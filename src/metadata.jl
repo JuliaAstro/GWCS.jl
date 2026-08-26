@@ -68,6 +68,9 @@ function _metadata_error(path, message)
     throw(ArgumentError("$message at $path"))
 end
 
+struct _NoMetadataDefault end
+const _NO_METADATA_DEFAULT = _NoMetadataDefault()
+
 function _required(node, key, path)
     haskey(node, key) || _metadata_error(path, "missing required property $key")
     return node[key]
@@ -76,6 +79,114 @@ end
 """Return a required mapping property or raise a path-aware metadata error."""
 function required_metadata(node, key, context::TransformParseContext)
     return _required(node, key, metadata_path(context))
+end
+
+_property_path(context::TransformParseContext, key) = "$(metadata_path(context))/$key"
+
+function _metadata_property(node, key, context; default=_NO_METADATA_DEFAULT)
+    haskey(node, key) && return node[key]
+    default isa _NoMetadataDefault && _metadata_error(metadata_path(context), "missing required property $key")
+    return default
+end
+
+function _metadata_string(node, key, context; default=_NO_METADATA_DEFAULT)
+    value = metadata_value(_metadata_property(node, key, context; default))
+    value isa AbstractString || _metadata_error(_property_path(context, key), "expected a string")
+    return String(value)
+end
+
+function _metadata_integer(node, key, context; default=_NO_METADATA_DEFAULT)
+    value = metadata_value(_metadata_property(node, key, context; default))
+    value isa Integer && !(value isa Bool) || _metadata_error(_property_path(context, key), "expected an integer")
+    return Int(value)
+end
+
+function _metadata_enum(node, key, allowed, context; default=_NO_METADATA_DEFAULT)
+    value = _metadata_string(node, key, context; default)
+    value in allowed || _metadata_error(_property_path(context, key), "expected one of $(join(allowed, ", ")), got $value")
+    return value
+end
+
+function _numeric_metadata(value, path)
+    unwrapped = metadata_value(value)
+    unwrapped isa Real && !(unwrapped isa Bool) || _metadata_error(path, "expected a unitless numeric value")
+    return unwrapped
+end
+
+function _numeric_property(node, key, context)
+    return _numeric_metadata(_metadata_property(node, key, context), _property_path(context, key))
+end
+
+function _array_metadata(value, path)
+    materialized = materialize_metadata(value)
+    if materialized isa AbstractDict
+        name = try
+            _tag_name(materialized)
+        catch error
+            error isa ArgumentError || rethrow()
+            nothing
+        end
+        if name == "ndarray"
+            data = _required(materialized, "data", path)
+            shape = haskey(materialized, "shape") ? Tuple(Int(_unwrap(axis)) for axis in materialized["shape"]) : nothing
+            return data, shape
+        end
+    end
+    return materialized, nothing
+end
+
+function _numeric_vector(value, path)
+    materialized, declared_shape = _array_metadata(value, path)
+    materialized isa AbstractVector || _metadata_error(path, "expected a one-dimensional numeric array")
+    values = map(enumerate(materialized)) do (index, item)
+        item isa AbstractVector && _metadata_error("$path/$index", "expected a numeric value")
+        _numeric_metadata(item, "$path/$index")
+    end
+    declared_shape === nothing || declared_shape == (length(values),) || _metadata_error("$path/shape", "declared shape $declared_shape does not match vector length $(length(values))")
+    isempty(values) && return Float64[]
+    return collect(promote(values...))
+end
+
+function _numeric_matrix(value, path)
+    materialized, declared_shape = _array_metadata(value, path)
+    matrix = if materialized isa AbstractMatrix
+        map(CartesianIndices(materialized)) do index
+            _numeric_metadata(materialized[index], "$path/$(index[1])/$(index[2])")
+        end
+    elseif materialized isa AbstractVector
+        isempty(materialized) && _metadata_error(path, "expected a nonempty numeric matrix")
+        all(row -> row isa AbstractVector, materialized) || _metadata_error(path, "expected a two-dimensional numeric array")
+        width = length(first(materialized))
+        width > 0 || _metadata_error(path, "expected a nonempty numeric matrix")
+        all(row -> length(row) == width, materialized) || _metadata_error(path, "matrix rows must have equal lengths")
+        rows = map(enumerate(materialized)) do (row_index, row)
+            map(enumerate(row)) do (column_index, item)
+                _numeric_metadata(item, "$path/$row_index/$column_index")
+            end
+        end
+        permutedims(reduce(hcat, rows))
+    else
+        _metadata_error(path, "expected a two-dimensional numeric array")
+    end
+    declared_shape === nothing || declared_shape == size(matrix) || _metadata_error("$path/shape", "declared shape $declared_shape does not match matrix size $(size(matrix))")
+    return matrix
+end
+
+function _metadata_axis_names(node, key, count, boundary, context)
+    path = _property_path(context, key)
+    values = node[key]
+    values isa AbstractVector || _metadata_error(path, "expected an array of strings")
+    names = map(enumerate(values)) do (index, value)
+        unwrapped = metadata_value(value)
+        unwrapped isa AbstractString || _metadata_error("$path/$index", "expected a string")
+        String(unwrapped)
+    end
+    try
+        return _axis_names(names, count, boundary)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
 end
 
 function _tuple_strings(values)
@@ -131,8 +242,48 @@ function _parse_concatenate(node, context)
     return AnnotatedTransform(parallel(transforms...); inputs, outputs)
 end
 
+function _parse_arithmetic(node, context, operator)
+    path = metadata_path(context)
+    values = required_metadata(node, "forward", context)
+    values isa AbstractVector || _metadata_error("$path/forward", "expected an array containing two transforms")
+    length(values) == 2 || _metadata_error("$path/forward", "arithmetic metadata must contain exactly two transforms")
+    left = parse_transform(values[1]; path="$path/forward/1", registry=context.registry)
+    right = parse_transform(values[2]; path="$path/forward/2", registry=context.registry)
+    try
+        return elementwise(operator, left, right)
+    catch error
+        error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
+end
+
+_parse_add(node, context) = _parse_arithmetic(node, context, +)
+_parse_subtract(node, context) = _parse_arithmetic(node, context, -)
+_parse_multiply(node, context) = _parse_arithmetic(node, context, *)
+_parse_divide(node, context) = _parse_arithmetic(node, context, /)
+_parse_power(node, context) = _parse_arithmetic(node, context, ^)
+
 _parse_shift(node, context) = Shift(metadata_value(required_metadata(node, "offset", context)))
 _parse_scale(node, context) = Scale(metadata_value(required_metadata(node, "factor", context)))
+
+function _parse_identity(node, context)
+    dimensions = _metadata_integer(node, "n_dims", context; default=1)
+    dimensions > 0 || _metadata_error(_property_path(context, "n_dims"), "identity dimension must be positive")
+    return IdentityTransform{dimensions}()
+end
+
+function _parse_affine(node, context)
+    matrix = _numeric_matrix(_metadata_property(node, "matrix", context), _property_path(context, "matrix"))
+    size(matrix) == (2, 2) || _metadata_error(_property_path(context, "matrix"), "affine matrix must be 2 x 2")
+    translation = haskey(node, "translation") ? _numeric_vector(node["translation"], _property_path(context, "translation")) : zeros(eltype(matrix), 2)
+    length(translation) == 2 || _metadata_error(_property_path(context, "translation"), "affine translation must have length 2")
+    return AffineTransform(matrix, translation)
+end
+
+function _parse_gnomonic(node, context)
+    direction = _metadata_enum(node, "direction", ("pix2sky", "sky2pix"), context; default="pix2sky")
+    return direction == "pix2sky" ? TangentPlaneToNative() : NativeToTangentPlane()
+end
 
 function _parse_constant(node, context)
     value = metadata_value(required_metadata(node, "value", context))
@@ -145,9 +296,11 @@ end
 _asdf_input_names(transform::AnnotatedTransform) = something(input_names(transform), _asdf_input_names(transform.transform))
 _asdf_input_names(transform::WithInverse) = _asdf_input_names(transform.forward)
 _asdf_input_names(transform::ComposedTransform) = _asdf_input_names(first(transform.transforms))
+_asdf_input_names(transform::ArithmeticTransform) = something(input_names(transform), _asdf_input_names(transform.left))
 _asdf_output_names(transform::AnnotatedTransform) = something(output_names(transform), _asdf_output_names(transform.transform))
 _asdf_output_names(transform::WithInverse) = _asdf_output_names(transform.forward)
 _asdf_output_names(transform::ComposedTransform) = _asdf_output_names(last(transform.transforms))
+_asdf_output_names(transform::ArithmeticTransform) = something(output_names(transform), _asdf_output_names(transform.left))
 
 function _asdf_parallel_names(transforms, accessor)
     branch_names = map(accessor, transforms)
@@ -217,12 +370,32 @@ function _parse_polynomial(node, context)
     _metadata_error(metadata_path(context), "only one- and two-dimensional polynomials are supported")
 end
 
+const _EULER_ORDERS = ("zxz", "xyx", "yzy", "zyz", "xzx", "yxy", "xyz", "yzx", "zxy", "xzy", "zyx", "yxz")
+
+function _spherical_rotation(angles, axes_order)
+    return compose(SphericalToCartesian(180), Rotation3D(collect(angles), axes_order), CartesianToSpherical(180))
+end
+
+function _parse_rotate3d(node, context)
+    phi = _numeric_property(node, "phi", context)
+    theta = _numeric_property(node, "theta", context)
+    psi = _numeric_property(node, "psi", context)
+    directions = (_EULER_ORDERS..., "native2celestial", "celestial2native")
+    direction = _metadata_enum(node, "direction", directions, context)
+    direction == "native2celestial" && return NativeToCelestial(phi, theta, psi)
+    direction == "celestial2native" && return CelestialToNative(phi, theta, psi)
+    return _spherical_rotation((phi, theta, psi), direction)
+end
+
 function _parse_rotation(node, context)
-    rotation_type = String(metadata_value(required_metadata(node, "rotation_type", context)))
-    rotation_type == "cartesian" || _metadata_error(metadata_path(context), "only cartesian rotation sequences are supported")
-    angles = collect(required_metadata(node, "angles", context))
-    axes_order = String(metadata_value(required_metadata(node, "axes_order", context)))
-    return Rotation3D(angles, axes_order)
+    rotation_type = _metadata_enum(node, "rotation_type", ("spherical", "cartesian"), context)
+    angles = _numeric_vector(_metadata_property(node, "angles", context), _property_path(context, "angles"))
+    isempty(angles) && _metadata_error(_property_path(context, "angles"), "rotation angles must not be empty")
+    axes_order = _metadata_string(node, "axes_order", context)
+    length(angles) == length(axes_order) || _metadata_error(metadata_path(context), "the number of angles must match axes_order")
+    all(axis -> axis in ('x', 'y', 'z'), axes_order) || _metadata_error(_property_path(context, "axes_order"), "rotation axes must contain only x, y, or z")
+    rotation_type == "cartesian" && return Rotation3D(angles, axes_order)
+    return _spherical_rotation(angles, axes_order)
 end
 
 function _parse_spherical_cartesian(node, context)
@@ -233,12 +406,18 @@ function _parse_spherical_cartesian(node, context)
     _metadata_error(metadata_path(context), "unsupported spherical/cartesian transform type $transform_type")
 end
 
-function _parse_transform_annotation(transform, node)
+function _parse_transform_annotation(transform, node, context)
     has_annotation = haskey(node, "name") || haskey(node, "inputs") || haskey(node, "outputs")
     has_annotation || return transform
-    name = haskey(node, "name") ? String(metadata_value(node["name"])) : transform_name(transform)
-    inputs = haskey(node, "inputs") ? _tuple_strings(node["inputs"]) : input_names(transform)
-    outputs = haskey(node, "outputs") ? _tuple_strings(node["outputs"]) : output_names(transform)
+    name = if haskey(node, "name")
+        value = _metadata_string(node, "name", context)
+        isempty(value) && _metadata_error(_property_path(context, "name"), "transform name must not be empty")
+        value
+    else
+        transform_name(transform)
+    end
+    inputs = haskey(node, "inputs") ? _metadata_axis_names(node, "inputs", input_dimension(transform), "input", context) : input_names(transform)
+    outputs = haskey(node, "outputs") ? _metadata_axis_names(node, "outputs", output_dimension(transform), "output", context) : output_names(transform)
     return annotate_transform(transform; name, inputs, outputs)
 end
 
@@ -253,13 +432,7 @@ function parse_transform(node; path="transform", registry=default_transform_regi
         input_dimension(transform) == output_dimension(backward) && output_dimension(transform) == input_dimension(backward) || _metadata_error(path, "explicit inverse dimensions do not match the forward transform")
         transform = WithInverse(transform, backward)
     end
-    try
-        transform = _parse_transform_annotation(transform, node)
-    catch error
-        error isa ArgumentError || error isa DimensionMismatch || rethrow()
-        _metadata_error(path, sprint(showerror, error))
-    end
-    return transform
+    return _parse_transform_annotation(transform, node, context)
 end
 
 function parse_transform(node, context::TransformParseContext; path=metadata_path(context))
@@ -270,13 +443,22 @@ function _register_builtin_transform_parsers!()
     asdf_transform = "tag:stsci.edu:asdf/transform"
     register_transform!("$asdf_transform/compose", _parse_compose)
     register_transform!("$asdf_transform/concatenate", _parse_concatenate)
+    register_transform!("$asdf_transform/add", _parse_add; max_version=v"1.5.0")
+    register_transform!("$asdf_transform/subtract", _parse_subtract; max_version=v"1.5.0")
+    register_transform!("$asdf_transform/multiply", _parse_multiply; max_version=v"1.5.0")
+    register_transform!("$asdf_transform/divide", _parse_divide; max_version=v"1.5.0")
+    register_transform!("$asdf_transform/power", _parse_power; max_version=v"1.5.0")
     register_transform!("$asdf_transform/shift", _parse_shift)
     register_transform!("$asdf_transform/scale", _parse_scale)
+    register_transform!("$asdf_transform/identity", _parse_identity; max_version=v"1.5.0")
+    register_transform!("$asdf_transform/affine", _parse_affine; max_version=v"1.6.0")
+    register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; max_version=v"1.5.0")
+    register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; max_version=v"1.6.0")
     register_transform!("$asdf_transform/constant", _parse_constant)
     register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; min_version=v"1.1.0")
     register_transform!("$asdf_transform/remap_axes", _parse_remap)
     register_transform!("$asdf_transform/polynomial", _parse_polynomial)
-    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation)
+    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation; max_version=v"1.3.0")
     register_transform!("tag:stsci.edu:gwcs/spherical_cartesian", _parse_spherical_cartesian)
     return nothing
 end

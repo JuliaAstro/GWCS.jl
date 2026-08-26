@@ -231,3 +231,106 @@ function transform_jacobian(transform::ParallelTransform{Nin,Nout}, coords::Stat
     end
     return SMatrix{Nout,Nin,T}(values)
 end
+
+abstract type _ArithmeticOperator end
+
+struct _AddOperator <: _ArithmeticOperator end
+struct _SubtractOperator <: _ArithmeticOperator end
+struct _MultiplyOperator <: _ArithmeticOperator end
+struct _DivideOperator <: _ArithmeticOperator end
+struct _PowerOperator <: _ArithmeticOperator end
+
+function _arithmetic_operator(operator)
+    operator === (+) && return _AddOperator()
+    operator === (-) && return _SubtractOperator()
+    operator === (*) && return _MultiplyOperator()
+    operator === (/) && return _DivideOperator()
+    operator === (^) && return _PowerOperator()
+    throw(ArgumentError("unsupported elementwise transform operator $operator"))
+end
+
+_apply_arithmetic(::_AddOperator, left, right) = left + right
+_apply_arithmetic(::_SubtractOperator, left, right) = left - right
+_apply_arithmetic(::_MultiplyOperator, left, right) = left * right
+_apply_arithmetic(::_DivideOperator, left, right) = left / right
+_apply_arithmetic(::_PowerOperator, left, right) = left ^ right
+
+"""Two transforms evaluated on the same inputs and combined elementwise."""
+struct ArithmeticTransform{Nin,Nout,O<:_ArithmeticOperator,L<:AbstractTransform{Nin,Nout},R<:AbstractTransform{Nin,Nout}} <: AbstractTransform{Nin,Nout}
+    operator::O
+    left::L
+    right::R
+end
+
+function _arithmetic_transform(operator::_ArithmeticOperator, left::AbstractTransform, right::AbstractTransform)
+    input_dimension(left) == input_dimension(right) || throw(DimensionMismatch("arithmetic operands have input dimensions $(input_dimension(left)) and $(input_dimension(right))"))
+    output_dimension(left) == output_dimension(right) || throw(DimensionMismatch("arithmetic operands have output dimensions $(output_dimension(left)) and $(output_dimension(right))"))
+    Nin = input_dimension(left)
+    Nout = output_dimension(left)
+    return ArithmeticTransform{Nin,Nout,typeof(operator),typeof(left),typeof(right)}(operator, left, right)
+end
+
+ArithmeticTransform(operator, left::AbstractTransform, right::AbstractTransform) = _arithmetic_transform(_arithmetic_operator(operator), left, right)
+
+"""
+    elementwise(operator, left, right)
+
+Evaluate `left` and `right` on the same inputs and combine corresponding
+outputs with `operator`.
+"""
+elementwise(operator, left::AbstractTransform, right::AbstractTransform) = ArithmeticTransform(operator, left, right)
+
+Base.:+(left::AbstractTransform, right::AbstractTransform) = elementwise(+, left, right)
+Base.:-(left::AbstractTransform, right::AbstractTransform) = elementwise(-, left, right)
+Base.:*(left::AbstractTransform, right::AbstractTransform) = elementwise(*, left, right)
+Base.:/(left::AbstractTransform, right::AbstractTransform) = elementwise(/, left, right)
+Base.:^(left::AbstractTransform, right::AbstractTransform) = elementwise(^, left, right)
+
+@inline function (transform::ArithmeticTransform{Nin,Nout})(coords::StaticVector{Nin}) where {Nin,Nout}
+    left = transform.left(coords)
+    right = transform.right(coords)
+    return SVector{Nout}(ntuple(i -> _apply_arithmetic(transform.operator, left[i], right[i]), Nout))
+end
+
+function compile_transform(transform::ArithmeticTransform)
+    left = _compile_transform_checked(transform.left)
+    right = _compile_transform_checked(transform.right)
+    return _arithmetic_transform(transform.operator, left, right)
+end
+
+function _arithmetic_names(left, right, accessor)
+    left_names = accessor(left)
+    right_names = accessor(right)
+    left_names === nothing && return right_names
+    right_names === nothing && return left_names
+    return left_names == right_names ? left_names : nothing
+end
+
+input_names(transform::ArithmeticTransform) = _arithmetic_names(transform.left, transform.right, input_names)
+output_names(transform::ArithmeticTransform) = _arithmetic_names(transform.left, transform.right, output_names)
+
+_arithmetic_jacobian_entry(::_AddOperator, left, right, left_derivative, right_derivative) = left_derivative + right_derivative
+_arithmetic_jacobian_entry(::_SubtractOperator, left, right, left_derivative, right_derivative) = left_derivative - right_derivative
+_arithmetic_jacobian_entry(::_MultiplyOperator, left, right, left_derivative, right_derivative) = right * left_derivative + left * right_derivative
+_arithmetic_jacobian_entry(::_DivideOperator, left, right, left_derivative, right_derivative) = (right * left_derivative - left * right_derivative) / right^2
+
+function _arithmetic_jacobian_entry(::_PowerOperator, left, right, left_derivative, right_derivative)
+    value = left ^ right
+    left_term = iszero(left_derivative) ? zero(value * left_derivative) : right * left ^ (right - one(right)) * left_derivative
+    right_term = iszero(right_derivative) ? zero(value * right_derivative) : value * log(left) * right_derivative
+    return left_term + right_term
+end
+
+function transform_jacobian(transform::ArithmeticTransform{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
+    T = _evaluation_type(eltype(coords))
+    inputs = SVector{Nin,T}(coords)
+    left = transform.left(inputs)
+    right = transform.right(inputs)
+    left_jacobian = _transform_jacobian_checked(transform.left, inputs)
+    right_jacobian = _transform_jacobian_checked(transform.right, inputs)
+    values = ntuple(Val(Nin * Nout)) do index
+        row = mod1(index, Nout)
+        _arithmetic_jacobian_entry(transform.operator, left[row], right[row], left_jacobian[index], right_jacobian[index])
+    end
+    return SMatrix{Nout,Nin}(values)
+end

@@ -34,4 +34,11 @@
     permuted_output = pixel_to_world(permuted_wcs, permuted_pixel)
     @test permuted_wcs.backward isa NoInverse
     @test world_to_pixel(permuted_wcs, permuted_output; tolerance=1e-10, quiet=false) ≈ permuted_pixel atol=1e-9
+
+    arithmetic_distortion = IdentityTransform{1}() + Polynomial1D([0.0, 0.0, 1e-3])
+    arithmetic_wcs = WCS(Step(CoordinateFrame{1}(name="arithmetic_input"), arithmetic_distortion), Step(CoordinateFrame{1}(name="arithmetic_output")); bounding_box=BoundingBox(((-10.0, 10.0),)))
+    arithmetic_pixel = SVector(2.5)
+    arithmetic_world = pixel_to_world(arithmetic_wcs, arithmetic_pixel)
+    @test arithmetic_wcs.backward isa NoInverse
+    @test world_to_pixel(arithmetic_wcs, arithmetic_world; tolerance=1e-12, quiet=false) ≈ arithmetic_pixel atol=1e-12
 end

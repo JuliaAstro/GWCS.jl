@@ -37,6 +37,9 @@ GWCS.transform_dependencies(::BadDependencyValues) = SMatrix{1,1}(2)
     @test axis_correlation_matrix(composed) == @SMatrix [false true; false false]
     block = parallel(Polynomial1D([0.0, 1.0]), Polynomial1D([1.0]))
     @test axis_correlation_matrix(block) == @SMatrix [true false; false false]
+    arithmetic_left = AffineTransform(@SMatrix [1.0 0.0; 0.0 0.0])
+    arithmetic_right = AffineTransform(@SMatrix [0.0 0.0; 0.0 1.0])
+    @test axis_correlation_matrix(arithmetic_left + arithmetic_right) == @SMatrix [true false; false true]
 
     affine = AffineTransform(@SMatrix [1.0 1.0; 1.0 -1.0])
     fixed = fix_inputs(affine, 2 => 1.0)

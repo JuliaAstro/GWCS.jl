@@ -121,10 +121,14 @@ const GWCS_SIP = tan_sip_wcs(FITS_SIP, SIP_A, SIP_B, SIP_AP, SIP_BP)
 callable_forward(x, y) = (2x + y + 1, -x + 3y - 2)
 callable_inverse(u, v) = ((3u - v - 5) / 7, (u + 2v + 3) / 7)
 callable_jacobian(x, y) = SMatrix{2,2}(2, -1, 1, 3)
+arithmetic_forward(x) = (x + 1) * (2x)
+arithmetic_jacobian(x) = SMatrix{1,1}(4x + 2)
 
 const NATIVE_CALLABLE_REFERENCE = AffineTransform(SMatrix{2,2}(2.0, -1.0, 1.0, 3.0), SVector(1.0, -2.0))
 const CALLABLE_REFERENCE = CallableTransform{2,2}(callable_forward; inverse=callable_inverse, jacobian=callable_jacobian)
 const CALLABLE_AD_REFERENCE = CallableTransform{2,2}(callable_forward; inverse=callable_inverse)
+const ARITHMETIC_REFERENCE = Shift(1.0) * Scale(2.0)
+const ARITHMETIC_CALLABLE = CallableTransform{1,1}(arithmetic_forward; jacobian=arithmetic_jacobian)
 const NATIVE_CALLABLE_INVERSE = inverse_transform(NATIVE_CALLABLE_REFERENCE)
 const CALLABLE_INVERSE = inverse_transform(CALLABLE_REFERENCE)
 const FIXED_REFERENCE = fix_inputs(NATIVE_CALLABLE_REFERENCE, 2 => 300.0)
@@ -139,6 +143,7 @@ const PERMUTED_3D_WCS = GWCS.WCS(Step(PERMUTED_INPUT_FRAME, AXIS_ORDER_TRANSFORM
 
 const PIXEL = SVector(400.0, 300.0)
 const FIXED_PIXEL = SVector(400.0)
+const ARITHMETIC_PIXEL = SVector(3.0)
 const PIXEL_3D = SVector(1.0, 2.0, 3.0)
 const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
 const FIXED_WORLD = FIXED_REFERENCE(FIXED_PIXEL)
@@ -160,7 +165,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "fixed_inputs", "axis_order")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "arithmetic", "fixed_inputs", "axis_order")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -186,6 +191,12 @@ SUITE["callable"]["inverse/native"] = @benchmarkable $NATIVE_CALLABLE_INVERSE($C
 SUITE["callable"]["inverse/wrapper"] = @benchmarkable $CALLABLE_INVERSE($CALLABLE_WORLD) evals=100
 SUITE["callable"]["jacobian/analytical"] = @benchmarkable transform_jacobian($CALLABLE_REFERENCE, $PIXEL) evals=100
 SUITE["callable"]["jacobian/ForwardDiff"] = @benchmarkable transform_jacobian($CALLABLE_AD_REFERENCE, $PIXEL) evals=100
+
+SUITE["arithmetic"]["forward/structured"] = @benchmarkable $ARITHMETIC_REFERENCE($ARITHMETIC_PIXEL) evals=100
+SUITE["arithmetic"]["forward/callable"] = @benchmarkable $ARITHMETIC_CALLABLE($ARITHMETIC_PIXEL) evals=100
+SUITE["arithmetic"]["forward/raw"] = @benchmarkable arithmetic_forward($ARITHMETIC_PIXEL[1]) evals=100
+SUITE["arithmetic"]["jacobian/structured"] = @benchmarkable transform_jacobian($ARITHMETIC_REFERENCE, $ARITHMETIC_PIXEL) evals=100
+SUITE["arithmetic"]["jacobian/callable"] = @benchmarkable transform_jacobian($ARITHMETIC_CALLABLE, $ARITHMETIC_PIXEL) evals=100
 
 SUITE["fixed_inputs"]["forward/structured"] = @benchmarkable $FIXED_REFERENCE($FIXED_PIXEL) evals=100
 SUITE["fixed_inputs"]["forward/closure"] = @benchmarkable $NATIVE_CALLABLE_REFERENCE(SVector($FIXED_PIXEL[1], 300.0)) evals=100
