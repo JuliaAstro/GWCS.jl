@@ -5,6 +5,7 @@ using Test
 
 @testset "GWCS" begin
     include("test_transforms.jl")
+    include("test_callable.jl")
     include("test_composition.jl")
     include("test_pipeline.jl")
     include("test_api.jl")

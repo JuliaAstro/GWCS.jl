@@ -67,7 +67,7 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
         end
         all(isfinite, residual) || break
 
-        jacobian = ForwardDiff.jacobian(residual_function, estimate)
+        jacobian = _transform_jacobian_checked(wcs.forward, estimate)
         all(isfinite, jacobian) || break
         scale = max(one(T), maximum(abs, jacobian))
         abs(det(jacobian)) > eps(T) * scale^N || break

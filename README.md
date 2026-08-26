@@ -36,6 +36,25 @@ world_to_pixel(wcs, world_coordinate; tolerance=1e-8, maxiter=50, initial_guess=
 
 The default `quiet=true` returns the best solution on nonconvergence. `quiet=false` throws `NoConvergence`, which records the best solution, accuracy, and iteration count. Numerical inversion is not available for pipelines with different pixel and world dimensions.
 
+### Callable transforms
+
+`CallableTransform` is a low-boilerplate entry point for programmatic transforms. Declare the input and output dimensions, then provide functions that accept positional scalar coordinates:
+
+```julia
+using StaticArrays
+
+forward(x, y) = (x + y, x - y)
+backward(u, v) = ((u + v) / 2, (u - v) / 2)
+jacobian(x, y) = SMatrix{2,2}(1, 1, 1, -1)
+
+transform = CallableTransform{2,2}(forward; inverse=backward, jacobian)
+wcs = WCS(Step(detector, transform), Step(world))
+```
+
+A one-output function may return a scalar. Multi-output functions return a tuple or vector of the declared length, and Jacobians return an output-by-input matrix. The callable, inverse, and Jacobian are stored in concrete type parameters, so named functions and type-stable closures can remain inferred and allocation-free. Supplied Jacobians are propagated through composed and parallel transforms and used by numerical inversion; otherwise GWCS.jl uses ForwardDiff.
+
+Use `CallableTransform` for local functions, prototypes, and closures over calibration values. Define a dedicated `AbstractTransform` subtype when a transform needs stable metadata tags, serialization, specialized compilation, parameter introspection, or a reusable package API. Arbitrary functions are not automatically serializable, and allocations or type instability inside user callables remain visible during evaluation.
+
 ## Metadata
 
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports the Roman L2 subset used by the validation fixtures:
@@ -59,14 +78,14 @@ Unknown tags, unsupported major schema versions, malformed dimensions, and missi
 
 ### Registering external transforms
 
-External packages can add metadata support for native `AbstractTransform` subtypes without modifying GWCS.jl. Dimensions are encoded in the subtype, while analytical inverses and optimized execution forms use ordinary Julia method extensions:
+External packages can add metadata support for native `AbstractTransform` subtypes without modifying GWCS.jl. Dimensions are encoded in the subtype, while analytical inverses, Jacobians, and optimized execution forms use ordinary Julia method extensions:
 
 ```julia
 module ExampleTransforms
 
 using GWCS
 using StaticArrays
-import GWCS: compile_transform, inverse_transform
+import GWCS: compile_transform, inverse_transform, transform_jacobian
 
 struct OffsetTransform{T<:Real} <: AbstractTransform{1,1}
     offset::T
@@ -74,6 +93,7 @@ end
 
 @inline (transform::OffsetTransform)(coords::StaticVector{1}) = SVector(coords[1] + transform.offset)
 inverse_transform(transform::OffsetTransform) = OffsetTransform(-transform.offset)
+transform_jacobian(transform::OffsetTransform, coords::StaticVector{1}) = SMatrix{1,1}(one(eltype(coords)))
 compile_transform(transform::OffsetTransform) = Shift(transform.offset)
 
 function parse_offset(node, context)

@@ -11,6 +11,7 @@ using StaticArrays: MMatrix, MVector, SMatrix, SVector, StaticMatrix, StaticVect
 using YAML
 
 include("transforms/core.jl")
+include("transforms/callable.jl")
 include("transforms/elementary.jl")
 include("transforms/polynomial.jl")
 include("transforms/geometry.jl")
@@ -22,7 +23,7 @@ include("api.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 
-export AbstractTransform, AffineTransform, CartesianToSpherical,
+export AbstractTransform, AffineTransform, CallableTransform, CartesianToSpherical,
        AbstractCoordinateFrame, BoundingBox, CelestialFrame,
        CelestialToNative,
        ComposedTransform, CoordinateFrame, Frame2D, IdentityTransform,
@@ -36,6 +37,6 @@ export AbstractTransform, AffineTransform, CartesianToSpherical,
        metadata_value, metadata_version, output_dimension, output_frame,
        parallel, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
        parse_transform, parse_wcs, register_transform!, required_metadata,
-       transform, world_n_dim, world_to_pixel
+       transform, transform_jacobian, world_n_dim, world_to_pixel
 
 end

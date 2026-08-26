@@ -47,6 +47,26 @@ function _compile_transform_checked(transform::AbstractTransform)
     return compiled
 end
 
+"""
+    transform_jacobian(transform, coords)
+
+Return the Jacobian of a transform with respect to its inputs. External
+transform packages may extend this method to provide an analytical Jacobian.
+"""
+function _forwarddiff_jacobian(transform::AbstractTransform{Nin}, coords::StaticVector{Nin}) where {Nin}
+    T = _evaluation_type(eltype(coords))
+    return ForwardDiff.jacobian(transform, SVector{Nin,T}(coords))
+end
+
+transform_jacobian(transform::AbstractTransform, coords::StaticVector) = _forwarddiff_jacobian(transform, coords)
+
+function _transform_jacobian_checked(transform::AbstractTransform{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
+    jacobian = transform_jacobian(transform, coords)
+    jacobian isa AbstractMatrix || throw(ArgumentError("transform_jacobian(::$(typeof(transform)), ::$(typeof(coords))) returned $(typeof(jacobian)), expected an AbstractMatrix"))
+    size(jacobian) == (Nout, Nin) || throw(DimensionMismatch("Jacobian of $(typeof(transform)) has size $(size(jacobian)), expected ($Nout, $Nin)"))
+    return SMatrix{Nout,Nin}(jacobian)
+end
+
 _evaluation_type(::Type{T}) where {T<:Integer} = Float64
 _evaluation_type(::Type{T}) where {T<:Rational} = Float64
 _evaluation_type(::Type{T}) where {T} = T
@@ -65,3 +85,4 @@ end
 
 inverse_transform(transform::WithInverse) = WithInverse(transform.backward, transform.forward)
 compile_transform(transform::WithInverse) = WithInverse(_compile_transform_checked(transform.forward), _compile_transform_checked(transform.backward))
+transform_jacobian(transform::WithInverse, coords::StaticVector) = _transform_jacobian_checked(transform.forward, coords)

@@ -118,7 +118,18 @@ const SIP_AP = FITS_SIP.pipeline.sip.ap
 const SIP_BP = FITS_SIP.pipeline.sip.bp
 const GWCS_SIP = tan_sip_wcs(FITS_SIP, SIP_A, SIP_B, SIP_AP, SIP_BP)
 
+callable_forward(x, y) = (2x + y + 1, -x + 3y - 2)
+callable_inverse(u, v) = ((3u - v - 5) / 7, (u + 2v + 3) / 7)
+callable_jacobian(x, y) = SMatrix{2,2}(2, -1, 1, 3)
+
+const NATIVE_CALLABLE_REFERENCE = AffineTransform(SMatrix{2,2}(2.0, -1.0, 1.0, 3.0), SVector(1.0, -2.0))
+const CALLABLE_REFERENCE = CallableTransform{2,2}(callable_forward; inverse=callable_inverse, jacobian=callable_jacobian)
+const CALLABLE_AD_REFERENCE = CallableTransform{2,2}(callable_forward; inverse=callable_inverse)
+const NATIVE_CALLABLE_INVERSE = inverse_transform(NATIVE_CALLABLE_REFERENCE)
+const CALLABLE_INVERSE = inverse_transform(CALLABLE_REFERENCE)
+
 const PIXEL = SVector(400.0, 300.0)
+const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
 const FITS_LINEAR_WORLD = FITSWCS.pixel_to_world(FITS_LINEAR, PIXEL)
 const FITS_TAN_WORLD = FITSWCS.pixel_to_world(FITS_TAN, PIXEL)
 const FITS_SIP_WORLD = FITSWCS.pixel_to_world(FITS_SIP, PIXEL)
@@ -135,7 +146,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -153,6 +164,14 @@ end
 SUITE["construction"]["affine/GWCS"] = @benchmarkable affine_wcs($(FITS_LINEAR.crpix), $(FITS_LINEAR.crval), $(FITS_LINEAR.cd)) evals=1
 SUITE["construction"]["TAN/GWCS"] = @benchmarkable tan_wcs($FITS_TAN) evals=1
 SUITE["construction"]["TAN-SIP/GWCS"] = @benchmarkable tan_sip_wcs($FITS_SIP, $SIP_A, $SIP_B, $SIP_AP, $SIP_BP) evals=1
+
+SUITE["callable"]["forward/native"] = @benchmarkable $NATIVE_CALLABLE_REFERENCE($PIXEL) evals=100
+SUITE["callable"]["forward/wrapper"] = @benchmarkable $CALLABLE_REFERENCE($PIXEL) evals=100
+SUITE["callable"]["forward/raw"] = @benchmarkable callable_forward($PIXEL[1], $PIXEL[2]) evals=100
+SUITE["callable"]["inverse/native"] = @benchmarkable $NATIVE_CALLABLE_INVERSE($CALLABLE_WORLD) evals=100
+SUITE["callable"]["inverse/wrapper"] = @benchmarkable $CALLABLE_INVERSE($CALLABLE_WORLD) evals=100
+SUITE["callable"]["jacobian/analytical"] = @benchmarkable transform_jacobian($CALLABLE_REFERENCE, $PIXEL) evals=100
+SUITE["callable"]["jacobian/ForwardDiff"] = @benchmarkable transform_jacobian($CALLABLE_AD_REFERENCE, $PIXEL) evals=100
 
 if abspath(PROGRAM_FILE) == @__FILE__
     for name in keys(SUITE)
