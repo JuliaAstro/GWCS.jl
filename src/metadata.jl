@@ -126,11 +126,82 @@ function _parse_concatenate(node, context)
     transforms = map(enumerate(values)) do (index, value)
         parse_transform(value; path="$path/forward/$index", registry=context.registry)
     end
-    return parallel(transforms...)
+    inputs = _asdf_parallel_names(transforms, _asdf_input_names)
+    outputs = _asdf_parallel_names(transforms, _asdf_output_names)
+    return AnnotatedTransform(parallel(transforms...); inputs, outputs)
 end
 
 _parse_shift(node, context) = Shift(metadata_value(required_metadata(node, "offset", context)))
 _parse_scale(node, context) = Scale(metadata_value(required_metadata(node, "factor", context)))
+
+function _parse_constant(node, context)
+    value = metadata_value(required_metadata(node, "value", context))
+    metadata_version(context) < v"1.4.0" && return ConstantTransform(value)
+    dimensions = Int(metadata_value(required_metadata(node, "dimensions", context)))
+    dimensions in (1, 2) || _metadata_error(metadata_path(context), "constant dimensions must be 1 or 2")
+    return ConstantTransform(value; n_inputs=dimensions)
+end
+
+_asdf_input_names(transform::AnnotatedTransform) = something(input_names(transform), _asdf_input_names(transform.transform))
+_asdf_input_names(transform::WithInverse) = _asdf_input_names(transform.forward)
+_asdf_input_names(transform::ComposedTransform) = _asdf_input_names(first(transform.transforms))
+_asdf_output_names(transform::AnnotatedTransform) = something(output_names(transform), _asdf_output_names(transform.transform))
+_asdf_output_names(transform::WithInverse) = _asdf_output_names(transform.forward)
+_asdf_output_names(transform::ComposedTransform) = _asdf_output_names(last(transform.transforms))
+
+function _asdf_parallel_names(transforms, accessor)
+    branch_names = map(accessor, transforms)
+    flattened = Tuple(Iterators.flatten(branch_names))
+    length(unique(flattened)) == length(flattened) && return flattened
+    return Tuple(name * string(branch - 1) for (branch, names) in enumerate(branch_names) for name in names)
+end
+
+_asdf_input_names(transform::ParallelTransform) = _asdf_parallel_names(transform.transforms, _asdf_input_names)
+_asdf_output_names(transform::ParallelTransform) = _asdf_parallel_names(transform.transforms, _asdf_output_names)
+
+function _asdf_input_names(transform::FixedInputsTransform{Nfree}) where {Nfree}
+    names = _asdf_input_names(transform.transform)
+    return ntuple(index -> names[transform.free_indices[index]], Nfree)
+end
+
+_asdf_output_names(transform::FixedInputsTransform) = _asdf_output_names(transform.transform)
+
+function _asdf_input_names(transform::AbstractTransform{N}) where {N}
+    N == 1 && return ("x",)
+    N == 2 && return ("x", "y")
+    return ntuple(index -> "x$(index - 1)", N)
+end
+
+function _asdf_output_names(transform::AbstractTransform{Nin,Nout}) where {Nin,Nout}
+    Nout == 1 && return ("y",)
+    Nout == 2 && return ("x", "y")
+    return ntuple(index -> "y$(index - 1)", Nout)
+end
+
+function _parse_fixed_inputs(node, context)
+    path = metadata_path(context)
+    forward = required_metadata(node, "forward", context)
+    length(forward) == 2 || _metadata_error(path, "fixed-input metadata must contain a transform and fixed values")
+    transform = parse_transform(forward[1]; path="$path/forward/1", registry=context.registry)
+    specification = forward[2]
+    specification isa AbstractDict || _metadata_error("$path/forward/2", "fixed-input specification must be a mapping")
+    keys = _required(specification, "keys", "$path/forward/2")
+    values = _required(specification, "values", "$path/forward/2")
+    length(keys) == length(values) || _metadata_error("$path/forward/2", "fixed-input keys and values must have equal lengths")
+    names = input_names(transform)
+    names === nothing && (names = _asdf_input_names(transform))
+    fixed = map(keys, values) do key, value
+        unwrapped = metadata_value(key)
+        converted = unwrapped isa Integer ? Int(unwrapped) + 1 : _fixed_index(String(unwrapped), names, input_dimension(transform))
+        converted => metadata_value(value)
+    end
+    try
+        return fix_inputs(transform, fixed)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
+end
 
 function _parse_remap(node, context)
     mapping = _tuple_ints(required_metadata(node, "mapping", context); zero_based=true)
@@ -162,6 +233,15 @@ function _parse_spherical_cartesian(node, context)
     _metadata_error(metadata_path(context), "unsupported spherical/cartesian transform type $transform_type")
 end
 
+function _parse_transform_annotation(transform, node)
+    has_annotation = haskey(node, "name") || haskey(node, "inputs") || haskey(node, "outputs")
+    has_annotation || return transform
+    name = haskey(node, "name") ? String(metadata_value(node["name"])) : transform_name(transform)
+    inputs = haskey(node, "inputs") ? _tuple_strings(node["inputs"]) : input_names(transform)
+    outputs = haskey(node, "outputs") ? _tuple_strings(node["outputs"]) : output_names(transform)
+    return annotate_transform(transform; name, inputs, outputs)
+end
+
 function parse_transform(node; path="transform", registry=default_transform_registry())
     tag, version = _split_metadata_tag(_tag(node), path)
     registration = _lookup_transform_registration(registry, tag, version, path)
@@ -172,6 +252,12 @@ function parse_transform(node; path="transform", registry=default_transform_regi
         backward = parse_transform(node["inverse"]; path="$path/inverse", registry)
         input_dimension(transform) == output_dimension(backward) && output_dimension(transform) == input_dimension(backward) || _metadata_error(path, "explicit inverse dimensions do not match the forward transform")
         transform = WithInverse(transform, backward)
+    end
+    try
+        transform = _parse_transform_annotation(transform, node)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
     end
     return transform
 end
@@ -186,6 +272,8 @@ function _register_builtin_transform_parsers!()
     register_transform!("$asdf_transform/concatenate", _parse_concatenate)
     register_transform!("$asdf_transform/shift", _parse_shift)
     register_transform!("$asdf_transform/scale", _parse_scale)
+    register_transform!("$asdf_transform/constant", _parse_constant)
+    register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; min_version=v"1.1.0")
     register_transform!("$asdf_transform/remap_axes", _parse_remap)
     register_transform!("$asdf_transform/polynomial", _parse_polynomial)
     register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation)

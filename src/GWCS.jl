@@ -11,6 +11,8 @@ using StaticArrays: MMatrix, MVector, SMatrix, SVector, StaticMatrix, StaticVect
 using YAML
 
 include("transforms/core.jl")
+include("transforms/annotations.jl")
+include("transforms/fixed.jl")
 include("transforms/callable.jl")
 include("transforms/elementary.jl")
 include("transforms/polynomial.jl")
@@ -23,20 +25,21 @@ include("api.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 
-export AbstractTransform, AffineTransform, CallableTransform, CartesianToSpherical,
+export AbstractTransform, AffineTransform, AnnotatedTransform, CallableTransform, CartesianToSpherical,
        AbstractCoordinateFrame, BoundingBox, CelestialFrame,
        CelestialToNative,
-       ComposedTransform, CoordinateFrame, Frame2D, IdentityTransform,
+       ComposedTransform, ConstantTransform, CoordinateFrame, FixedInputsTransform,
+       Frame2D, IdentityTransform,
        NativeToCelestial, NativeToTangentPlane, NoInverse,
        ParallelTransform, Polynomial1D, Polynomial2D, RemapAxes, Rotation3D,
        Scale, Shift, SphericalToCartesian, Step, TangentPlaneToNative, WCS,
        WithInverse, TransformParseContext, TransformRegistry, available_frames,
-       compile_transform, compose, default_transform_registry, degree,
-       frame_dimension, get_transform, has_inverse, input_dimension, input_frame,
-       inverse_transform, materialize_metadata, metadata_path, metadata_tag,
+       annotate_transform, compile_transform, compose, default_transform_registry, degree,
+       fix_inputs, frame_dimension, get_transform, has_inverse, input_dimension, input_frame,
+       input_names, inverse_transform, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,
-       parallel, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
+       output_names, parallel, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
        parse_transform, parse_wcs, register_transform!, required_metadata,
-       transform, transform_jacobian, world_n_dim, world_to_pixel
+       transform, transform_jacobian, transform_name, world_n_dim, world_to_pixel
 
 end

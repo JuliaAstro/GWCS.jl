@@ -86,6 +86,9 @@ function compile_transform(transform::ComposedTransform)
     return compose(map(_compile_transform_checked, transform.transforms)...)
 end
 
+input_names(transform::ComposedTransform) = input_names(first(transform.transforms))
+output_names(transform::ComposedTransform) = output_names(last(transform.transforms))
+
 @inline _apply_composed_jacobian(::Tuple{}, coords, jacobian) = (coords, jacobian)
 
 @inline function _apply_composed_jacobian(transforms::Tuple, coords, jacobian)
@@ -185,6 +188,15 @@ end
 function compile_transform(transform::ParallelTransform)
     return parallel(map(_compile_transform_checked, transform.transforms)...)
 end
+
+function _parallel_names(transforms, accessor)
+    names = map(accessor, transforms)
+    all(name -> name !== nothing, names) || return nothing
+    return Tuple(Iterators.flatten(names))
+end
+
+input_names(transform::ParallelTransform) = _parallel_names(transform.transforms, input_names)
+output_names(transform::ParallelTransform) = _parallel_names(transform.transforms, output_names)
 
 @inline _parallel_jacobians(::Tuple{}, coords, input_offset) = ()
 

@@ -34,3 +34,23 @@ function CelestialFrame{N}(; name, axes_names=ntuple(i -> i == 1 ? "lon" : "lat"
 end
 
 CelestialFrame(; kwargs...) = CelestialFrame{2}(; kwargs...)
+
+function _subset_axes_order(order, indices)
+    selected = map(index -> order[index], indices)
+    ranked = sort(collect(selected))
+    return map(value -> findfirst(==(value), ranked)::Int, selected)
+end
+
+function _subset_frame(frame::CoordinateFrame, indices::NTuple{N,Int}) where {N}
+    return CoordinateFrame{N}(; name=frame.name, axes_names=map(index -> frame.axes_names[index], indices),
+        axes_order=_subset_axes_order(frame.axes_order, indices),
+        axis_physical_types=map(index -> frame.axis_physical_types[index], indices),
+        unit=map(index -> frame.unit[index], indices), reference_frame=frame.reference_frame)
+end
+
+function _subset_frame(frame::CelestialFrame, indices::NTuple{N,Int}) where {N}
+    return CelestialFrame{N}(; name=frame.name, axes_names=map(index -> frame.axes_names[index], indices),
+        axes_order=_subset_axes_order(frame.axes_order, indices),
+        axis_physical_types=map(index -> frame.axis_physical_types[index], indices),
+        unit=map(index -> frame.unit[index], indices), reference_frame=frame.reference_frame)
+end

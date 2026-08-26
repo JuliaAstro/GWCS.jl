@@ -9,6 +9,8 @@ function _coordinate_vector(coords::Tuple{Vararg{Real,N}}) where {N}
     return SVector{N,T}(coords)
 end
 
+_coordinate_vector(::Tuple{}) = SVector{0,Float64}()
+
 function _filled_coordinate(::Val{N}, ::Type{T}, fill_value) where {N,T}
     return SVector{N,T}(ntuple(i -> T(fill_value), N))
 end
@@ -30,6 +32,7 @@ end
 
 pixel_to_world(wcs::WCS, coords::Tuple{Vararg{Real}}; kwargs...) = _pixel_to_world(wcs, _coordinate_vector(coords); kwargs...)
 pixel_to_world(wcs::WCS, coords::Real...; kwargs...) = pixel_to_world(wcs, coords; kwargs...)
+pixel_to_world(wcs::WCS{0}; kwargs...) = _pixel_to_world(wcs, SVector{0,Float64}(); kwargs...)
 
 function pixel_to_world(wcs::WCS{Nin,Nout}, pixels::AbstractMatrix; kwargs...) where {Nin,Nout}
     size(pixels, 1) == Nin || throw(DimensionMismatch("pixel matrix has $(size(pixels, 1)) rows, expected $Nin"))

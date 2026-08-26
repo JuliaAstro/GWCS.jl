@@ -8,6 +8,29 @@
     @test !has_inverse(Scale(0.0))
     @test eltype(Shift(2.0f0)(SVector(3.0f0))) === Float32
 
+    constant = ConstantTransform{2}(42.0)
+    @test input_dimension(constant) == 2
+    @test output_dimension(constant) == 1
+    @test constant(SVector(1.0, 2.0)) == SVector(42.0)
+    @test transform_jacobian(constant, SVector(1.0, 2.0)) == SMatrix{1,2}(0.0, 0.0)
+    @test !has_inverse(constant)
+
+    inserted = ConstantTransform(3.0)
+    @test input_dimension(inserted) == 0
+    @test inserted(SVector{0,Float64}()) == SVector(3.0)
+    @test size(transform_jacobian(inserted, SVector{0,Float64}())) == (1, 0)
+    inserted_inverse = inverse_transform(inserted)
+    @test inserted_inverse(SVector(3.0)) == SVector{0,Float64}()
+    @test inverse_transform(inserted_inverse) === inserted
+    @test_throws DomainError inserted_inverse(SVector(4.0))
+
+    add_axis = parallel(IdentityTransform{2}(), inserted)
+    @test input_dimension(add_axis) == 2
+    @test output_dimension(add_axis) == 3
+    @test add_axis(SVector(1.0, 2.0)) == SVector(1.0, 2.0, 3.0)
+    @test inverse_transform(add_axis)(SVector(1.0, 2.0, 3.0)) == SVector(1.0, 2.0)
+    @test_throws DomainError inverse_transform(add_axis)(SVector(1.0, 2.0, 4.0))
+
     affine = AffineTransform(SMatrix{2,2}(2.0, -1.0, 1.0, 3.0), SVector(4.0, -2.0))
     coords = SVector(1.0, 2.0)
     result = affine(coords)

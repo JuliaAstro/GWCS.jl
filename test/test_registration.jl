@@ -70,6 +70,29 @@ end
     @test RegistrationFixture.parsed_context[] == ("tag:example.org:gwcs/offset", v"1.2.3", "transform")
     @test materialize_metadata([1, 2]) == [1, 2]
 
+    annotated_metadata = """
+    !<tag:example.org:gwcs/offset-1.2.3>
+    offset: 2.5
+    name: registered
+    inputs: [x]
+    outputs: [u]
+    """
+    annotated = parse_transform(GWCS._load_tagged_yaml(annotated_metadata); registry)
+    @test annotated isa AnnotatedTransform
+    @test annotated.transform isa RegistrationFixture.OffsetTransform
+    @test transform_name(annotated) == "registered"
+    @test input_names(annotated) == ("x",)
+    @test output_names(annotated) == ("u",)
+
+    register_transform!(registry, "tag:example.org:gwcs/preannotated", (node, context) -> AnnotatedTransform(RegistrationFixture.OffsetTransform(1.0); inputs=("x",), outputs=("u",)))
+    partially_annotated = parse_transform(GWCS._load_tagged_yaml("""
+    !<tag:example.org:gwcs/preannotated-1.0.0>
+    name: retained_axes
+    """); registry)
+    @test transform_name(partially_annotated) == "retained_axes"
+    @test input_names(partially_annotated) == ("x",)
+    @test output_names(partially_annotated) == ("u",)
+
     wrapped_metadata = """
     !<tag:example.org:gwcs/wrapped-1.0.0>
     transform: !<tag:example.org:gwcs/offset-1.9.9>
@@ -91,6 +114,21 @@ end
     explicit = parse_transform(GWCS._load_tagged_yaml(explicit_inverse_metadata); registry)
     @test explicit isa WithInverse
     @test inverse_transform(explicit)(explicit(SVector(3.0))) == SVector(3.0)
+
+    annotated_inverse_metadata = """
+    !<tag:example.org:gwcs/offset-1.0.0>
+    offset: 2.0
+    name: named_inverse
+    inputs: [x]
+    outputs: [u]
+    inverse: !<tag:example.org:gwcs/offset-1.0.0>
+      offset: -2.0
+    """
+    annotated_explicit = parse_transform(GWCS._load_tagged_yaml(annotated_inverse_metadata); registry)
+    annotated_backward = inverse_transform(annotated_explicit)
+    @test input_names(annotated_backward) == ("u",)
+    @test output_names(annotated_backward) == ("x",)
+    @test annotated_backward(annotated_explicit(SVector(3.0))) == SVector(3.0)
 
     unsupported_metadata = replace(offset_metadata, "offset-1.2.3" => "offset-2.0.0")
     @test_throws "registered ranges are [1.0.0, 2.0.0)" parse_transform(GWCS._load_tagged_yaml(unsupported_metadata); registry)

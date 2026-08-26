@@ -26,7 +26,7 @@ Coordinates are pipeline-native. GWCS.jl does not apply an implicit zero- or one
 
 ## Transforms and inverses
 
-The initial transform set includes identity, shift, scale, affine and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and TAN/native/celestial projection transforms. `compose` and `parallel` are the function forms of `|` and `&`.
+The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and TAN/native/celestial projection transforms. `compose` and `parallel` are the function forms of `|` and `&`.
 
 Analytical and metadata-provided inverses are compiled into the WCS. Square pipelines without an inverse use a damped Newton solver with ForwardDiff Jacobians:
 
@@ -55,12 +55,46 @@ A one-output function may return a scalar. Multi-output functions return a tuple
 
 Use `CallableTransform` for local functions, prototypes, and closures over calibration values. Define a dedicated `AbstractTransform` subtype when a transform needs stable metadata tags, serialization, specialized compilation, parameter introspection, or a reusable package API. Arbitrary functions are not automatically serializable, and allocations or type instability inside user callables remain visible during evaluation.
 
+### Fixed inputs, constants, and axis names
+
+A closure is sufficient for one-off partial application, but `fix_inputs` creates a lower-dimensional transform that remains visible to composition, Jacobian propagation, metadata parsing, and inversion:
+
+```julia
+transform = AnnotatedTransform(AffineTransform([1.0 1.0; 1.0 -1.0]); inputs=("x", "y"), outputs=("u", "v"))
+slice = fix_inputs(transform, "y" => 2.0)
+
+slice(SVector(3.0))                    # [5.0, 1.0]
+inverse_transform(slice)(SVector(5.0, 1.0))
+```
+
+Programmatic integer indices are one-based. String and symbol keys use `input_names(transform)`. `annotate_transform` attaches an optional transform name and input/output names without changing the numerical transform:
+
+```julia
+transform = annotate_transform(transform; name="sum_and_difference")
+transform_name(transform)
+input_names(transform)
+output_names(transform)
+```
+
+When the original transform has an inverse, the fixed-input inverse verifies both the recovered fixed coordinates and the complete forward round trip. It throws `DomainError` for an output outside the fixed slice instead of returning a misleading coordinate. `atol` and `rtol` keywords on `fix_inputs` control this validation.
+
+`fix_inputs(wcs, ...)` also projects the input frame, bounding box, and pixel shape. Fixing every input produces a zero-dimensional WCS evaluated with `pixel_to_world(wcs)`:
+
+```julia
+detector_slice = fix_inputs(wcs, "y" => 20.0)
+constant_wcs = fix_inputs(wcs, ("x" => 11.0, "y" => 20.0))
+pixel_to_world(constant_wcs)
+```
+
+`ConstantTransform(value; n_inputs=0)` inserts a constant output axis without consuming an input. Constants with ignored inputs have no inverse. A zero-input constant has a checked inverse that accepts only its constant output and returns an empty coordinate.
+
 ## Metadata
 
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports the Roman L2 subset used by the validation fixtures:
 
 - GWCS WCS, step, bounding-box, 2D frame, celestial frame, ICRS, and unit tags
 - compose, concatenate, shift, scale, axis remapping, and polynomial transforms
+- legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
 - 3D rotation sequences and spherical/cartesian conversions
 - serialized explicit inverses
 

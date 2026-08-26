@@ -32,4 +32,8 @@
     @test @inferred(world_to_pixel(wcs, SVector(5.0, 11.0))) ≈ coords
     @test allocated_pixel_to_world(wcs, coords) == 0
     @test allocated_world_to_pixel(wcs, SVector(5.0, 11.0)) == 0
+
+    constant_wcs = fix_inputs(wcs, (1 => 2.0, 2 => 4.0))
+    @test pixel_to_world(constant_wcs) == SVector(5.0, 11.0)
+    @test world_to_pixel(constant_wcs, 5.0, 11.0) == SVector{0,Float64}()
 end
