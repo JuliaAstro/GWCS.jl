@@ -27,4 +27,26 @@
 
     @test_throws "frame names must be unique" WCS(Step(detector, detector_to_focal), Step(detector))
     @test_throws DimensionMismatch WCS(Step(detector, Shift(1.0)), Step(world))
+
+    sliced = fix_inputs(wcs, "y" => 20.0)
+    @test pixel_n_dim(sliced) == 1
+    @test world_n_dim(sliced) == 2
+    @test input_frame(sliced).axes_names == ("x",)
+    @test input_frame(sliced).unit == ("pixel",)
+    @test sliced.pixel_shape == (100,)
+    @test sliced.bounding_box.intervals == ((-0.5, 99.5),)
+    @test pixel_to_world(sliced, 11.0) ≈ pixel_to_world(wcs, 11.0, 20.0)
+    @test world_to_pixel(sliced, pixel_to_world(sliced, 11.0)) ≈ SVector(11.0) atol=1e-10
+    @test_throws DomainError world_to_pixel(sliced, pixel_to_world(wcs, 11.0, 21.0))
+    @test_throws "lies outside the WCS bounding box" fix_inputs(wcs, "y" => 300.0)
+
+    constant_wcs = fix_inputs(wcs, ("x" => 11.0, "y" => 20.0))
+    @test pixel_n_dim(constant_wcs) == 0
+    @test input_frame(constant_wcs).axes_names == ()
+    @test constant_wcs.pixel_shape == ()
+    @test constant_wcs.bounding_box === nothing
+    @test pixel_to_world(constant_wcs) ≈ pixel_to_world(wcs, 11.0, 20.0)
+    @test pixel_to_world(constant_wcs, ()) ≈ pixel_to_world(wcs, 11.0, 20.0)
+    @test world_to_pixel(constant_wcs, pixel_to_world(constant_wcs)) == SVector{0,Float64}()
+    @test eltype(world_to_pixel(constant_wcs, pixel_to_world(constant_wcs))) === Float64
 end

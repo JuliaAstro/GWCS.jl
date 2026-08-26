@@ -127,9 +127,14 @@ const CALLABLE_REFERENCE = CallableTransform{2,2}(callable_forward; inverse=call
 const CALLABLE_AD_REFERENCE = CallableTransform{2,2}(callable_forward; inverse=callable_inverse)
 const NATIVE_CALLABLE_INVERSE = inverse_transform(NATIVE_CALLABLE_REFERENCE)
 const CALLABLE_INVERSE = inverse_transform(CALLABLE_REFERENCE)
+const FIXED_REFERENCE = fix_inputs(NATIVE_CALLABLE_REFERENCE, 2 => 300.0)
+const FIXED_INVERSE = inverse_transform(FIXED_REFERENCE)
+const CONSTANT_AXIS = parallel(IdentityTransform{2}(), ConstantTransform(42.0))
 
 const PIXEL = SVector(400.0, 300.0)
+const FIXED_PIXEL = SVector(400.0)
 const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
+const FIXED_WORLD = FIXED_REFERENCE(FIXED_PIXEL)
 const FITS_LINEAR_WORLD = FITSWCS.pixel_to_world(FITS_LINEAR, PIXEL)
 const FITS_TAN_WORLD = FITSWCS.pixel_to_world(FITS_TAN, PIXEL)
 const FITS_SIP_WORLD = FITSWCS.pixel_to_world(FITS_SIP, PIXEL)
@@ -146,7 +151,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "fixed_inputs")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -172,6 +177,11 @@ SUITE["callable"]["inverse/native"] = @benchmarkable $NATIVE_CALLABLE_INVERSE($C
 SUITE["callable"]["inverse/wrapper"] = @benchmarkable $CALLABLE_INVERSE($CALLABLE_WORLD) evals=100
 SUITE["callable"]["jacobian/analytical"] = @benchmarkable transform_jacobian($CALLABLE_REFERENCE, $PIXEL) evals=100
 SUITE["callable"]["jacobian/ForwardDiff"] = @benchmarkable transform_jacobian($CALLABLE_AD_REFERENCE, $PIXEL) evals=100
+
+SUITE["fixed_inputs"]["forward/structured"] = @benchmarkable $FIXED_REFERENCE($FIXED_PIXEL) evals=100
+SUITE["fixed_inputs"]["forward/closure"] = @benchmarkable $NATIVE_CALLABLE_REFERENCE(SVector($FIXED_PIXEL[1], 300.0)) evals=100
+SUITE["fixed_inputs"]["inverse/checked"] = @benchmarkable $FIXED_INVERSE($FIXED_WORLD) evals=100
+SUITE["fixed_inputs"]["constant_axis"] = @benchmarkable $CONSTANT_AXIS($PIXEL) evals=100
 
 if abspath(PROGRAM_FILE) == @__FILE__
     for name in keys(SUITE)

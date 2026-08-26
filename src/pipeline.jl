@@ -69,6 +69,33 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape)}(compiled, forward, backward, String(name), shape, bounding_box)
 end
 
+function fix_inputs(wcs::WCS{Nin}, fixed; atol=nothing, rtol=nothing) where {Nin}
+    frame = input_frame(wcs)
+    input_pairs = _fixed_pairs(fixed)
+    indexed = map(input_pairs) do pair
+        _fixed_index(pair.first, frame.axes_names, Nin) => pair.second
+    end
+    fixed_transform = fix_inputs(first(wcs.steps).transform, indexed; atol, rtol)
+
+    for (index, value) in zip(filter(index -> fixed_transform.sources[index] < 0, 1:Nin), fixed_transform.fixed_values)
+        if wcs.bounding_box !== nothing
+            lower, upper = wcs.bounding_box.intervals[index]
+            lower <= value <= upper || throw(DomainError(value, "fixed input $(frame.axes_names[index]) lies outside the WCS bounding box"))
+        end
+    end
+
+    free_indices = fixed_transform.free_indices
+    reduced_frame = _subset_frame(frame, free_indices)
+    reduced_box = if wcs.bounding_box === nothing || isempty(free_indices)
+        nothing
+    else
+        BoundingBox(map(index -> wcs.bounding_box.intervals[index], free_indices))
+    end
+    reduced_shape = wcs.pixel_shape === nothing ? nothing : map(index -> wcs.pixel_shape[index], free_indices)
+    steps = (Step(reduced_frame, fixed_transform), Base.tail(wcs.steps)...)
+    return WCS(steps...; name=wcs.name, pixel_shape=reduced_shape, bounding_box=reduced_box)
+end
+
 input_frame(wcs::WCS) = first(wcs.steps).frame
 output_frame(wcs::WCS) = last(wcs.steps).frame
 available_frames(wcs::WCS) = map(step -> step.frame.name, wcs.steps)
@@ -104,3 +131,5 @@ end
 function transform(wcs::WCS, from_frame, to_frame, coords::Real...)
     return transform(wcs, from_frame, to_frame, SVector(coords))
 end
+
+transform(wcs::WCS, from_frame, to_frame) = transform(wcs, from_frame, to_frame, SVector{0,Float64}())

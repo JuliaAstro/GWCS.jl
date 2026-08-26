@@ -11,6 +11,9 @@ struct NoInverse end
 
 input_dimension(::AbstractTransform{Nin,Nout}) where {Nin,Nout} = Nin
 output_dimension(::AbstractTransform{Nin,Nout}) where {Nin,Nout} = Nout
+transform_name(::AbstractTransform) = nothing
+input_names(::AbstractTransform) = nothing
+output_names(::AbstractTransform) = nothing
 
 """
     inverse_transform(transform)
@@ -86,3 +89,6 @@ end
 inverse_transform(transform::WithInverse) = WithInverse(transform.backward, transform.forward)
 compile_transform(transform::WithInverse) = WithInverse(_compile_transform_checked(transform.forward), _compile_transform_checked(transform.backward))
 transform_jacobian(transform::WithInverse, coords::StaticVector) = _transform_jacobian_checked(transform.forward, coords)
+transform_name(transform::WithInverse) = transform_name(transform.forward)
+input_names(transform::WithInverse) = input_names(transform.forward)
+output_names(transform::WithInverse) = output_names(transform.forward)
