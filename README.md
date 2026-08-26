@@ -24,6 +24,41 @@ Coordinates use each boundary frame's native order. `axes_order[i]` gives the on
 
 `pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`.
 
+### Bounding boxes and input domains
+
+`BoundingBox` constrains all input axes by default. Use the dimensioned constructor to leave selected axes unconstrained:
+
+```julia
+box = BoundingBox{3}(((0.0, 4095.0), (0.0, 4095.0)), (1, 2))
+wcs = WCS(Step(detector, transform), Step(world); bounding_box=box)
+
+bounded_axes(box) # (1, 2)
+ignored_axes(box) # (3,)
+```
+
+`CompoundBoundingBox` selects a simple box from exact values of one or more input axes. This represents detector regions, slices, and orders whose valid spatial bounds differ:
+
+```julia
+boxes = Dict(
+    (1,) => BoundingBox{3}(((0.0, 2047.0), (0.0, 2047.0)), (1, 2)),
+    (2,) => BoundingBox{3}(((2048.0, 4095.0), (0.0, 2047.0)), (1, 2))
+)
+domain = CompoundBoundingBox(boxes, (3,))
+```
+
+Selector matching is exact. An unknown selector is outside the domain and therefore produces `fill_value` during WCS evaluation. `select_bounding_box(domain, selector)` or `domain[selector]` returns one selected box explicitly and throws `KeyError` when it is absent.
+
+Use `with_bounding_box(wcs, box)` to return a newly validated WCS with a replacement domain, or pass `nothing` to remove it. `with_pixel_shape(wcs, shape)` provides the corresponding persistent pixel-shape update. `fix_inputs(wcs, ...)` reduces simple and compound domains, including selecting and collapsing a compound box when selector inputs are fixed.
+
+`grid_from_bounding_box` returns a coordinate matrix whose columns can be passed directly to `pixel_to_world`. Scalar or per-axis steps are supported; `center=true` uses pixel-center rounding. Compound boxes require `selector`, and other ignored axes require fixed values:
+
+```julia
+pixels = grid_from_bounding_box(wcs; selector=1, fixed=("order" => 2), step=4)
+world = pixel_to_world(wcs, pixels)
+```
+
+Numerical inversion can derive an initial guess from a simple box or a compound box with one selector entry. A multi-entry compound box requires an explicit `initial_guess` because the world coordinate does not generically identify a discontinuous selector branch before solving.
+
 ### Coordinate frames
 
 Frames classify axes with the standard `AxisType` values `SPATIAL`, `SPECTRAL`, `TIME`, `STOKES`, `PIXEL`, and `UNDEFINED`; generic frames may also use custom strings. `SpectralFrame`, `TemporalFrame`, and `StokesFrame` provide one-dimensional defaults, while `CompositeFrame` combines heterogeneous outputs without changing the compiled numeric kernel:
@@ -128,7 +163,7 @@ Composition uses boolean dependency propagation, parallel transforms produce blo
 
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports:
 
-- GWCS WCS, step, bounding-box, generic, 2D, celestial, spectral, temporal, Stokes, and composite frames
+- GWCS WCS, step, simple and compound bounding boxes, generic, 2D, celestial, spectral, temporal, Stokes, and composite frames
 - ICRS, structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
 - compose, concatenate, elementwise arithmetic, identity, shift, scale, affine, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
@@ -204,7 +239,9 @@ External Roman validation requires the local ASDF.jl checkout configured in `val
 julia --project=validation validation/validate_asdf_parsers.jl
 julia --project=validation validation/compare_asdf_parsers.jl
 julia --project=validation validation/compare_arithmetic.jl
+julia --project=validation validation/compare_bounding_boxes.jl
+julia --project=validation validation/validate_asdf_bounding_boxes.jl
 julia --project=validation validation/compare_roman.jl FILE...
 ```
 
-The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, and arithmetic compound results against Astropy. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
+The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, and bounding-box behavior against Astropy and Python GWCS. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.

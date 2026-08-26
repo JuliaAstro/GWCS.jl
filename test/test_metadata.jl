@@ -113,6 +113,54 @@
     @test_throws "same input cannot be fixed more than once" parse_transform(GWCS._load_tagged_yaml(duplicate))
 end
 
+@testset "ASDF bounding-box metadata" begin
+    fixture = GWCS._load_tagged_yaml(read(joinpath(@__DIR__, "fixtures", "asdf_bounding_boxes.yaml"), String))
+
+    simple = parse_wcs(fixture["simple_ignored"])
+    @test simple.bounding_box isa BoundingBox{3}
+    @test bounded_axes(simple.bounding_box) == (1, 2)
+    @test ignored_axes(simple.bounding_box) == (3,)
+    @test simple.bounding_box.intervals == ((10.0, 15.0), (0.0, 5.0))
+    @test pixel_to_world(simple, 12.0, 2.0, 100.0) == SVector(2.0, 12.0, 100.0)
+    @test all(isnan, pixel_to_world(simple, 2.0, 12.0, 100.0))
+
+    compound = parse_wcs(fixture["compound"])
+    @test compound.bounding_box isa CompoundBoundingBox{3}
+    @test selector_axes(compound.bounding_box) == (3,)
+    @test selector_ignored(compound.bounding_box) == (true,)
+    @test Set(keys(compound.bounding_box.boxes)) == Set(((1,), (2,)))
+    @test pixel_to_world(compound, 2.0, 3.0, 1.0) == SVector(2.0, 3.0, 1.0)
+    @test all(isnan, pixel_to_world(compound, 2.0, 3.0, 2.0))
+    @test all(isnan, pixel_to_world(compound, 2.0, 3.0, 3.0))
+
+    metadata = read(joinpath(@__DIR__, "fixtures", "asdf_bounding_boxes.yaml"), String)
+    for version in ("1.0.0", "1.1.0", "1.2.0")
+        versioned = replace(metadata, "property/bounding_box-1.2.0" => "property/bounding_box-$version",
+            "property/compound_bounding_box-1.2.0" => "property/compound_bounding_box-$version")
+        parsed = GWCS._load_tagged_yaml(versioned)
+        @test parse_wcs(parsed["simple_ignored"]).bounding_box isa BoundingBox{3}
+        @test parse_wcs(parsed["compound"]).bounding_box isa CompoundBoundingBox{3}
+    end
+
+    bad_version = replace(metadata, "property/bounding_box-1.2.0" => "property/bounding_box-1.3.0"; count=1)
+    @test_throws "supported range is [1.0.0, 1.3.0)" parse_wcs(GWCS._load_tagged_yaml(bad_version)["simple_ignored"])
+
+    @test_throws "is not among" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "x: [0.0, 5.0]" => "bad: [0.0, 5.0]"; count=1))["simple_ignored"])
+    @test_throws "account for every transform input" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "ignore: [slice]" => "ignore: []"; count=1))["simple_ignored"])
+    @test_throws "cannot be both bounded and ignored" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "ignore: [slice]" => "ignore: [x, slice]"; count=1))["simple_ignored"])
+    @test_throws "selector key has length" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "key: [1]" => "key: [1, 2]"; count=1))["compound"])
+    @test_throws "selector keys must be unique" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "key: [2]" => "key: [1]"; count=1))["compound"])
+    @test_throws "expected a boolean" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "ignore: true" => "ignore: yes"; count=1))["compound"])
+    quantity = replace(metadata, "x: [0.0, 5.0]" => "x: [!<tag:stsci.edu:asdf/unit/quantity-1.2.0> {value: 0.0, unit: pixel}, 5.0]"; count=1)
+    @test_throws "expected a unitless numeric value" parse_wcs(GWCS._load_tagged_yaml(quantity)["simple_ignored"])
+
+    allocated_compound_metadata(wcs, coords) = @allocated pixel_to_world(wcs, coords)
+    coords = SVector(2.0, 3.0, 1.0)
+    pixel_to_world(compound, coords)
+    @test @inferred(pixel_to_world(compound, coords)) == coords
+    @test allocated_compound_metadata(compound, coords) == 0
+end
+
 @testset "ASDF arithmetic transforms" begin
     function arithmetic_metadata(name; version="1.4.0")
         return """

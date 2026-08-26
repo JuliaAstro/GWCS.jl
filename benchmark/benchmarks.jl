@@ -140,11 +140,20 @@ const PERMUTED_OUTPUT_FRAME = CoordinateFrame{3}(name="permuted_output", axes_or
 const AXIS_ORDER_TRANSFORM = AffineTransform(SMatrix{3,3}(1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0))
 const ORDERED_3D_WCS = GWCS.WCS(Step(ORDERED_3D_FRAME, AXIS_ORDER_TRANSFORM), Step(CoordinateFrame{3}(name="ordered_output")))
 const PERMUTED_3D_WCS = GWCS.WCS(Step(PERMUTED_INPUT_FRAME, AXIS_ORDER_TRANSFORM), Step(PERMUTED_OUTPUT_FRAME))
+const DOMAIN_INPUT_FRAME = CoordinateFrame{3}(name="domain_input", axes_names=("x", "y", "slice"))
+const DOMAIN_OUTPUT_FRAME = CoordinateFrame{3}(name="domain_output")
+const SIMPLE_DOMAIN_BOX = BoundingBox{3}(((0.0, 5.0), (0.0, 5.0)), (1, 2))
+const COMPOUND_DOMAIN_BOX = CompoundBoundingBox(Dict((1,) => SIMPLE_DOMAIN_BOX,
+    (2,) => BoundingBox{3}(((10.0, 15.0), (10.0, 15.0)), (1, 2))), (3,))
+const SIMPLE_DOMAIN_WCS = GWCS.WCS(Step(DOMAIN_INPUT_FRAME, IdentityTransform{3}()), Step(DOMAIN_OUTPUT_FRAME); bounding_box=SIMPLE_DOMAIN_BOX)
+const COMPOUND_DOMAIN_WCS = GWCS.WCS(Step(DOMAIN_INPUT_FRAME, IdentityTransform{3}()), Step(DOMAIN_OUTPUT_FRAME); bounding_box=COMPOUND_DOMAIN_BOX)
 
 const PIXEL = SVector(400.0, 300.0)
 const FIXED_PIXEL = SVector(400.0)
 const ARITHMETIC_PIXEL = SVector(3.0)
 const PIXEL_3D = SVector(1.0, 2.0, 3.0)
+const DOMAIN_INSIDE = SVector(2.0, 3.0, 1.0)
+const DOMAIN_OUTSIDE = SVector(7.0, 3.0, 1.0)
 const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
 const FIXED_WORLD = FIXED_REFERENCE(FIXED_PIXEL)
 const ORDERED_WORLD_3D = GWCS.pixel_to_world(ORDERED_3D_WCS, PIXEL_3D)
@@ -165,7 +174,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "arithmetic", "fixed_inputs", "axis_order")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -206,6 +215,12 @@ SUITE["axis_order"]["forward/identity"] = @benchmarkable GWCS.pixel_to_world($OR
 SUITE["axis_order"]["forward/permuted"] = @benchmarkable GWCS.pixel_to_world($PERMUTED_3D_WCS, $PIXEL_3D) evals=100
 SUITE["axis_order"]["inverse/identity"] = @benchmarkable GWCS.world_to_pixel($ORDERED_3D_WCS, $ORDERED_WORLD_3D) evals=100
 SUITE["axis_order"]["inverse/permuted"] = @benchmarkable GWCS.world_to_pixel($PERMUTED_3D_WCS, $PERMUTED_WORLD_3D) evals=100
+SUITE["domains"]["simple/inside"] = @benchmarkable GWCS.pixel_to_world($SIMPLE_DOMAIN_WCS, $DOMAIN_INSIDE) evals=100
+SUITE["domains"]["simple/outside"] = @benchmarkable GWCS.pixel_to_world($SIMPLE_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
+SUITE["domains"]["compound/inside"] = @benchmarkable GWCS.pixel_to_world($COMPOUND_DOMAIN_WCS, $DOMAIN_INSIDE) evals=100
+SUITE["domains"]["compound/outside"] = @benchmarkable GWCS.pixel_to_world($COMPOUND_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
+SUITE["domains"]["grid/simple"] = @benchmarkable grid_from_bounding_box($SIMPLE_DOMAIN_BOX; fixed=(3 => 1.0,)) evals=1
+SUITE["domains"]["grid/compound"] = @benchmarkable grid_from_bounding_box($COMPOUND_DOMAIN_BOX; selector=1) evals=1
 
 if abspath(PROGRAM_FILE) == @__FILE__
     for name in keys(SUITE)
