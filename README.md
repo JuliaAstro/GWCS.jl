@@ -24,6 +24,21 @@ Coordinates use each boundary frame's native order. `axes_order[i]` gives the on
 
 `pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`.
 
+### Coordinate frames
+
+Frames classify axes with the standard `AxisType` values `SPATIAL`, `SPECTRAL`, `TIME`, `STOKES`, `PIXEL`, and `UNDEFINED`; generic frames may also use custom strings. `SpectralFrame`, `TemporalFrame`, and `StokesFrame` provide one-dimensional defaults, while `CompositeFrame` combines heterogeneous outputs without changing the compiled numeric kernel:
+
+```julia
+sky = CelestialFrame(name="sky", axes_order=(2, 4))
+wave = SpectralFrame(name="wave", axes_order=1, axes_names="lambda", unit="nm")
+time = TemporalFrame(name="time", axes_order=3, unit="s", reference_epoch=2460000.5, time_format="jd")
+world = CompositeFrame((sky, wave, time); name="world")
+```
+
+Constituent `axes_order` values are global transform positions and must form a complete permutation across the composite. Frame metadata and public WCS values remain in frame-native order. Use `axis_names`, `axis_physical_types`, `axis_units`, and `axis_types` for frame metadata, or the corresponding `pixel_axis_*` and `world_axis_*` WCS accessors.
+
+`SpectralFrame` infers common wavelength, frequency, energy, and velocity physical types from unit strings. `TemporalFrame` preserves reference epoch, scale, format, and location metadata. `offset_to_time` and `time_to_offset` handle numeric JD/MJD origins for common time units and delegate ordinary arithmetic to compatible external time values; other numeric time formats require an optional time integration. Rich units, celestial coordinates, and astronomy time objects remain optional extension concerns.
+
 ## Transforms and inverses
 
 The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and TAN/native/celestial projection transforms. `compose` and `parallel` are the function forms of `|` and `&`.
@@ -102,9 +117,10 @@ Composition uses boolean dependency propagation, parallel transforms produce blo
 
 ## Metadata
 
-`parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports the Roman L2 subset used by the validation fixtures:
+`parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports:
 
-- GWCS WCS, step, bounding-box, 2D frame, celestial frame, ICRS, unit, and nonidentity frame-axis-order metadata
+- GWCS WCS, step, bounding-box, generic, 2D, celestial, spectral, temporal, Stokes, and composite frames
+- ICRS, structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
 - compose, concatenate, shift, scale, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
 - 3D rotation sequences and spherical/cartesian conversions

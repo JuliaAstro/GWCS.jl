@@ -106,6 +106,14 @@ input_frame(wcs::WCS) = first(wcs.steps).frame
 output_frame(wcs::WCS) = last(wcs.steps).frame
 available_frames(wcs::WCS) = map(step -> step.frame.name, wcs.steps)
 axis_correlation_matrix(wcs::WCS) = axis_correlation_matrix(wcs.forward)
+pixel_axis_names(wcs::WCS) = axis_names(input_frame(wcs))
+world_axis_names(wcs::WCS) = axis_names(output_frame(wcs))
+pixel_axis_physical_types(wcs::WCS) = axis_physical_types(input_frame(wcs))
+world_axis_physical_types(wcs::WCS) = axis_physical_types(output_frame(wcs))
+pixel_axis_units(wcs::WCS) = axis_units(input_frame(wcs))
+world_axis_units(wcs::WCS) = axis_units(output_frame(wcs))
+pixel_axis_types(wcs::WCS) = axis_types(input_frame(wcs))
+world_axis_types(wcs::WCS) = axis_types(output_frame(wcs))
 
 function _frame_index(wcs::WCS, frame::AbstractString)
     index = findfirst(==(frame), available_frames(wcs))
