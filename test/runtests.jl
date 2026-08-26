@@ -10,4 +10,5 @@ using Test
     include("test_api.jl")
     include("test_numerical_inverse.jl")
     include("test_metadata.jl")
+    include("test_registration.jl")
 end

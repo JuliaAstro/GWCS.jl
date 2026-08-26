@@ -57,6 +57,41 @@ wcs = parse_wcs(file["roman"]["meta"]["wcs"])
 
 Unknown tags, unsupported major schema versions, malformed dimensions, and missing required properties raise explicit errors. The current parser is intentionally limited to the observed Roman transform subset rather than the full Astropy modeling schema.
 
+### Registering external transforms
+
+External packages can add metadata support for native `AbstractTransform` subtypes without modifying GWCS.jl. Dimensions are encoded in the subtype, while analytical inverses and optimized execution forms use ordinary Julia method extensions:
+
+```julia
+module ExampleTransforms
+
+using GWCS
+using StaticArrays
+import GWCS: compile_transform, inverse_transform
+
+struct OffsetTransform{T<:Real} <: AbstractTransform{1,1}
+    offset::T
+end
+
+@inline (transform::OffsetTransform)(coords::StaticVector{1}) = SVector(coords[1] + transform.offset)
+inverse_transform(transform::OffsetTransform) = OffsetTransform(-transform.offset)
+compile_transform(transform::OffsetTransform) = Shift(transform.offset)
+
+function parse_offset(node, context)
+    offset = metadata_value(required_metadata(node, "offset", context))
+    return OffsetTransform(offset)
+end
+
+function __init__()
+    register_transform!("tag:example.org:gwcs/offset", parse_offset; min_version=v"1.0.0", max_version=v"2.0.0")
+end
+
+end
+```
+
+Tags use their full namespace and omit the trailing schema version. Version intervals are half-open, and overlapping registrations are rejected. Register from an extension package's `__init__` so the process-wide default registry is populated at runtime. For deterministic or restricted parsing, use `registry = copy(default_transform_registry())`, register additional transforms into that isolated registry, and pass it to `parse_transform` or `parse_wcs`.
+
+Registration and metadata callbacks run only while constructing a transform. A parsed `WCS` stores concrete compiled transforms, so scalar evaluation performs no registry lookup or dynamic metadata dispatch. Registered constructors must return an `AbstractTransform`; custom inverse and compilation methods are checked for compatible dimensions before the pipeline is accepted.
+
 ## Tests, benchmarks, and validation
 
 Run the package tests with:
