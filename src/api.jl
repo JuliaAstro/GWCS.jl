@@ -15,6 +15,37 @@ function _filled_coordinate(::Val{N}, ::Type{T}, fill_value) where {N,T}
     return SVector{N,T}(ntuple(i -> T(fill_value), N))
 end
 
+@inline function _in_domain(wcs::WCS{N}, pixels::StaticVector{N}; with_bounding_box=true) where {N}
+    all(isfinite, pixels) || return false
+    return !with_bounding_box || wcs.bounding_box === nothing || pixels in wcs.bounding_box
+end
+
+"""
+    in_domain(wcs, pixels...) -> Bool
+    in_domain(wcs, pixels::AbstractMatrix) -> BitVector
+
+Test whether finite pixel coordinates belong to the WCS input domain. Matrix columns are coordinates.
+"""
+function in_domain(wcs::WCS{N}, coords::AbstractVector) where {N}
+    length(coords) == N || throw(DimensionMismatch("pixel has length $(length(coords)), expected $N"))
+    T = _coordinate_float_type(eltype(coords))
+    return _in_domain(wcs, SVector{N,T}(coords))
+end
+
+in_domain(wcs::WCS, coords::Tuple{Vararg{Real}}) = _in_domain(wcs, _coordinate_vector(coords))
+in_domain(wcs::WCS, coords::Real...) = in_domain(wcs, coords)
+in_domain(wcs::WCS{0}) = _in_domain(wcs, SVector{0,Float64}())
+
+function in_domain(wcs::WCS{N}, pixels::AbstractMatrix) where {N}
+    size(pixels, 1) == N || throw(DimensionMismatch("pixel matrix has $(size(pixels, 1)) rows, expected $N"))
+    T = _coordinate_float_type(eltype(pixels))
+    result = BitVector(undef, size(pixels, 2))
+    @inbounds for (index, column) in enumerate(axes(pixels, 2))
+        result[index] = _in_domain(wcs, SVector{N,T}(view(pixels, :, column)))
+    end
+    return result
+end
+
 @inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     pixels = SVector{Nin,T}(coords)
@@ -74,6 +105,44 @@ function world_to_pixel(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwargs...) w
     result[:, 1] .= first_result
     @inbounds for j in 2:size(worlds, 2)
         result[:, j] .= world_to_pixel(wcs, view(worlds, :, j); kwargs...)
+    end
+    return result
+end
+
+@inline function _in_image(wcs::WCS{Nin,Nout}, world::StaticVector{Nout}; with_bounding_box=true, tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12) where {Nin,Nout}
+    pixels = try
+        _world_to_pixel(wcs, world; with_bounding_box=false, tolerance, maxiter, initial_guess, quiet=false, max_backtracks)
+    catch error
+        if error isa NoConvergence || error isa DomainError
+            return false
+        end
+        rethrow()
+    end
+    return _in_domain(wcs, pixels; with_bounding_box)
+end
+
+"""
+    in_image(wcs, world...; with_bounding_box=true, kwargs...) -> Bool
+    in_image(wcs, worlds::AbstractMatrix; with_bounding_box=true, kwargs...) -> BitVector
+
+Test whether world coordinates invert successfully to finite pixels in the WCS input domain. Matrix columns are coordinates.
+"""
+function in_image(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
+    length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))
+    T = _coordinate_float_type(eltype(coords))
+    return _in_image(wcs, SVector{Nout,T}(coords); kwargs...)
+end
+
+in_image(wcs::WCS, coords::Tuple{Vararg{Real}}; kwargs...) = _in_image(wcs, _coordinate_vector(coords); kwargs...)
+in_image(wcs::WCS, coords::Real...; kwargs...) = in_image(wcs, coords; kwargs...)
+in_image(wcs::WCS{Nin,0}; kwargs...) where {Nin} = _in_image(wcs, SVector{0,Float64}(); kwargs...)
+
+function in_image(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwargs...) where {Nin,Nout}
+    size(worlds, 1) == Nout || throw(DimensionMismatch("world matrix has $(size(worlds, 1)) rows, expected $Nout"))
+    T = _coordinate_float_type(eltype(worlds))
+    result = BitVector(undef, size(worlds, 2))
+    @inbounds for (index, column) in enumerate(axes(worlds, 2))
+        result[index] = _in_image(wcs, SVector{Nout,T}(view(worlds, :, column)); kwargs...)
     end
     return result
 end

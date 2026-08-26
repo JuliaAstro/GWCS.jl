@@ -1,3 +1,11 @@
+struct OffsetColumnMatrix{T,M<:AbstractMatrix{T}} <: AbstractMatrix{T}
+    parent::M
+end
+
+Base.size(matrix::OffsetColumnMatrix) = size(matrix.parent)
+Base.axes(matrix::OffsetColumnMatrix) = (axes(matrix.parent, 1), 0:(size(matrix.parent, 2) - 1))
+Base.getindex(matrix::OffsetColumnMatrix, row::Int, column::Int) = matrix.parent[row, column + 1]
+
 @testset "Evaluation API" begin
     pixels = Frame2D(name="pixels")
     world = CoordinateFrame{2}(name="world")
@@ -15,25 +23,52 @@
     @test all(isnan, pixel_to_world(wcs, 20.0, 4.0))
     @test pixel_to_world(wcs, 20.0, 4.0; with_bounding_box=false) == SVector(41.0, 11.0)
     @test all(isnan, world_to_pixel(wcs, 41.0, 11.0))
+    @test in_domain(wcs, 2.0, 4.0)
+    @test in_domain(wcs, (2.0, 4.0))
+    @test in_domain(wcs, [2.0, 4.0])
+    @test !in_domain(wcs, 20.0, 4.0)
+    @test !in_domain(wcs, NaN, 4.0)
+    @test in_image(wcs, 5.0, 11.0)
+    @test in_image(wcs, (5.0, 11.0))
+    @test in_image(wcs, [5.0, 11.0])
+    @test !in_image(wcs, 41.0, 11.0)
+    @test in_image(wcs, 41.0, 11.0; with_bounding_box=false)
 
     batch = [2.0 3.0; 4.0 5.0]
     world_batch = pixel_to_world(wcs, batch)
     @test world_batch == [5.0 7.0; 11.0 14.0]
     @test world_to_pixel(wcs, world_batch) ≈ batch
+    @test in_domain(wcs, [2.0 20.0; 4.0 4.0]) == Bool[true, false]
+    @test in_image(wcs, [5.0 41.0; 11.0 11.0]) == Bool[true, false]
+    @test in_domain(wcs, OffsetColumnMatrix([2.0 20.0; 4.0 4.0])) == Bool[true, false]
+    @test in_image(wcs, OffsetColumnMatrix([5.0 41.0; 11.0 11.0])) == Bool[true, false]
+    @test in_domain(wcs, Matrix{Float64}(undef, 2, 0)) == BitVector()
+    @test in_image(wcs, Matrix{Float64}(undef, 2, 0)) == BitVector()
     @test_throws DimensionMismatch pixel_to_world(wcs, [1.0])
     @test_throws DimensionMismatch world_to_pixel(wcs, [1.0])
+    @test_throws DimensionMismatch in_domain(wcs, [1.0])
+    @test_throws DimensionMismatch in_image(wcs, [1.0])
 
     coords = SVector(2.0, 4.0)
     allocated_pixel_to_world(wcs, coords) = @allocated pixel_to_world(wcs, coords)
     allocated_world_to_pixel(wcs, coords) = @allocated world_to_pixel(wcs, coords)
+    allocated_in_domain(wcs, coords) = @allocated in_domain(wcs, coords)
+    allocated_in_image(wcs, coords) = @allocated in_image(wcs, coords)
     pixel_to_world(wcs, coords)
     world_to_pixel(wcs, SVector(5.0, 11.0))
     @test @inferred(pixel_to_world(wcs, coords)) == SVector(5.0, 11.0)
     @test @inferred(world_to_pixel(wcs, SVector(5.0, 11.0))) ≈ coords
+    @test @inferred(in_domain(wcs, coords))
+    @test @inferred(in_image(wcs, SVector(5.0, 11.0)))
     @test allocated_pixel_to_world(wcs, coords) == 0
     @test allocated_world_to_pixel(wcs, SVector(5.0, 11.0)) == 0
+    @test allocated_in_domain(wcs, coords) == 0
+    @test allocated_in_image(wcs, SVector(5.0, 11.0)) == 0
 
     constant_wcs = fix_inputs(wcs, (1 => 2.0, 2 => 4.0))
     @test pixel_to_world(constant_wcs) == SVector(5.0, 11.0)
     @test world_to_pixel(constant_wcs, 5.0, 11.0) == SVector{0,Float64}()
+    @test in_domain(constant_wcs)
+    @test in_image(constant_wcs, 5.0, 11.0)
+    @test !in_image(constant_wcs, 7.0, 11.0)
 end

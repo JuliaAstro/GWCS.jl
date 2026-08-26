@@ -64,6 +64,9 @@ end
     world = SVector(100.0, 30.0, 2000.0)
     @test pixel_to_world(wcs, pixels) == world
     @test world_to_pixel(wcs, world) == pixels
+    @test in_domain(wcs, pixels)
+    @test in_image(wcs, world)
+    @test !in_domain(wcs, SVector(1.0, 20.0, 3.0))
     @test transform(wcs, "input", "middle", pixels...) == intermediate
     @test transform(wcs, "middle", "output", intermediate...) == world
     @test transform(wcs, "output", "input", world...) == pixels

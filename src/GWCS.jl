@@ -40,7 +40,7 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransfo
        annotate_transform, axis_names, axis_physical_types, axis_types, axis_units, bounded_axes, bounds,
        compile_transform, compose, default_transform_registry, degree, elementwise,
        axis_correlation_matrix, fix_inputs, frame_dimension, get_transform, grid_from_bounding_box, has_inverse, ignored_axes, input_dimension, input_frame,
-       input_names, inverse_transform, materialize_metadata, metadata_path, metadata_tag,
+       in_domain, in_image, input_names, inverse_transform, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,
        offset_to_time, output_names, parallel, pixel_axis_names, pixel_axis_physical_types, pixel_axis_types,
        pixel_axis_units, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,

@@ -24,6 +24,16 @@ Coordinates use each boundary frame's native order. `axes_order[i]` gives the on
 
 `pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`.
 
+Use `in_domain(wcs, pixels...)` when only the validity decision is needed. It returns `true` for finite input coordinates accepted by the WCS domain; the matrix form returns one Boolean per coordinate column. `in_image(wcs, world...)` performs the corresponding world-side test by requiring a successful finite inverse in the input domain:
+
+```julia
+in_domain(wcs, 11.0, 22.0)
+in_image(wcs, pixel_to_world(wcs, 11.0, 22.0))
+mask = in_domain(wcs, pixel_matrix)
+```
+
+`in_image(...; with_bounding_box=false)` tests finite invertibility without enforcing the input domain. Numerical-inverse controls such as `tolerance`, `maxiter`, `initial_guess`, and `max_backtracks` are supported. Nonconvergence returns `false`; invalid solver arguments and ambiguous multi-entry compound domains still raise errors.
+
 ### Bounding boxes and input domains
 
 `BoundingBox` constrains all input axes by default. Use the dimensioned constructor to leave selected axes unconstrained:
@@ -58,6 +68,8 @@ world = pixel_to_world(wcs, pixels)
 ```
 
 Numerical inversion can derive an initial guess from a simple box or a compound box with one selector entry. A multi-entry compound box requires an explicit `initial_guess` because the world coordinate does not generically identify a discontinuous selector branch before solving.
+
+These predicates test the input domain, not an axis-aligned approximation of the output footprint. Output-footprint masking remains coupled to future footprint sampling and celestial longitude/pole handling.
 
 ### Coordinate frames
 

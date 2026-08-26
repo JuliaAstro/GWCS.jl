@@ -59,6 +59,15 @@ function _finish_numerical_inverse(wcs::WCS{N}, solution::StaticVector{N}; with_
     return solution
 end
 
+function _numerical_inverse(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=true, with_bounding_box=true, fill_value=NaN, max_backtracks=12)
+    tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
+    maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
+    max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
+    initial_guess === nothing || isempty(initial_guess) || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected 0"))
+    T = _coordinate_float_type(eltype(world))
+    return _finish_numerical_inverse(wcs, SVector{0,T}(); with_bounding_box, fill_value)
+end
+
 function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=true, with_bounding_box=true, fill_value=NaN, max_backtracks=12) where {N}
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
@@ -75,9 +84,11 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
     best_norm = maximum(abs, best_residual)
     accuracy = SVector{N,T}(ntuple(i -> T(Inf), N))
     iterations = 0
+    last_step_accepted = false
 
     for iteration in 1:maxiter
         iterations = iteration
+        last_step_accepted = false
         residual = residual_function(estimate)
         residual_norm = maximum(abs, residual)
         if residual_norm < best_norm
@@ -110,6 +121,20 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
         end
         accepted || break
         estimate = candidate
+        last_step_accepted = true
+    end
+
+    if last_step_accepted && iterations == maxiter
+        residual = residual_function(estimate)
+        if all(isfinite, residual)
+            jacobian = _transform_jacobian_checked(wcs.forward, estimate)
+            scale = max(one(T), maximum(abs, jacobian))
+            if all(isfinite, jacobian) && abs(det(jacobian)) > eps(T) * scale^N
+                step = jacobian \ residual
+                accuracy = abs.(step)
+                maximum(accuracy) <= tolerance && return _finish_numerical_inverse(wcs, estimate - step; with_bounding_box, fill_value)
+            end
+        end
     end
 
     result = _finish_numerical_inverse(wcs, best_solution; with_bounding_box, fill_value)

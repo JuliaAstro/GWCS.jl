@@ -72,6 +72,10 @@ end
     compound = CompoundBoundingBox(boxes, (3,))
     wcs = WCS(Step(input, IdentityTransform{3}()), Step(output); bounding_box=compound, pixel_shape=(20, 20, 2))
 
+    @test in_domain(wcs, 2.0, 3.0, 1.0)
+    @test !in_domain(wcs, 7.0, 3.0, 1.0)
+    @test !in_domain(wcs, 2.0, 3.0, 3.0)
+    @test !in_domain(wcs, 2.0, NaN, 1.0)
     @test pixel_to_world(wcs, 2.0, 3.0, 1.0) == SVector(2.0, 3.0, 1.0)
     @test all(isnan, pixel_to_world(wcs, 7.0, 3.0, 1.0))
     @test pixel_to_world(wcs, 7.0, 3.0, 1.0; with_bounding_box=false) == SVector(7.0, 3.0, 1.0)
@@ -82,6 +86,8 @@ end
 
     pixels = [2.0 7.0 12.0; 3.0 3.0 12.0; 1.0 1.0 2.0]
     worlds = pixel_to_world(wcs, pixels)
+    @test in_domain(wcs, pixels) == Bool[true, false, true]
+    @test in_image(wcs, pixels) == Bool[true, false, true]
     @test worlds[:, 1] == pixels[:, 1]
     @test all(isnan, worlds[:, 2])
     @test worlds[:, 3] == pixels[:, 3]
@@ -113,12 +119,20 @@ end
     coords = SVector(2.0, 3.0, 1.0)
     pixel_to_world(wcs, coords)
     @test @inferred(pixel_to_world(wcs, coords)) == coords
+    @test @inferred(in_domain(wcs, coords))
+    @test @inferred(in_image(wcs, coords))
     @test allocated_domain(wcs, coords) == 0
+
+    partial_wcs = WCS(Step(input, IdentityTransform{3}()), Step(output); bounding_box=BoundingBox{3}(((0.0, 5.0), (0.0, 5.0)), (1, 2)))
+    @test in_domain(partial_wcs, 2.0, 3.0, 100.0)
+    @test !in_domain(partial_wcs, 2.0, 3.0, Inf)
 
     no_inverse = CallableTransform{3,3}((x, y, slice) -> (x, y, slice))
     numerical = WCS(Step(input, no_inverse), Step(output); bounding_box=compound)
     @test_throws "requires an initial_guess" world_to_pixel(numerical, 2.0, 3.0, 1.0)
     @test world_to_pixel(numerical, 2.0, 3.0, 1.0; initial_guess=(2.0, 3.0, 1.0)) ≈ SVector(2.0, 3.0, 1.0)
+    @test in_image(numerical, 2.0, 3.0, 1.0; initial_guess=(2.0, 3.0, 1.0))
+    @test_throws "requires an initial_guess" in_image(numerical, 2.0, 3.0, 1.0)
 
     input4 = CoordinateFrame{4}(name="input4", axes_names=("x", "y", "detector", "slice"))
     output4 = CoordinateFrame{4}(name="output4")

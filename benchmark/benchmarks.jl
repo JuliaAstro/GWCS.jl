@@ -154,6 +154,7 @@ const ARITHMETIC_PIXEL = SVector(3.0)
 const PIXEL_3D = SVector(1.0, 2.0, 3.0)
 const DOMAIN_INSIDE = SVector(2.0, 3.0, 1.0)
 const DOMAIN_OUTSIDE = SVector(7.0, 3.0, 1.0)
+const DOMAIN_BATCH = [2.0 7.0 12.0; 3.0 3.0 12.0; 1.0 1.0 2.0]
 const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
 const FIXED_WORLD = FIXED_REFERENCE(FIXED_PIXEL)
 const ORDERED_WORLD_3D = GWCS.pixel_to_world(ORDERED_3D_WCS, PIXEL_3D)
@@ -219,6 +220,13 @@ SUITE["domains"]["simple/inside"] = @benchmarkable GWCS.pixel_to_world($SIMPLE_D
 SUITE["domains"]["simple/outside"] = @benchmarkable GWCS.pixel_to_world($SIMPLE_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
 SUITE["domains"]["compound/inside"] = @benchmarkable GWCS.pixel_to_world($COMPOUND_DOMAIN_WCS, $DOMAIN_INSIDE) evals=100
 SUITE["domains"]["compound/outside"] = @benchmarkable GWCS.pixel_to_world($COMPOUND_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
+SUITE["domains"]["mask/simple/inside"] = @benchmarkable GWCS.in_domain($SIMPLE_DOMAIN_WCS, $DOMAIN_INSIDE) evals=100
+SUITE["domains"]["mask/simple/outside"] = @benchmarkable GWCS.in_domain($SIMPLE_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
+SUITE["domains"]["mask/compound/inside"] = @benchmarkable GWCS.in_domain($COMPOUND_DOMAIN_WCS, $DOMAIN_INSIDE) evals=100
+SUITE["domains"]["mask/compound/outside"] = @benchmarkable GWCS.in_domain($COMPOUND_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
+SUITE["domains"]["mask/image/inside"] = @benchmarkable GWCS.in_image($COMPOUND_DOMAIN_WCS, $DOMAIN_INSIDE) evals=100
+SUITE["domains"]["mask/image/outside"] = @benchmarkable GWCS.in_image($COMPOUND_DOMAIN_WCS, $DOMAIN_OUTSIDE) evals=100
+SUITE["domains"]["mask/batch"] = @benchmarkable GWCS.in_domain($COMPOUND_DOMAIN_WCS, $DOMAIN_BATCH) evals=1
 SUITE["domains"]["grid/simple"] = @benchmarkable grid_from_bounding_box($SIMPLE_DOMAIN_BOX; fixed=(3 => 1.0,)) evals=1
 SUITE["domains"]["grid/compound"] = @benchmarkable grid_from_bounding_box($COMPOUND_DOMAIN_BOX; selector=1) evals=1
 
