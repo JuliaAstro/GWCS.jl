@@ -58,9 +58,9 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
         output_dimension(step.transform) == frame_dimension(next_step.frame) || throw(DimensionMismatch("transform from frame $(step.frame.name) has $(output_dimension(step.transform)) outputs but frame $(next_step.frame.name) has $(frame_dimension(next_step.frame)) axes"))
     end
 
-    compiled = ntuple(i -> i == length(steps) ? steps[i] : Step(steps[i].frame, compile_transform(steps[i].transform)), length(steps))
+    compiled = ntuple(i -> i == length(steps) ? steps[i] : Step(steps[i].frame, _compile_transform_checked(steps[i].transform)), length(steps))
     forward = compose(map(step -> step.transform, compiled[1:(end - 1)])...)
-    backward = inverse_transform(forward)
+    backward = _inverse_transform_checked(forward)
     Nin = frame_dimension(first(compiled).frame)
     Nout = frame_dimension(last(compiled).frame)
     bounding_box === nothing || length(bounding_box.intervals) == Nin || throw(DimensionMismatch("bounding box has $(length(bounding_box.intervals)) axes, expected $Nin"))
@@ -90,7 +90,7 @@ function get_transform(wcs::WCS, from_frame, to_frame)
         return compose(map(step -> step.transform, wcs.steps[from_index:(to_index - 1)])...)
     end
 
-    transforms = map(step -> inverse_transform(step.transform), reverse(wcs.steps[to_index:(from_index - 1)]))
+    transforms = map(step -> _inverse_transform_checked(step.transform), reverse(wcs.steps[to_index:(from_index - 1)]))
     any(transform -> transform isa NoInverse, transforms) && return NoInverse()
     return compose(transforms...)
 end

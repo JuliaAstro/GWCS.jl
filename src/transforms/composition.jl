@@ -77,13 +77,13 @@ end
 Base.:|(first::AbstractTransform, second::AbstractTransform) = compose(first, second)
 
 function inverse_transform(transform::ComposedTransform)
-    inverses = map(inverse_transform, reverse(transform.transforms))
+    inverses = map(_inverse_transform_checked, reverse(transform.transforms))
     any(inverse -> inverse isa NoInverse, inverses) && return NoInverse()
     return compose(inverses...)
 end
 
 function compile_transform(transform::ComposedTransform)
-    return compose(map(compile_transform, transform.transforms)...)
+    return compose(map(_compile_transform_checked, transform.transforms)...)
 end
 
 """Independent transforms evaluated over consecutive input slices."""
@@ -161,11 +161,11 @@ end
 Base.:&(first::AbstractTransform, second::AbstractTransform) = parallel(first, second)
 
 function inverse_transform(transform::ParallelTransform)
-    inverses = map(inverse_transform, transform.transforms)
+    inverses = map(_inverse_transform_checked, transform.transforms)
     any(inverse -> inverse isa NoInverse, inverses) && return NoInverse()
     return parallel(inverses...)
 end
 
 function compile_transform(transform::ParallelTransform)
-    return parallel(map(compile_transform, transform.transforms)...)
+    return parallel(map(_compile_transform_checked, transform.transforms)...)
 end

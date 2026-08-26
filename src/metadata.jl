@@ -35,6 +35,12 @@ _unwrap(node::TaggedScalar) = node.value
 _unwrap(node) = node
 _materialize_array(value) = value
 
+"""Unwrap a scalar value retained by a tagged metadata adapter."""
+metadata_value(value) = _unwrap(value)
+
+"""Materialize an inline or lazy metadata array."""
+materialize_metadata(value) = _materialize_array(value)
+
 function _construct_tagged_node(constructor, node)
     if node isa YAML.MappingNode
         return TaggedMapping(node.tag, YAML.construct_mapping(Dict{Any,Any}, constructor, node))
@@ -65,6 +71,11 @@ end
 function _required(node, key, path)
     haskey(node, key) || _metadata_error(path, "missing required property $key")
     return node[key]
+end
+
+"""Return a required mapping property or raise a path-aware metadata error."""
+function required_metadata(node, key, context::TransformParseContext)
+    return _required(node, key, metadata_path(context))
 end
 
 function _tuple_strings(values)
@@ -100,78 +111,89 @@ function _domain_window(node)
     return Tuple(domain), Tuple(window)
 end
 
-function _parse_compose(node, path)
-    values = _required(node, "forward", path)
+function _parse_compose(node, context)
+    values = required_metadata(node, "forward", context)
+    path = metadata_path(context)
     transforms = map(enumerate(values)) do (index, value)
-        parse_transform(value; path="$path/forward/$index")
+        parse_transform(value; path="$path/forward/$index", registry=context.registry)
     end
     return compose(transforms...)
 end
 
-function _parse_concatenate(node, path)
-    values = _required(node, "forward", path)
+function _parse_concatenate(node, context)
+    values = required_metadata(node, "forward", context)
+    path = metadata_path(context)
     transforms = map(enumerate(values)) do (index, value)
-        parse_transform(value; path="$path/forward/$index")
+        parse_transform(value; path="$path/forward/$index", registry=context.registry)
     end
     return parallel(transforms...)
 end
 
-_parse_shift(node, path) = Shift(_unwrap(_required(node, "offset", path)))
-_parse_scale(node, path) = Scale(_unwrap(_required(node, "factor", path)))
+_parse_shift(node, context) = Shift(metadata_value(required_metadata(node, "offset", context)))
+_parse_scale(node, context) = Scale(metadata_value(required_metadata(node, "factor", context)))
 
-function _parse_remap(node, path)
-    mapping = _tuple_ints(_required(node, "mapping", path); zero_based=true)
+function _parse_remap(node, context)
+    mapping = _tuple_ints(required_metadata(node, "mapping", context); zero_based=true)
     n_inputs = Int(get(node, "n_inputs", maximum(mapping)))
     return RemapAxes{n_inputs}(mapping)
 end
 
-function _parse_polynomial(node, path)
-    coefficients = _coefficient_array(_required(node, "coefficients", path))
+function _parse_polynomial(node, context)
+    coefficients = _coefficient_array(required_metadata(node, "coefficients", context))
     domain, window = _domain_window(node)
     ndims(coefficients) == 1 && return Polynomial1D(coefficients; domain, window)
     ndims(coefficients) == 2 && return Polynomial2D(coefficients; domain, window)
-    _metadata_error(path, "only one- and two-dimensional polynomials are supported")
+    _metadata_error(metadata_path(context), "only one- and two-dimensional polynomials are supported")
 end
 
-function _parse_rotation(node, path)
-    rotation_type = String(_unwrap(_required(node, "rotation_type", path)))
-    rotation_type == "cartesian" || _metadata_error(path, "only cartesian rotation sequences are supported")
-    angles = collect(_required(node, "angles", path))
-    axes_order = String(_unwrap(_required(node, "axes_order", path)))
+function _parse_rotation(node, context)
+    rotation_type = String(metadata_value(required_metadata(node, "rotation_type", context)))
+    rotation_type == "cartesian" || _metadata_error(metadata_path(context), "only cartesian rotation sequences are supported")
+    angles = collect(required_metadata(node, "angles", context))
+    axes_order = String(metadata_value(required_metadata(node, "axes_order", context)))
     return Rotation3D(angles, axes_order)
 end
 
-function _parse_spherical_cartesian(node, path)
-    transform_type = String(_unwrap(_required(node, "transform_type", path)))
-    wrap_lon_at = Int(_unwrap(_required(node, "wrap_lon_at", path)))
+function _parse_spherical_cartesian(node, context)
+    transform_type = String(metadata_value(required_metadata(node, "transform_type", context)))
+    wrap_lon_at = Int(metadata_value(required_metadata(node, "wrap_lon_at", context)))
     transform_type == "spherical_to_cartesian" && return SphericalToCartesian(wrap_lon_at)
     transform_type == "cartesian_to_spherical" && return CartesianToSpherical(wrap_lon_at)
-    _metadata_error(path, "unsupported spherical/cartesian transform type $transform_type")
+    _metadata_error(metadata_path(context), "unsupported spherical/cartesian transform type $transform_type")
 end
 
-const _TRANSFORM_PARSERS = Dict{String,Function}(
-    "compose" => _parse_compose,
-    "concatenate" => _parse_concatenate,
-    "shift" => _parse_shift,
-    "scale" => _parse_scale,
-    "remap_axes" => _parse_remap,
-    "polynomial" => _parse_polynomial,
-    "rotate_sequence_3d" => _parse_rotation,
-    "spherical_cartesian" => _parse_spherical_cartesian
-)
-
-function parse_transform(node; path="transform")
-    name = _tag_name(node)
-    parser = get(_TRANSFORM_PARSERS, name, nothing)
-    parser === nothing && _metadata_error(path, "unsupported transform tag $(_tag(node))")
-    transform = parser(node, path)
+function parse_transform(node; path="transform", registry=default_transform_registry())
+    tag, version = _split_metadata_tag(_tag(node), path)
+    registration = _lookup_transform_registration(registry, tag, version, path)
+    context = TransformParseContext(tag, version, String(path), registry)
+    transform = registration.constructor(node, context)
+    transform isa AbstractTransform || _metadata_error(path, "registered constructor for $tag returned $(typeof(transform)), expected AbstractTransform")
     if haskey(node, "inverse")
-        backward = parse_transform(node["inverse"]; path="$path/inverse")
+        backward = parse_transform(node["inverse"]; path="$path/inverse", registry)
         input_dimension(transform) == output_dimension(backward) && output_dimension(transform) == input_dimension(backward) || _metadata_error(path, "explicit inverse dimensions do not match the forward transform")
         transform = WithInverse(transform, backward)
     end
     return transform
 end
+
+function parse_transform(node, context::TransformParseContext; path=metadata_path(context))
+    return parse_transform(node; path, registry=context.registry)
+end
+
+function _register_builtin_transform_parsers!()
+    asdf_transform = "tag:stsci.edu:asdf/transform"
+    register_transform!("$asdf_transform/compose", _parse_compose)
+    register_transform!("$asdf_transform/concatenate", _parse_concatenate)
+    register_transform!("$asdf_transform/shift", _parse_shift)
+    register_transform!("$asdf_transform/scale", _parse_scale)
+    register_transform!("$asdf_transform/remap_axes", _parse_remap)
+    register_transform!("$asdf_transform/polynomial", _parse_polynomial)
+    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation)
+    register_transform!("tag:stsci.edu:gwcs/spherical_cartesian", _parse_spherical_cartesian)
+    return nothing
+end
+
+_register_builtin_transform_parsers!()
 
 function _parse_reference_frame(value)
     value === nothing && return nothing
@@ -194,11 +216,11 @@ function _parse_frame(node, path)
     _metadata_error(path, "unsupported coordinate frame tag $(_tag(node))")
 end
 
-function _parse_step(node, path)
+function _parse_step(node, path, registry)
     _tag_name(node) == "step" || _metadata_error(path, "expected a GWCS step")
     frame = _parse_frame(_required(node, "frame", path), "$path/frame")
     transform_node = get(node, "transform", nothing)
-    return transform_node === nothing ? Step(frame) : Step(frame, parse_transform(transform_node; path="$path/transform"))
+    return transform_node === nothing ? Step(frame) : Step(frame, parse_transform(transform_node; path="$path/transform", registry))
 end
 
 function _parse_bounding_box(node, path)
@@ -213,11 +235,11 @@ function _parse_bounding_box(node, path)
     return BoundingBox(intervals; order)
 end
 
-function parse_wcs(node::AbstractDict)
+function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     _tag_name(node) == "wcs" || throw(ArgumentError("expected a GWCS WCS metadata node"))
     raw_steps = _required(node, "steps", "wcs")
     steps = map(enumerate(raw_steps)) do (index, value)
-        _parse_step(value, "wcs/steps/$index")
+        _parse_step(value, "wcs/steps/$index", registry)
     end
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
@@ -227,4 +249,4 @@ function parse_wcs(node::AbstractDict)
     return WCS(steps...; name, pixel_shape, bounding_box=parsed_box)
 end
 
-parse_wcs(metadata::AbstractString) = parse_wcs(_load_tagged_yaml(metadata))
+parse_wcs(metadata::AbstractString; registry=default_transform_registry()) = parse_wcs(_load_tagged_yaml(metadata); registry)
