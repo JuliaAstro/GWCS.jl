@@ -18,6 +18,7 @@ include("transforms/elementary.jl")
 include("transforms/polynomial.jl")
 include("transforms/geometry.jl")
 include("transforms/composition.jl")
+include("transforms/dependencies.jl")
 include("metadata_registry.jl")
 include("frames.jl")
 include("pipeline.jl")
@@ -35,11 +36,11 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, CallableTransform
        Scale, Shift, SphericalToCartesian, Step, TangentPlaneToNative, WCS,
        WithInverse, TransformParseContext, TransformRegistry, available_frames,
        annotate_transform, compile_transform, compose, default_transform_registry, degree,
-       fix_inputs, frame_dimension, get_transform, has_inverse, input_dimension, input_frame,
+       axis_correlation_matrix, fix_inputs, frame_dimension, get_transform, has_inverse, input_dimension, input_frame,
        input_names, inverse_transform, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,
        output_names, parallel, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
        parse_transform, parse_wcs, register_transform!, required_metadata,
-       transform, transform_jacobian, transform_name, world_n_dim, world_to_pixel
+       transform, transform_dependencies, transform_jacobian, transform_name, world_n_dim, world_to_pixel
 
 end
