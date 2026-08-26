@@ -86,6 +86,22 @@ function compile_transform(transform::ComposedTransform)
     return compose(map(_compile_transform_checked, transform.transforms)...)
 end
 
+@inline _apply_composed_jacobian(::Tuple{}, coords, jacobian) = (coords, jacobian)
+
+@inline function _apply_composed_jacobian(transforms::Tuple, coords, jacobian)
+    transform = first(transforms)
+    local_jacobian = _transform_jacobian_checked(transform, coords)
+    outputs = transform(coords)
+    return _apply_composed_jacobian(Base.tail(transforms), outputs, local_jacobian * jacobian)
+end
+
+function transform_jacobian(transform::ComposedTransform{Nin}, coords::StaticVector{Nin}) where {Nin}
+    T = _evaluation_type(eltype(coords))
+    inputs = SVector{Nin,T}(coords)
+    _, jacobian = _apply_composed_jacobian(transform.transforms, inputs, SMatrix{Nin,Nin,T}(I))
+    return jacobian
+end
+
 """Independent transforms evaluated over consecutive input slices."""
 struct ParallelTransform{Nin,Nout,Ts<:Tuple} <: AbstractTransform{Nin,Nout}
     transforms::Ts
@@ -168,4 +184,38 @@ end
 
 function compile_transform(transform::ParallelTransform)
     return parallel(map(_compile_transform_checked, transform.transforms)...)
+end
+
+@inline _parallel_jacobians(::Tuple{}, coords, input_offset) = ()
+
+@inline function _parallel_jacobians(transforms::Tuple, coords, input_offset)
+    transform = first(transforms)
+    Nin = input_dimension(transform)
+    inputs = SVector{Nin}(ntuple(i -> coords[input_offset + i], Nin))
+    jacobian = _transform_jacobian_checked(transform, inputs)
+    return (jacobian, _parallel_jacobians(Base.tail(transforms), coords, input_offset + Nin)...)
+end
+
+@inline _parallel_jacobian_entry(::Tuple{}, row, column, input_offset, output_offset, ::Type{T}) where {T} = zero(T)
+
+@inline function _parallel_jacobian_entry(jacobians::Tuple, row, column, input_offset, output_offset, ::Type{T}) where {T}
+    jacobian = first(jacobians)
+    Nout, Nin = size(jacobian)
+    if output_offset < row <= output_offset + Nout && input_offset < column <= input_offset + Nin
+        return T(jacobian[row - output_offset, column - input_offset])
+    end
+    return _parallel_jacobian_entry(Base.tail(jacobians), row, column, input_offset + Nin, output_offset + Nout, T)
+end
+
+function transform_jacobian(transform::ParallelTransform{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
+    Tcoords = _evaluation_type(eltype(coords))
+    inputs = SVector{Nin,Tcoords}(coords)
+    jacobians = _parallel_jacobians(transform.transforms, inputs, 0)
+    T = promote_type(map(eltype, jacobians)...)
+    values = ntuple(Val(Nin * Nout)) do index
+        row = mod1(index, Nout)
+        column = div(index - 1, Nout) + 1
+        _parallel_jacobian_entry(jacobians, row, column, 0, 0, T)
+    end
+    return SMatrix{Nout,Nin,T}(values)
 end

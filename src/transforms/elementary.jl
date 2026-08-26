@@ -3,6 +3,7 @@ struct IdentityTransform{N} <: AbstractTransform{N,N} end
 
 @inline (::IdentityTransform{N})(coords::StaticVector{N}) where {N} = coords
 inverse_transform(transform::IdentityTransform) = transform
+transform_jacobian(::IdentityTransform{N}, coords::StaticVector{N}) where {N} = SMatrix{N,N,_evaluation_type(eltype(coords))}(I)
 
 """Add a constant offset to one coordinate."""
 struct Shift{T<:Real} <: AbstractTransform{1,1}
@@ -16,6 +17,7 @@ end
 end
 
 inverse_transform(transform::Shift) = Shift(-transform.offset)
+transform_jacobian(::Shift, coords::StaticVector{1}) = SMatrix{1,1}(one(_evaluation_type(eltype(coords))))
 
 """Multiply one coordinate by a constant factor."""
 struct Scale{T<:Real} <: AbstractTransform{1,1}
@@ -31,6 +33,11 @@ end
 function inverse_transform(transform::Scale)
     iszero(transform.factor) && return NoInverse()
     return Scale(inv(transform.factor))
+end
+
+function transform_jacobian(transform::Scale, coords::StaticVector{1})
+    T = _evaluation_type(eltype(coords))
+    return SMatrix{1,1}(T(transform.factor))
 end
 
 """Static affine transform `matrix * coords + offset`."""
@@ -68,6 +75,11 @@ function inverse_transform(transform::AffineTransform{N,N}) where {N}
 end
 
 inverse_transform(::AffineTransform) = NoInverse()
+
+function transform_jacobian(transform::AffineTransform{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
+    T = _evaluation_type(eltype(coords))
+    return SMatrix{Nout,Nin,T}(transform.matrix)
+end
 
 """
     RemapAxes{Nin}(mapping)
