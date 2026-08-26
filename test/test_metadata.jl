@@ -14,6 +14,21 @@
     @test world_to_pixel(wcs, world) ≈ SVector(11.0, 22.0) atol=1e-10
     @test all(isnan, pixel_to_world(wcs, 21.0, 22.0))
 
+    permuted_metadata = replace(metadata, "axes_order: [0, 1]" => "axes_order: [1, 0]"; count=1)
+    permuted_wcs = parse_wcs(permuted_metadata)
+    @test permuted_wcs.pixel_shape == (30, 20)
+    @test permuted_wcs.bounding_box.intervals == ((-0.5, 29.5), (-0.5, 19.5))
+    permuted_world = pixel_to_world(permuted_wcs, 22.0, 11.0)
+    @test permuted_world ≈ world atol=1e-12
+    @test world_to_pixel(permuted_wcs, permuted_world) ≈ SVector(22.0, 11.0) atol=1e-10
+    @test all(isnan, pixel_to_world(permuted_wcs, 11.0, 22.0))
+    permuted_slice = fix_inputs(permuted_wcs, "x" => 22.0)
+    @test permuted_slice.pixel_shape == (20,)
+    @test permuted_slice.bounding_box.intervals == ((-0.5, 19.5),)
+    @test pixel_to_world(permuted_slice, 11.0) ≈ world atol=1e-12
+    invalid_order = replace(metadata, "axes_order: [0, 1]" => "axes_order: [0, 2]"; count=1)
+    @test_throws "axes_order must be a permutation of 1:2" parse_wcs(invalid_order)
+
     bad = replace(metadata, "transform/shift-1.4.0" => "transform/not_supported-1.4.0"; count=1)
     @test_throws "unsupported transform tag" parse_wcs(bad)
 

@@ -15,6 +15,36 @@ transform_name(::AbstractTransform) = nothing
 input_names(::AbstractTransform) = nothing
 output_names(::AbstractTransform) = nothing
 
+function _dense_dependencies(::Val{Nout}, ::Val{Nin}) where {Nin,Nout}
+    return SMatrix{Nout,Nin,Bool}(ntuple(_ -> true, Nin * Nout))
+end
+
+"""
+    transform_dependencies(transform)
+
+Return a boolean output-by-input matrix describing structural coordinate
+dependencies. External transform packages may specialize this method; the
+default conservatively assumes every output depends on every input.
+"""
+transform_dependencies(::AbstractTransform{Nin,Nout}) where {Nin,Nout} = _dense_dependencies(Val(Nout), Val(Nin))
+
+function _dependency_matrix(dependencies, ::Val{Nout}, ::Val{Nin}, context) where {Nin,Nout}
+    dependencies isa AbstractMatrix || throw(ArgumentError("$context returned $(typeof(dependencies)), expected an AbstractMatrix"))
+    size(dependencies) == (Nout, Nin) || throw(DimensionMismatch("$context has size $(size(dependencies)), expected ($Nout, $Nin)"))
+    try
+        return SMatrix{Nout,Nin,Bool}(dependencies)
+    catch error
+        error isa InexactError || error isa MethodError || rethrow()
+        throw(ArgumentError("$context entries must be boolean-convertible"))
+    end
+end
+
+function _transform_dependencies_checked(transform::AbstractTransform{Nin,Nout}) where {Nin,Nout}
+    return _dependency_matrix(transform_dependencies(transform), Val(Nout), Val(Nin), "transform_dependencies(::$(typeof(transform)))")
+end
+
+axis_correlation_matrix(transform::AbstractTransform) = _transform_dependencies_checked(transform)
+
 """
     inverse_transform(transform)
 

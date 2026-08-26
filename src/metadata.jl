@@ -299,9 +299,18 @@ function _parse_frame(node, path)
     physical_types = _tuple_strings(get(node, "axis_physical_types", ntuple(i -> "custom:$(axes_names[i])", N)))
     units = _tuple_strings(get(node, "unit", ntuple(i -> "", N)))
     reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
-    name == "frame2d" && N == 2 && return Frame2D(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
-    name == "celestial_frame" && return CelestialFrame{N}(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
-    _metadata_error(path, "unsupported coordinate frame tag $(_tag(node))")
+    (name == "frame2d" && N == 2 || name == "celestial_frame") || _metadata_error(path, "unsupported coordinate frame tag $(_tag(node))")
+    try
+        frame = if name == "frame2d"
+            Frame2D(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
+        else
+            CelestialFrame{N}(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
+        end
+        return _validate_frame_axes_order(frame)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
 end
 
 function _parse_step(node, path, registry)
@@ -323,6 +332,11 @@ function _parse_bounding_box(node, path)
     return BoundingBox(intervals; order)
 end
 
+function _metadata_native_order(values, frame::AbstractCoordinateFrame{N}, path) where {N}
+    length(values) == N || _metadata_error(path, "metadata value has length $(length(values)), expected $N")
+    return ntuple(index -> values[frame.axes_order[index]], N)
+end
+
 function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     _tag_name(node) == "wcs" || throw(ArgumentError("expected a GWCS WCS metadata node"))
     raw_steps = _required(node, "steps", "wcs")
@@ -332,8 +346,11 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
     parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, "wcs/steps/1/transform/bounding_box")
+    input = first(steps).frame
+    parsed_box === nothing || (parsed_box = BoundingBox(_metadata_native_order(parsed_box.intervals, input, "wcs/steps/1/transform/bounding_box")))
     name = String(_unwrap(get(node, "name", "")))
     pixel_shape = get(node, "pixel_shape", nothing)
+    pixel_shape === nothing || (pixel_shape = _metadata_native_order(Tuple(Int(_unwrap(value)) for value in pixel_shape), input, "wcs/pixel_shape"))
     return WCS(steps...; name, pixel_shape, bounding_box=parsed_box)
 end
 

@@ -24,4 +24,14 @@
 
     non_square = WCS(Step(CoordinateFrame{2}(name="input"), Polynomial2D([0.0 1.0; 1.0 0.0])), Step(CoordinateFrame{1}(name="output")))
     @test_throws "numerical inversion requires equal pixel and world dimensions" world_to_pixel(non_square, 1.0)
+
+    permuted_pixels = CoordinateFrame{3}(name="permuted_pixels", axes_order=(2, 3, 1))
+    permuted_world = CoordinateFrame{3}(name="permuted_world", axes_order=(3, 1, 2))
+    permuted_distortion = parallel(Polynomial1D([0.0, 1.0, 1e-3]), Polynomial1D([0.0, 1.0, -5e-4]), Polynomial1D([0.0, 1.0, 2e-4]))
+    permuted_wcs = WCS(Step(permuted_pixels, permuted_distortion), Step(permuted_world);
+        bounding_box=BoundingBox(((-10.0, 10.0), (-10.0, 10.0), (-10.0, 10.0))))
+    permuted_pixel = SVector(2.5, -3.5, 1.25)
+    permuted_output = pixel_to_world(permuted_wcs, permuted_pixel)
+    @test permuted_wcs.backward isa NoInverse
+    @test world_to_pixel(permuted_wcs, permuted_output; tolerance=1e-10, quiet=false) ≈ permuted_pixel atol=1e-9
 end

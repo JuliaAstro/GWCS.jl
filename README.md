@@ -20,7 +20,7 @@ pixel_to_world(wcs, 11.0, 22.0)
 world_to_pixel(wcs, 1.12, 2.38)
 ```
 
-Coordinates are pipeline-native. GWCS.jl does not apply an implicit zero- or one-based pixel offset. A FITS-equivalent pipeline must encode the FITS reference-pixel convention explicitly.
+Coordinates use each boundary frame's native order. `axes_order[i]` gives the one-based transform position of native frame axis `i`; GWCS compiles static boundary remaps when this order is not the identity. Transform kernels and stored pipeline steps remain in transform order. GWCS.jl does not apply an implicit zero- or one-based pixel offset, so a FITS-equivalent pipeline must encode the FITS reference-pixel convention explicitly.
 
 `pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`.
 
@@ -47,11 +47,12 @@ forward(x, y) = (x + y, x - y)
 backward(u, v) = ((u + v) / 2, (u - v) / 2)
 jacobian(x, y) = SMatrix{2,2}(1, 1, 1, -1)
 
-transform = CallableTransform{2,2}(forward; inverse=backward, jacobian)
+dependencies = SMatrix{2,2,Bool}(true, true, true, true)
+transform = CallableTransform{2,2}(forward; inverse=backward, jacobian, dependencies)
 wcs = WCS(Step(detector, transform), Step(world))
 ```
 
-A one-output function may return a scalar. Multi-output functions return a tuple or vector of the declared length, and Jacobians return an output-by-input matrix. The callable, inverse, and Jacobian are stored in concrete type parameters, so named functions and type-stable closures can remain inferred and allocation-free. Supplied Jacobians are propagated through composed and parallel transforms and used by numerical inversion; otherwise GWCS.jl uses ForwardDiff.
+A one-output function may return a scalar. Multi-output functions return a tuple or vector of the declared length, and Jacobians return an output-by-input matrix. Optional `dependencies` and `inverse_dependencies` matrices declare structural axis correlations; omitted declarations conservatively assume every output depends on every input. The callable, inverse, Jacobian, and dependency declarations are stored in concrete type parameters, so named functions and type-stable closures can remain inferred and allocation-free. Supplied Jacobians are propagated through composed and parallel transforms and used by numerical inversion; otherwise GWCS.jl uses ForwardDiff.
 
 Use `CallableTransform` for local functions, prototypes, and closures over calibration values. Define a dedicated `AbstractTransform` subtype when a transform needs stable metadata tags, serialization, specialized compilation, parameter introspection, or a reusable package API. Arbitrary functions are not automatically serializable, and allocations or type instability inside user callables remain visible during evaluation.
 
@@ -88,11 +89,22 @@ pixel_to_world(constant_wcs)
 
 `ConstantTransform(value; n_inputs=0)` inserts a constant output axis without consuming an input. Constants with ignored inputs have no inverse. A zero-input constant has a checked inverse that accepts only its constant output and returns an empty coordinate.
 
+### Axis dependencies
+
+`axis_correlation_matrix(wcs)` returns a static boolean matrix with world axes on rows and pixel axes on columns, both in their frames' native order. `axis_correlation_matrix(transform)` reports the same output-by-input relationship for a transform:
+
+```julia
+axis_correlation_matrix(wcs)
+transform_dependencies(transform)
+```
+
+Composition uses boolean dependency propagation, parallel transforms produce block-diagonal correlations, and fixed inputs remove the corresponding columns. Unknown external transforms use a conservative dense matrix. External transform packages may specialize `transform_dependencies`; a false entry must guarantee independence for every valid coordinate and parameter value rather than describe a Jacobian that happens to be zero at one point.
+
 ## Metadata
 
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports the Roman L2 subset used by the validation fixtures:
 
-- GWCS WCS, step, bounding-box, 2D frame, celestial frame, ICRS, and unit tags
+- GWCS WCS, step, bounding-box, 2D frame, celestial frame, ICRS, unit, and nonidentity frame-axis-order metadata
 - compose, concatenate, shift, scale, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
 - 3D rotation sequences and spherical/cartesian conversions
@@ -119,7 +131,7 @@ module ExampleTransforms
 
 using GWCS
 using StaticArrays
-import GWCS: compile_transform, inverse_transform, transform_jacobian
+import GWCS: compile_transform, inverse_transform, transform_dependencies, transform_jacobian
 
 struct OffsetTransform{T<:Real} <: AbstractTransform{1,1}
     offset::T
@@ -128,6 +140,7 @@ end
 @inline (transform::OffsetTransform)(coords::StaticVector{1}) = SVector(coords[1] + transform.offset)
 inverse_transform(transform::OffsetTransform) = OffsetTransform(-transform.offset)
 transform_jacobian(transform::OffsetTransform, coords::StaticVector{1}) = SMatrix{1,1}(one(eltype(coords)))
+transform_dependencies(::OffsetTransform) = SMatrix{1,1,Bool}(true)
 compile_transform(transform::OffsetTransform) = Shift(transform.offset)
 
 function parse_offset(node, context)

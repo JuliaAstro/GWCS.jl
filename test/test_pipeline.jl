@@ -50,3 +50,52 @@
     @test world_to_pixel(constant_wcs, pixel_to_world(constant_wcs)) == SVector{0,Float64}()
     @test eltype(world_to_pixel(constant_wcs, pixel_to_world(constant_wcs))) === Float64
 end
+
+@testset "Frame axis ordering" begin
+    input = CoordinateFrame{3}(name="input", axes_names=("a", "b", "c"), axes_order=(2, 3, 1))
+    middle = CoordinateFrame{3}(name="middle", axes_names=("p", "q", "r"), axes_order=(3, 1, 2))
+    output = CoordinateFrame{3}(name="output", axes_names=("u", "v", "w"), axes_order=(2, 1, 3))
+    first_transform = AffineTransform(@SMatrix [10.0 0.0 0.0; 0.0 100.0 0.0; 0.0 0.0 1000.0])
+    wcs = WCS(Step(input, first_transform), Step(middle, IdentityTransform{3}()), Step(output);
+        pixel_shape=(10, 20, 30), bounding_box=BoundingBox(((0.0, 9.0), (0.0, 19.0), (0.0, 29.0))))
+
+    pixels = SVector(1.0, 2.0, 3.0)
+    intermediate = SVector(2000.0, 30.0, 100.0)
+    world = SVector(100.0, 30.0, 2000.0)
+    @test pixel_to_world(wcs, pixels) == world
+    @test world_to_pixel(wcs, world) == pixels
+    @test transform(wcs, "input", "middle", pixels...) == intermediate
+    @test transform(wcs, "middle", "output", intermediate...) == world
+    @test transform(wcs, "output", "input", world...) == pixels
+    @test axis_correlation_matrix(wcs) == @SMatrix [true false false; false false true; false true false]
+
+    batch = [1.0 4.0; 2.0 5.0; 3.0 6.0]
+    world_batch = pixel_to_world(wcs, batch)
+    @test world_batch == [100.0 400.0; 30.0 60.0; 2000.0 5000.0]
+    @test world_to_pixel(wcs, world_batch) == batch
+
+    sliced = fix_inputs(wcs, "a" => 1.0)
+    @test input_frame(sliced).axes_names == ("b", "c")
+    @test input_frame(sliced).axes_order == (2, 1)
+    @test sliced.pixel_shape == (20, 30)
+    @test sliced.bounding_box.intervals == ((0.0, 19.0), (0.0, 29.0))
+    @test pixel_to_world(sliced, 2.0, 3.0) == world
+    @test world_to_pixel(sliced, world) == SVector(2.0, 3.0)
+    @test_throws "lies outside the WCS bounding box" fix_inputs(wcs, "a" => 10.0)
+
+    allocated_forward(wcs, coords) = @allocated pixel_to_world(wcs, coords)
+    allocated_backward(wcs, coords) = @allocated world_to_pixel(wcs, coords)
+    pixel_to_world(wcs, pixels)
+    world_to_pixel(wcs, world)
+    @test @inferred(pixel_to_world(wcs, pixels)) == world
+    @test @inferred(world_to_pixel(wcs, world)) == pixels
+    @test allocated_forward(wcs, pixels) == 0
+    @test allocated_backward(wcs, world) == 0
+
+    @test_throws DimensionMismatch CoordinateFrame{2}(name="bad", axes_order=(1,))
+    @test_throws "entries must be integers" CoordinateFrame{2}(name="bad", axes_order=(true, 2))
+    @test_throws "entries must be positive" CoordinateFrame{2}(name="bad", axes_order=(0, 1))
+    @test_throws "entries must be unique" CoordinateFrame{2}(name="bad", axes_order=(1, 1))
+    incomplete = CoordinateFrame{2}(name="incomplete", axes_order=(1, 3))
+    @test_throws "must be a permutation of 1:2" WCS(Step(incomplete, IdentityTransform{2}()), Step(CoordinateFrame{2}(name="valid")))
+end

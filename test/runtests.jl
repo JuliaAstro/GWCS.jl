@@ -9,6 +9,7 @@ using Test
     include("test_annotations.jl")
     include("test_fixed_inputs.jl")
     include("test_composition.jl")
+    include("test_dependencies.jl")
     include("test_pipeline.jl")
     include("test_api.jl")
     include("test_numerical_inverse.jl")

@@ -130,11 +130,20 @@ const CALLABLE_INVERSE = inverse_transform(CALLABLE_REFERENCE)
 const FIXED_REFERENCE = fix_inputs(NATIVE_CALLABLE_REFERENCE, 2 => 300.0)
 const FIXED_INVERSE = inverse_transform(FIXED_REFERENCE)
 const CONSTANT_AXIS = parallel(IdentityTransform{2}(), ConstantTransform(42.0))
+const ORDERED_3D_FRAME = CoordinateFrame{3}(name="ordered")
+const PERMUTED_INPUT_FRAME = CoordinateFrame{3}(name="permuted_input", axes_order=(2, 3, 1))
+const PERMUTED_OUTPUT_FRAME = CoordinateFrame{3}(name="permuted_output", axes_order=(3, 1, 2))
+const AXIS_ORDER_TRANSFORM = AffineTransform(SMatrix{3,3}(1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0))
+const ORDERED_3D_WCS = GWCS.WCS(Step(ORDERED_3D_FRAME, AXIS_ORDER_TRANSFORM), Step(CoordinateFrame{3}(name="ordered_output")))
+const PERMUTED_3D_WCS = GWCS.WCS(Step(PERMUTED_INPUT_FRAME, AXIS_ORDER_TRANSFORM), Step(PERMUTED_OUTPUT_FRAME))
 
 const PIXEL = SVector(400.0, 300.0)
 const FIXED_PIXEL = SVector(400.0)
+const PIXEL_3D = SVector(1.0, 2.0, 3.0)
 const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
 const FIXED_WORLD = FIXED_REFERENCE(FIXED_PIXEL)
+const ORDERED_WORLD_3D = GWCS.pixel_to_world(ORDERED_3D_WCS, PIXEL_3D)
+const PERMUTED_WORLD_3D = GWCS.pixel_to_world(PERMUTED_3D_WCS, PIXEL_3D)
 const FITS_LINEAR_WORLD = FITSWCS.pixel_to_world(FITS_LINEAR, PIXEL)
 const FITS_TAN_WORLD = FITSWCS.pixel_to_world(FITS_TAN, PIXEL)
 const FITS_SIP_WORLD = FITSWCS.pixel_to_world(FITS_SIP, PIXEL)
@@ -151,7 +160,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "fixed_inputs")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "fixed_inputs", "axis_order")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -182,6 +191,10 @@ SUITE["fixed_inputs"]["forward/structured"] = @benchmarkable $FIXED_REFERENCE($F
 SUITE["fixed_inputs"]["forward/closure"] = @benchmarkable $NATIVE_CALLABLE_REFERENCE(SVector($FIXED_PIXEL[1], 300.0)) evals=100
 SUITE["fixed_inputs"]["inverse/checked"] = @benchmarkable $FIXED_INVERSE($FIXED_WORLD) evals=100
 SUITE["fixed_inputs"]["constant_axis"] = @benchmarkable $CONSTANT_AXIS($PIXEL) evals=100
+SUITE["axis_order"]["forward/identity"] = @benchmarkable GWCS.pixel_to_world($ORDERED_3D_WCS, $PIXEL_3D) evals=100
+SUITE["axis_order"]["forward/permuted"] = @benchmarkable GWCS.pixel_to_world($PERMUTED_3D_WCS, $PIXEL_3D) evals=100
+SUITE["axis_order"]["inverse/identity"] = @benchmarkable GWCS.world_to_pixel($ORDERED_3D_WCS, $ORDERED_WORLD_3D) evals=100
+SUITE["axis_order"]["inverse/permuted"] = @benchmarkable GWCS.world_to_pixel($PERMUTED_3D_WCS, $PERMUTED_WORLD_3D) evals=100
 
 if abspath(PROGRAM_FILE) == @__FILE__
     for name in keys(SUITE)
