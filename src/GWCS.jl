@@ -26,7 +26,7 @@ include("api.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 
-export AbstractTransform, AffineTransform, AnnotatedTransform, CallableTransform, CartesianToSpherical,
+export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, CallableTransform, CartesianToSpherical,
        AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompositeFrame,
        CelestialToNative,
        ComposedTransform, ConstantTransform, CoordinateFrame, FixedInputsTransform,
@@ -37,7 +37,7 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, CallableTransform
        Scale, Shift, SpectralFrame, SphericalToCartesian, Step, StokesFrame, TangentPlaneToNative, TemporalFrame, WCS,
        WithInverse, TransformParseContext, TransformRegistry, available_frames,
        annotate_transform, axis_names, axis_physical_types, axis_types, axis_units,
-       compile_transform, compose, default_transform_registry, degree,
+       compile_transform, compose, default_transform_registry, degree, elementwise,
        axis_correlation_matrix, fix_inputs, frame_dimension, get_transform, has_inverse, input_dimension, input_frame,
        input_names, inverse_transform, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,

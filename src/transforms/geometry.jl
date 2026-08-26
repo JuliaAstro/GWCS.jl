@@ -127,7 +127,7 @@ end
     z = sin_delta * sin_delta_p + cos_delta * cos_delta_p * cos_delta_alpha
     theta = abs(z) > T(0.99) ? copysign(acos(clamp(hypot(x, y), zero(T), one(T))), z) : asin(clamp(z, -one(T), one(T)))
     phi = mod(phi_p + atan(y, x) + T(pi), T(2pi)) - T(pi)
-    return SVector(rad2deg(phi), rad2deg(theta))
+    return SVector(mod(rad2deg(phi), T(360)), rad2deg(theta))
 end
 
 inverse_transform(transform::CelestialToNative) = NativeToCelestial(transform.alpha_p, transform.delta_p, transform.phi_p)

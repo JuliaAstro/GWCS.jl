@@ -1,0 +1,49 @@
+arithmetic:
+  add: !<tag:stsci.edu:asdf/transform/add-1.4.0>
+    forward:
+      - !<tag:stsci.edu:asdf/transform/shift-1.4.0>
+        inputs: [x]
+        offset: 1.0
+        outputs: [y]
+      - !<tag:stsci.edu:asdf/transform/scale-1.4.0>
+        factor: 2.0
+        inputs: [x]
+        outputs: [y]
+    inputs: [x]
+    outputs: [y]
+  divide: !<tag:stsci.edu:asdf/transform/divide-1.4.0>
+    forward:
+      - !<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: 1.0}
+      - !<tag:stsci.edu:asdf/transform/scale-1.4.0> {factor: 2.0}
+    inputs: [x]
+    outputs: [y]
+  multiply: !<tag:stsci.edu:asdf/transform/multiply-1.4.0>
+    forward:
+      - !<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: 1.0}
+      - !<tag:stsci.edu:asdf/transform/scale-1.4.0> {factor: 2.0}
+    inputs: [x]
+    outputs: [y]
+  nested: !<tag:stsci.edu:asdf/transform/multiply-1.4.0>
+    forward:
+      - !<tag:stsci.edu:asdf/transform/add-1.4.0>
+        forward:
+          - !<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: 1.0}
+          - !<tag:stsci.edu:asdf/transform/scale-1.4.0> {factor: 2.0}
+      - !<tag:stsci.edu:asdf/transform/subtract-1.4.0>
+        forward:
+          - !<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: 1.0}
+          - !<tag:stsci.edu:asdf/transform/scale-1.4.0> {factor: 2.0}
+    inputs: [x]
+    outputs: [y]
+  power: !<tag:stsci.edu:asdf/transform/power-1.4.0>
+    forward:
+      - !<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: 1.0}
+      - !<tag:stsci.edu:asdf/transform/scale-1.4.0> {factor: 2.0}
+    inputs: [x]
+    outputs: [y]
+  subtract: !<tag:stsci.edu:asdf/transform/subtract-1.4.0>
+    forward:
+      - !<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: 1.0}
+      - !<tag:stsci.edu:asdf/transform/scale-1.4.0> {factor: 2.0}
+    inputs: [x]
+    outputs: [y]

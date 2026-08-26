@@ -43,6 +43,15 @@ Constituent `axes_order` values are global transform positions and must form a c
 
 The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and TAN/native/celestial projection transforms. `compose` and `parallel` are the function forms of `|` and `&`.
 
+Compatible transforms can also be combined elementwise with `+`, `-`, `*`, `/`, and `^`. Both operands receive the same coordinates and must have matching input and output dimensions:
+
+```julia
+correction = Shift(1.0) * Scale(2.0)
+correction(SVector(3.0)) # [24.0]
+```
+
+`elementwise(operator, left, right)` is the function form. Arithmetic transforms recursively compile their operands, propagate axis dependencies and Jacobians, and remain allocation-free for scalar static-vector evaluation. They do not infer an analytical inverse because combining invertible operands does not generally produce a uniquely invertible function; square WCS pipelines can use numerical inversion or an explicit `WithInverse`.
+
 Analytical and metadata-provided inverses are compiled into the WCS. Square pipelines without an inverse use a damped Newton solver with ForwardDiff Jacobians:
 
 ```julia
@@ -121,9 +130,9 @@ Composition uses boolean dependency propagation, parallel transforms produce blo
 
 - GWCS WCS, step, bounding-box, generic, 2D, celestial, spectral, temporal, Stokes, and composite frames
 - ICRS, structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
-- compose, concatenate, shift, scale, axis remapping, and polynomial transforms
+- compose, concatenate, elementwise arithmetic, identity, shift, scale, affine, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
-- 3D rotation sequences and spherical/cartesian conversions
+- TAN/gnomonic projections, native/celestial rotations, Cartesian and spherical rotation sequences, and spherical/cartesian conversions
 - serialized explicit inverses
 
 ASDF.jl is an optional dependency. Loading ASDF activates the package extension that adapts tagged nodes and lazy coefficient arrays:
@@ -136,7 +145,7 @@ file = ASDF.load("roman_cal.asdf"; extensions=true, validate_checksum=false)
 wcs = parse_wcs(file["roman"]["meta"]["wcs"])
 ```
 
-Unknown tags, unsupported major schema versions, malformed dimensions, and missing required properties raise explicit errors. The current parser is intentionally limited to the observed Roman transform subset rather than the full Astropy modeling schema.
+Unknown tags, unsupported schema versions, malformed dimensions, and missing required properties raise path-aware errors. Built-in parsers register only the schema-version intervals verified against the corresponding ASDF schemas instead of assuming that every future `1.x` version is compatible. Unit-bearing transform parameters require a future units extension and are not silently stripped in the numeric core.
 
 ### Registering external transforms
 
@@ -192,7 +201,10 @@ julia --project=benchmark benchmark/benchmarks.jl
 External Roman validation requires the local ASDF.jl checkout configured in `validation/Project.toml`, Python GWCS in `~/.venvs/311_main`, and one or more Roman L2 ASDF files:
 
 ```sh
+julia --project=validation validation/validate_asdf_parsers.jl
+julia --project=validation validation/compare_asdf_parsers.jl
+julia --project=validation validation/compare_arithmetic.jl
 julia --project=validation validation/compare_roman.jl FILE...
 ```
 
-The validation compares four detector positions per file in both directions against Python GWCS. The current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
+The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, and arithmetic compound results against Astropy. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.

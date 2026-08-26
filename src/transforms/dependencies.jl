@@ -105,6 +105,12 @@ function transform_dependencies(transform::ParallelTransform{Nin,Nout}) where {N
     return SMatrix{Nout,Nin,Bool}(values)
 end
 
+function transform_dependencies(transform::ArithmeticTransform{Nin,Nout}) where {Nin,Nout}
+    left = _transform_dependencies_checked(transform.left)
+    right = _transform_dependencies_checked(transform.right)
+    return SMatrix{Nout,Nin,Bool}(ntuple(index -> left[index] || right[index], Nin * Nout))
+end
+
 function transform_dependencies(transform::CallableTransform{Nin,Nout}) where {Nin,Nout}
     transform.dependencies === nothing && return _dense_dependencies(Val(Nout), Val(Nin))
     return transform.dependencies
