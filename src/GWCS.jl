@@ -1,0 +1,38 @@
+"""
+    GWCS
+
+Generalized world coordinate systems with composable, compiled transformations.
+"""
+module GWCS
+
+using ForwardDiff
+using LinearAlgebra: I, det, inv
+using StaticArrays: MMatrix, MVector, SMatrix, SVector, StaticMatrix, StaticVector
+using YAML
+
+include("transforms/core.jl")
+include("transforms/elementary.jl")
+include("transforms/polynomial.jl")
+include("transforms/geometry.jl")
+include("transforms/composition.jl")
+include("frames.jl")
+include("pipeline.jl")
+include("api.jl")
+include("numerical_inverse.jl")
+include("metadata.jl")
+
+export AbstractTransform, AffineTransform, CartesianToSpherical,
+       AbstractCoordinateFrame, BoundingBox, CelestialFrame,
+       CelestialToNative,
+       ComposedTransform, CoordinateFrame, Frame2D, IdentityTransform,
+       NativeToCelestial, NativeToTangentPlane, NoInverse,
+       ParallelTransform, Polynomial1D, Polynomial2D, RemapAxes, Rotation3D,
+       Scale, Shift, SphericalToCartesian, Step, TangentPlaneToNative, WCS,
+       WithInverse, available_frames, compile_transform, compose, degree,
+       frame_dimension, get_transform, has_inverse, input_dimension,
+       input_frame, inverse_transform, output_dimension, output_frame,
+       parallel, pixel_n_dim, pixel_to_world, numerical_inverse,
+       NoConvergence, parse_transform, parse_wcs, transform, world_n_dim,
+       world_to_pixel
+
+end
