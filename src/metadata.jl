@@ -285,28 +285,118 @@ _register_builtin_transform_parsers!()
 
 function _parse_reference_frame(value)
     value === nothing && return nothing
-    value isa AbstractDict || return _unwrap(value)
-    _tag_name(value) == "icrs" && return :ICRS
-    return _tag(value)
+    try
+        _tag(value)
+    catch error
+        error isa ArgumentError || rethrow()
+        return _unwrap(value)
+    end
+    value isa AbstractDict && _tag_name(value) == "icrs" && return :ICRS
+    return value
 end
 
-function _parse_frame(node, path)
-    name = _tag_name(node)
+_metadata_sequence(value) = value isa AbstractVector || value isa Tuple ? value : (value,)
+
+function _metadata_frame_strings(node, key, default)
+    haskey(node, key) || return default
+    return Tuple(begin
+        unwrapped = _unwrap(value)
+        unwrapped === nothing ? "" : String(unwrapped)
+    end for value in _metadata_sequence(node[key]))
+end
+
+function _frame_order(node, count)
+    values = haskey(node, "axes_order") ? _metadata_sequence(node["axes_order"]) : 0:(count - 1)
+    return _tuple_ints(values; zero_based=true)
+end
+
+function _frame_axis_types(node, count)
+    values = haskey(node, "axes_type") ? _metadata_sequence(node["axes_type"]) : ntuple(_ -> "UNDEFINED", count)
+    return Tuple(_axis_type(String(_unwrap(value))) for value in values)
+end
+
+function _temporal_reference(node)
+    node === nothing && return nothing, nothing, "", "", nothing
+    reference = _parse_reference_frame(node)
+    node isa AbstractDict || return reference, _unwrap(node), "", "", nothing
+    epoch = haskey(node, "value") ? _unwrap(node["value"]) : nothing
+    scale = haskey(node, "scale") ? String(_unwrap(node["scale"])) : ""
+    format = haskey(node, "format") ? String(_unwrap(node["format"])) : ""
+    location = get(node, "location", nothing)
+    return reference, epoch, scale, format, location
+end
+
+function _parse_composite_frame(node, path)
+    length(node) == 2 || _metadata_error(path, "composite frame must contain only name and frames")
     frame_name = String(_unwrap(_required(node, "name", path)))
-    axes_names = _tuple_strings(_required(node, "axes_names", path))
-    N = length(axes_names)
-    axes_order = _tuple_ints(get(node, "axes_order", 0:(N - 1)); zero_based=true)
-    physical_types = _tuple_strings(get(node, "axis_physical_types", ntuple(i -> "custom:$(axes_names[i])", N)))
-    units = _tuple_strings(get(node, "unit", ntuple(i -> "", N)))
-    reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
-    (name == "frame2d" && N == 2 || name == "celestial_frame") || _metadata_error(path, "unsupported coordinate frame tag $(_tag(node))")
+    values = _required(node, "frames", path)
+    frames = map(enumerate(values)) do (index, value)
+        _parse_frame(value, "$path/frames/$index"; validate_order=false)
+    end
     try
-        frame = if name == "frame2d"
-            Frame2D(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
-        else
+        return CompositeFrame(frames; name=frame_name)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
+end
+
+function _parse_frame(node, path; validate_order=true)
+    name = _tag_name(node)
+    name == "composite_frame" && return _parse_composite_frame(node, path)
+    name in ("frame", "frame2d", "celestial_frame", "spectral_frame", "temporal_frame", "stokes_frame") || _metadata_error(path, "unsupported coordinate frame tag $(_tag(node))")
+    frame_name = String(_unwrap(_required(node, "name", path)))
+    try
+        frame = if name == "frame"
+            N = Int(_unwrap(_required(node, "naxes", path)))
+            axes_names = _metadata_frame_strings(node, "axes_names", ntuple(i -> "x$(i - 1)", N))
+            axes_order = _frame_order(node, N)
+            axis_types = _frame_axis_types(node, N)
+            physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
+            units = _metadata_frame_strings(node, "unit", ntuple(_ -> "", N))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            CoordinateFrame{N}(; name=frame_name, axes_names, axes_order, axis_types, axis_physical_types=physical_types, unit=units, reference_frame)
+        elseif name == "frame2d"
+            axes_names = _metadata_frame_strings(node, "axes_names", ("x", "y"))
+            axes_order = _frame_order(node, 2)
+            axis_types = haskey(node, "axes_type") ? _frame_axis_types(node, 2) : nothing
+            physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
+            units = _metadata_frame_strings(node, "unit", ("", ""))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            Frame2D(; name=frame_name, axes_names, axes_order, axis_types, axis_physical_types=physical_types, unit=units, reference_frame)
+        elseif name == "celestial_frame"
+            N = haskey(node, "axes_names") ? length(_metadata_sequence(node["axes_names"])) :
+                haskey(node, "axes_order") ? length(_metadata_sequence(node["axes_order"])) :
+                haskey(node, "unit") ? length(_metadata_sequence(node["unit"])) : 2
+            axes_names = _metadata_frame_strings(node, "axes_names", ntuple(i -> i == 1 ? "lon" : i == 2 ? "lat" : "distance", N))
+            axes_order = _frame_order(node, N)
+            physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
+            units = _metadata_frame_strings(node, "unit", ntuple(i -> i <= 2 ? "deg" : "", N))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
             CelestialFrame{N}(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
+        elseif name == "spectral_frame"
+            axes_names = _metadata_frame_strings(node, "axes_names", ("spectral",))
+            axes_order = _frame_order(node, 1)
+            physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
+            units = _metadata_frame_strings(node, "unit", ("",))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            reference_position = String(_unwrap(get(node, "reference_position", "geocenter")))
+            SpectralFrame(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame, reference_position)
+        elseif name == "temporal_frame"
+            axes_names = _metadata_frame_strings(node, "axes_names", ("time",))
+            axes_order = _frame_order(node, 1)
+            physical_types = _metadata_frame_strings(node, "axis_physical_types", ("time",))
+            units = _metadata_frame_strings(node, "unit", ("s",))
+            reference, epoch, scale, format, location = _temporal_reference(get(node, "reference_frame", nothing))
+            TemporalFrame(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units,
+                reference_frame=reference, reference_epoch=epoch, time_scale=scale, time_format=format, location)
+        elseif name == "stokes_frame"
+            axes_names = _metadata_frame_strings(node, "axes_names", ("stokes",))
+            axes_order = _frame_order(node, 1)
+            physical_types = _metadata_frame_strings(node, "axis_physical_types", ("phys.polarization.stokes",))
+            StokesFrame(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types)
         end
-        return _validate_frame_axes_order(frame)
+        return validate_order ? _validate_frame_axes_order(frame) : frame
     catch error
         error isa ArgumentError || error isa DimensionMismatch || rethrow()
         _metadata_error(path, sprint(showerror, error))

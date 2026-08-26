@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+---
+!<tag:stsci.edu:gwcs/wcs-1.4.0>
+name: mixed_frame
+steps:
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+      name: detector
+      naxes: 5
+      axes_type: [PIXEL, PIXEL, PIXEL, PIXEL, PIXEL]
+      axes_names: [a, b, c, d, e]
+      axes_order: [0, 1, 2, 3, 4]
+      axis_physical_types: ["custom:a", "custom:b", "custom:c", "custom:d", "custom:e"]
+      unit:
+        - !unit/unit-1.0.0 pixel
+        - !unit/unit-1.0.0 pixel
+        - !unit/unit-1.0.0 pixel
+        - !unit/unit-1.0.0 pixel
+        - !unit/unit-1.0.0 pixel
+    transform: !transform/remap_axes-1.5.0
+      mapping: [0, 1, 2, 3, 4]
+      n_inputs: 5
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/composite_frame-1.0.0>
+      name: world
+      frames:
+        - !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+          name: sky
+          axes_names: [lon, lat]
+          axes_order: [1, 4]
+          axis_physical_types: [pos.eq.ra, pos.eq.dec]
+          reference_frame: !<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>
+            frame_attributes: {}
+          unit:
+            - !unit/unit-1.0.0 deg
+            - !unit/unit-1.0.0 deg
+        - !<tag:stsci.edu:gwcs/spectral_frame-1.2.0>
+          name: spectral
+          axes_names: [wave]
+          axes_order: [0]
+          unit:
+            - !unit/unit-1.0.0 nm
+        - !<tag:stsci.edu:gwcs/temporal_frame-1.2.0>
+          name: temporal
+          axes_names: [time]
+          axes_order: [3]
+          unit:
+            - !unit/unit-1.0.0 s
+          reference_frame: !<tag:stsci.edu:asdf/time/time-1.4.0>
+            value: 100.0
+            scale: utc
+            format: jd
+        - !<tag:stsci.edu:gwcs/stokes_frame-1.0.0>
+          name: polarization
+          axes_order: [2]
+    transform: null
+...

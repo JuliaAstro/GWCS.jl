@@ -112,3 +112,56 @@
     duplicate = replace(fixed_metadata, "keys: [y]" => "keys: [0, x]", "values: [10.0]" => "values: [10.0, 11.0]")
     @test_throws "same input cannot be fixed more than once" parse_transform(GWCS._load_tagged_yaml(duplicate))
 end
+
+@testset "Frame metadata parsing" begin
+    metadata = read(joinpath(@__DIR__, "fixtures", "mixed_frame_wcs.yaml"), String)
+    wcs = parse_wcs(metadata)
+    output = output_frame(wcs)
+
+    @test input_frame(wcs) isa CoordinateFrame{5}
+    @test pixel_axis_types(wcs) == ntuple(_ -> PIXEL, 5)
+    @test output isa CompositeFrame{5}
+    @test output.axes_order == (2, 5, 1, 4, 3)
+    @test world_axis_names(wcs) == ("lon", "lat", "wave", "time", "stokes")
+    @test world_axis_types(wcs) == (SPATIAL, SPATIAL, SPECTRAL, TIME, STOKES)
+    @test world_axis_physical_types(wcs) == ("pos.eq.ra", "pos.eq.dec", "em.wl", "time", "phys.polarization.stokes")
+    @test world_axis_units(wcs) == ("deg", "deg", "nm", "s", "")
+    @test output.frames[1].reference_frame === :ICRS
+    @test output.frames[3].reference_epoch == 100.0
+    @test output.frames[3].time_scale == "utc"
+    @test output.frames[3].time_format == "jd"
+    @test output.frames[3].location === nothing
+    @test output.frames[3].reference_frame isa AbstractDict
+    @test offset_to_time(output.frames[3], 86400.0) == 101.0
+    @test axis_names(GWCS._subset_frame(output, (1, 3))) == ("lon", "wave")
+
+    pixels = SVector(1.0, 2.0, 3.0, 4.0, 5.0)
+    world = SVector(2.0, 5.0, 1.0, 4.0, 3.0)
+    @test pixel_to_world(wcs, pixels) == world
+    @test world_to_pixel(wcs, world) == pixels
+    @test axis_correlation_matrix(wcs) == @SMatrix [false true false false false; false false false false true; true false false false false; false false false true false; false false true false false]
+
+    bad_child = replace(metadata, "axes_names: [wave]" => "axes_names: [wave, extra]")
+    @test_throws "axes_names has length 2, expected 1 at wcs/steps/2/frame/frames/2" parse_wcs(bad_child)
+    duplicate_order = replace(metadata, "axes_order: [0]" => "axes_order: [1]"; count=1)
+    @test_throws "axes_order entries must be unique at wcs/steps/2/frame" parse_wcs(duplicate_order)
+
+    scalar_time = GWCS._parse_frame(GWCS._load_tagged_yaml("""
+    !<tag:stsci.edu:gwcs/temporal_frame-1.2.0>
+    name: time
+    reference_frame: !<tag:stsci.edu:asdf/time/time-1.4.0> 2010-01-01T00:00:00
+    """), "frame")
+    @test scalar_time.reference_frame isa GWCS.TaggedScalar
+    @test scalar_time.reference_epoch == "2010-01-01T00:00:00"
+    @test_throws "does not support offset arithmetic" offset_to_time(scalar_time, 1.0)
+
+    unnamed = GWCS._parse_frame(GWCS._load_tagged_yaml("""
+    !<tag:stsci.edu:gwcs/frame-1.2.0>
+    name: unnamed
+    naxes: 1
+    axes_type: [PIXEL]
+    axes_names: [null]
+    """), "frame")
+    @test axis_names(unnamed) == ("",)
+    @test axis_physical_types(unnamed) == ("custom:PIXEL",)
+end
