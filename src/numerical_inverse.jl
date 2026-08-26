@@ -10,12 +10,32 @@ function Base.showerror(io::IO, error::NoConvergence)
     print(io, error.message)
 end
 
+function _box_axis_guess(wcs::WCS, box::BoundingBox, axis, ::Type{T}) where {T}
+    interval = bounds(box, axis)
+    interval !== nothing && return T(sum(interval) / 2)
+    wcs.pixel_shape !== nothing && return T((wcs.pixel_shape[axis] - 1) / 2)
+    return one(T)
+end
+
+function _box_initial_guess(wcs::WCS{N}, box::BoundingBox{N}, ::Type{T}) where {N,T}
+    return SVector{N,T}(ntuple(axis -> _box_axis_guess(wcs, box, axis, T), N))
+end
+
+function _box_initial_guess(wcs::WCS{N}, box::CompoundBoundingBox{N,K}, ::Type{T}) where {N,K,T}
+    length(box.boxes) == 1 || throw(ArgumentError("numerical inversion with a compound bounding box requires an initial_guess unless the box has one selector entry"))
+    key, selected = only(box.boxes)
+    return SVector{N,T}(ntuple(N) do axis
+        position = findfirst(==(axis), box.selector_axes)
+        position === nothing ? _box_axis_guess(wcs, selected, axis, T) : T(key[position])
+    end)
+end
+
 function _initial_guess(wcs::WCS{N}, ::Type{T}, initial_guess) where {N,T}
     if initial_guess !== nothing
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess)
     elseif wcs.bounding_box !== nothing
-        return SVector{N,T}(ntuple(i -> T(sum(wcs.bounding_box.intervals[i]) / 2), N))
+        return _box_initial_guess(wcs, wcs.bounding_box, T)
     end
     return SVector{N,T}(ntuple(i -> one(T), N))
 end

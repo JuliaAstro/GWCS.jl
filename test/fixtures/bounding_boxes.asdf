@@ -1,0 +1,109 @@
+#ASDF 1.0.0
+#ASDF_STANDARD 1.6.0
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+--- !core/asdf-1.1.0
+asdf_library: !core/software-1.0.0 {author: The ASDF Developers, homepage: 'http://github.com/asdf-format/asdf',
+  name: asdf, version: 5.3.1}
+history:
+  extensions:
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/core/extensions/core-1.6.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf, version: 5.3.1}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/transform/extensions/transform-1.7.0
+    manifest_software: !core/software-1.0.0 {name: asdf_transform_schemas, version: 0.6.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/gwcs/extensions/gwcs-1.4.0
+    manifest_software: !core/software-1.0.0 {name: asdf_wcs_schemas, version: 0.5.0}
+    software: !core/software-1.0.0 {name: gwcs, version: 1.0.3}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://astropy.org/astropy/extensions/units-1.3.0
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+compound: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+  name: compound
+  pixel_shape: null
+  steps:
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+      axes_names: [x, y, slice]
+      axes_order: [0, 1, 2]
+      axes_type: [PIXEL, PIXEL, PIXEL]
+      axis_physical_types: ['custom:PIXEL', 'custom:PIXEL', 'custom:PIXEL']
+      name: detector
+      naxes: 3
+      unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+    transform: !transform/identity-1.4.0
+      bounding_box: !transform/property/compound_bounding_box-1.2.0
+        cbbox:
+        - bbox: !transform/property/bounding_box-1.2.0
+            ignore: [slice]
+            intervals:
+              x: [0.0, 5.0]
+              y: [0.0, 5.0]
+            order: F
+          key: [1]
+        - bbox: !transform/property/bounding_box-1.2.0
+            ignore: [slice]
+            intervals:
+              x: [10.0, 15.0]
+              y: [10.0, 15.0]
+            order: F
+          key: [2]
+        ignore: []
+        order: F
+        selector_args:
+        - {argument: slice, ignore: true}
+      inputs: [x, y, slice]
+      n_dims: 3
+      outputs: [x0, x1, x2]
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+      axes_names: [x, y, slice]
+      axes_order: [0, 1, 2]
+      axes_type: [PIXEL, PIXEL, PIXEL]
+      axis_physical_types: ['custom:PIXEL', 'custom:PIXEL', 'custom:PIXEL']
+      name: output
+      naxes: 3
+      unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+    transform: null
+simple: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+  name: simple
+  pixel_shape: null
+  steps:
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+      axes_names: [x, y, slice]
+      axes_order: [0, 1, 2]
+      axes_type: [PIXEL, PIXEL, PIXEL]
+      axis_physical_types: ['custom:PIXEL', 'custom:PIXEL', 'custom:PIXEL']
+      name: detector
+      naxes: 3
+      unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+    transform: !transform/identity-1.4.0
+      bounding_box: !transform/property/bounding_box-1.2.0
+        ignore: [slice]
+        intervals:
+          x: [0.0, 5.0]
+          y: [10.0, 15.0]
+        order: F
+      inputs: [x, y, slice]
+      n_dims: 3
+      outputs: [x0, x1, x2]
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+      axes_names: [x, y, slice]
+      axes_order: [0, 1, 2]
+      axes_type: [PIXEL, PIXEL, PIXEL]
+      axis_physical_types: ['custom:PIXEL', 'custom:PIXEL', 'custom:PIXEL']
+      name: output
+      naxes: 3
+      unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+    transform: null
+...

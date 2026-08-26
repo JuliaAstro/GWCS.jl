@@ -11,6 +11,7 @@ using Test
     include("test_composition.jl")
     include("test_dependencies.jl")
     include("test_frames.jl")
+    include("test_domains.jl")
     include("test_pipeline.jl")
     include("test_api.jl")
     include("test_numerical_inverse.jl")

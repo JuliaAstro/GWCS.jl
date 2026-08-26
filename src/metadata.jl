@@ -592,16 +592,133 @@ function _parse_step(node, path, registry)
     return transform_node === nothing ? Step(frame) : Step(frame, parse_transform(transform_node; path="$path/transform", registry))
 end
 
-function _parse_bounding_box(node, path)
-    _tag_name(node) == "bounding_box" || _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
+function _bounding_box_tag(node, expected, path)
+    family, version = _split_metadata_tag(_tag(node), path)
+    target = "tag:stsci.edu:asdf/transform/property/$expected"
+    family == target || _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
+    v"1.0.0" <= version < v"1.3.0" || _metadata_error(path, "unsupported bounding-box tag version $family-$version; supported range is [1.0.0, 1.3.0)")
+    return version
+end
+
+function _bounding_box_order(node, path)
+    value = String(_unwrap(get(node, "order", "C")))
+    value in ("C", "F") || _metadata_error("$path/order", "expected one of C, F, got $value")
+    return Symbol(value)
+end
+
+function _bounding_box_names(transform)
+    names = input_names(transform)
+    return names === nothing ? _asdf_input_names(transform) : names
+end
+
+function _bounding_box_axis(name, names, path)
+    value = String(_unwrap(name))
+    indices = findall(==(value), names)
+    isempty(indices) && _metadata_error(path, "bounding-box input $value is not among $names")
+    length(indices) == 1 || _metadata_error(path, "bounding-box input $value is ambiguous in $names")
+    return only(indices)
+end
+
+function _bounding_box_name_axes(values, names, path)
+    values isa AbstractVector || _metadata_error(path, "expected an array of input names")
+    axes = map(enumerate(values)) do (index, value)
+        _bounding_box_axis(value, names, "$path/$index")
+    end
+    length(unique(axes)) == length(axes) || _metadata_error(path, "bounding-box input names must be unique")
+    return Tuple(axes)
+end
+
+function _parse_simple_bounding_box(node, names, path; implicit_ignored=())
+    _bounding_box_tag(node, "bounding_box", path)
+    _bounding_box_order(node, path)
     raw_intervals = _required(node, "intervals", path)
-    keys_sorted = sort(collect(keys(raw_intervals)); by=key -> parse(Int, match(r"(\d+)$", String(key)).captures[1]))
-    intervals = Tuple(begin
-        values = raw_intervals[key]
-        (float(_unwrap(values[1])), float(_unwrap(values[2])))
-    end for key in keys_sorted)
-    order = Symbol(String(_unwrap(get(node, "order", "F"))))
-    return BoundingBox(intervals; order)
+    raw_intervals isa AbstractDict || _metadata_error("$path/intervals", "expected a mapping of input names to intervals")
+    isempty(raw_intervals) && _metadata_error("$path/intervals", "bounding-box intervals must not be empty")
+    axes = Int[]
+    intervals = Tuple{Real,Real}[]
+    for (key, raw_interval) in raw_intervals
+        name = String(_unwrap(key))
+        interval_path = "$path/intervals/$name"
+        axis = _bounding_box_axis(key, names, interval_path)
+        axis in axes && _metadata_error(interval_path, "bounding-box interval input names must be unique")
+        raw_interval isa AbstractVector || raw_interval isa Tuple || _metadata_error(interval_path, "expected a two-element interval")
+        length(raw_interval) == 2 || _metadata_error(interval_path, "expected a two-element interval")
+        lower = _numeric_metadata(raw_interval[1], "$interval_path/1")
+        upper = _numeric_metadata(raw_interval[2], "$interval_path/2")
+        lower <= upper || _metadata_error(interval_path, "bounding-box lower limit must not exceed upper limit")
+        push!(axes, axis)
+        push!(intervals, (lower, upper))
+    end
+    ignored = haskey(node, "ignore") ? _bounding_box_name_axes(node["ignore"], names, "$path/ignore") : ()
+    all_ignored = Tuple(unique((Tuple(implicit_ignored)..., ignored...)))
+    overlap = intersect(axes, all_ignored)
+    isempty(overlap) || _metadata_error(path, "bounding-box inputs cannot be both bounded and ignored")
+    accounted = union(Set(axes), Set(all_ignored))
+    accounted == Set(1:length(names)) || _metadata_error(path, "bounding-box intervals and ignored inputs must account for every transform input")
+    try
+        return BoundingBox{length(names)}(Tuple(intervals), Tuple(axes))
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
+end
+
+function _parse_selector_args(node, names, path)
+    raw = _required(node, "selector_args", path)
+    raw isa AbstractVector || _metadata_error("$path/selector_args", "expected an array of selector arguments")
+    isempty(raw) && _metadata_error("$path/selector_args", "selector arguments must not be empty")
+    selectors = map(enumerate(raw)) do (index, value)
+        item_path = "$path/selector_args/$index"
+        value isa AbstractDict || _metadata_error(item_path, "expected a selector-argument mapping")
+        axis = _bounding_box_axis(_required(value, "argument", item_path), names, "$item_path/argument")
+        ignore = _unwrap(_required(value, "ignore", item_path))
+        ignore isa Bool || _metadata_error("$item_path/ignore", "expected a boolean")
+        (axis, ignore)
+    end
+    axes = Tuple(first.(selectors))
+    length(unique(axes)) == length(axes) || _metadata_error("$path/selector_args", "selector input names must be unique")
+    return axes, Tuple(last.(selectors))
+end
+
+function _parse_compound_bounding_box(node, names, path)
+    _bounding_box_tag(node, "compound_bounding_box", path)
+    _bounding_box_order(node, path)
+    selectors, selector_flags = _parse_selector_args(node, names, path)
+    globally_ignored = haskey(node, "ignore") ? _bounding_box_name_axes(node["ignore"], names, "$path/ignore") : ()
+    isempty(intersect(selectors, globally_ignored)) || _metadata_error(path, "selector inputs cannot also be globally ignored")
+    implicit_ignored = (globally_ignored..., Tuple(selectors[index] for index in eachindex(selectors) if selector_flags[index])...)
+    raw_entries = _required(node, "cbbox", path)
+    raw_entries isa AbstractVector || _metadata_error("$path/cbbox", "expected an array of compound bounding-box entries")
+    isempty(raw_entries) && _metadata_error("$path/cbbox", "compound bounding-box entries must not be empty")
+    entries = Pair[]
+    seen = Set()
+    for (index, value) in enumerate(raw_entries)
+        item_path = "$path/cbbox/$index"
+        value isa AbstractDict || _metadata_error(item_path, "expected a compound bounding-box entry mapping")
+        raw_key = _required(value, "key", item_path)
+        raw_key isa AbstractVector || raw_key isa Tuple || _metadata_error("$item_path/key", "expected an array of selector values")
+        length(raw_key) == length(selectors) || _metadata_error("$item_path/key", "selector key has length $(length(raw_key)), expected $(length(selectors))")
+        key = Tuple(_numeric_metadata(item, "$item_path/key/$key_index") for (key_index, item) in enumerate(raw_key))
+        key in seen && _metadata_error("$item_path/key", "compound bounding-box selector keys must be unique")
+        push!(seen, key)
+        nested = _required(value, "bbox", item_path)
+        box = _parse_simple_bounding_box(nested, names, "$item_path/bbox"; implicit_ignored)
+        push!(entries, key => box)
+    end
+    try
+        return CompoundBoundingBox{length(names)}(Dict(entries), selectors; selector_ignored=selector_flags, ignored=globally_ignored)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
+end
+
+function _parse_bounding_box(node, transform, path)
+    names = _bounding_box_names(transform)
+    name = _tag_name(node)
+    name == "bounding_box" && return _parse_simple_bounding_box(node, names, path)
+    name == "compound_bounding_box" && return _parse_compound_bounding_box(node, names, path)
+    _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
 end
 
 function _metadata_native_order(values, frame::AbstractCoordinateFrame{N}, path) where {N}
@@ -617,9 +734,9 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     end
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
-    parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, "wcs/steps/1/transform/bounding_box")
+    parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, first(steps).transform, "wcs/steps/1/transform/bounding_box")
     input = first(steps).frame
-    parsed_box === nothing || (parsed_box = BoundingBox(_metadata_native_order(parsed_box.intervals, input, "wcs/steps/1/transform/bounding_box")))
+    parsed_box === nothing || (parsed_box = _remap_bounding_box(parsed_box, input.axes_order))
     name = String(_unwrap(get(node, "name", "")))
     pixel_shape = get(node, "pixel_shape", nothing)
     pixel_shape === nothing || (pixel_shape = _metadata_native_order(Tuple(Int(_unwrap(value)) for value in pixel_shape), input, "wcs/pixel_shape"))

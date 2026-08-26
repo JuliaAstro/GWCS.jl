@@ -1,0 +1,69 @@
+simple_ignored: !<tag:stsci.edu:gwcs/wcs-1.3.0>
+  name: simple_ignored
+  steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+        name: detector
+        naxes: 3
+        axes_names: [x, y, slice]
+        axes_order: [1, 0, 2]
+        axes_type: [PIXEL, PIXEL, PIXEL]
+        unit: [pixel, pixel, pixel]
+      transform: !<tag:stsci.edu:asdf/transform/identity-1.4.0>
+        n_dims: 3
+        inputs: [x, y, slice]
+        outputs: [x, y, slice]
+        bounding_box: !<tag:stsci.edu:asdf/transform/property/bounding_box-1.2.0>
+          intervals:
+            x: [0.0, 5.0]
+            y: [10.0, 15.0]
+          ignore: [slice]
+          order: F
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+        name: output
+        naxes: 3
+        axes_names: [x, y, slice]
+        axes_order: [0, 1, 2]
+        axes_type: [PIXEL, PIXEL, PIXEL]
+        unit: [pixel, pixel, pixel]
+
+compound: !<tag:stsci.edu:gwcs/wcs-1.3.0>
+  name: compound
+  steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+        name: detector
+        naxes: 3
+        axes_names: [x, y, slice]
+        axes_order: [0, 1, 2]
+        axes_type: [PIXEL, PIXEL, PIXEL]
+        unit: [pixel, pixel, pixel]
+      transform: !<tag:stsci.edu:asdf/transform/identity-1.4.0>
+        n_dims: 3
+        inputs: [x, y, slice]
+        outputs: [x, y, slice]
+        bounding_box: !<tag:stsci.edu:asdf/transform/property/compound_bounding_box-1.2.0>
+          selector_args:
+            - argument: slice
+              ignore: true
+          cbbox:
+            - key: [1]
+              bbox: !<tag:stsci.edu:asdf/transform/property/bounding_box-1.2.0>
+                intervals:
+                  x: [0.0, 5.0]
+                  y: [0.0, 5.0]
+            - key: [2]
+              bbox: !<tag:stsci.edu:asdf/transform/property/bounding_box-1.2.0>
+                intervals:
+                  x: [10.0, 15.0]
+                  y: [10.0, 15.0]
+          order: F
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+        name: output
+        naxes: 3
+        axes_names: [x, y, slice]
+        axes_order: [0, 1, 2]
+        axes_type: [PIXEL, PIXEL, PIXEL]
+        unit: [pixel, pixel, pixel]

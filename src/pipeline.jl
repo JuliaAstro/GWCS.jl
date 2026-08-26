@@ -1,26 +1,3 @@
-"""Inclusive input-domain intervals for a WCS."""
-struct BoundingBox{N,T<:Real}
-    intervals::NTuple{N,Tuple{T,T}}
-    order::Symbol
-end
-
-function BoundingBox(intervals::NTuple{N,Tuple{T,T}}; order=:F) where {N,T<:Real}
-    all(interval -> interval[1] <= interval[2], intervals) || throw(ArgumentError("bounding-box lower limits must not exceed upper limits"))
-    order in (:F, :C) || throw(ArgumentError("bounding-box order must be :F or :C"))
-    canonical = order === :C ? reverse(intervals) : intervals
-    return BoundingBox{N,T}(canonical, :F)
-end
-
-function BoundingBox(intervals::AbstractVector; order=:F)
-    values = Tuple((promote(interval[1], interval[2])...,) for interval in intervals)
-    T = promote_type(map(interval -> typeof(interval[1]), values)...)
-    return BoundingBox(ntuple(i -> (T(values[i][1]), T(values[i][2])), length(values)); order)
-end
-
-@inline function Base.in(coords::StaticVector{N}, box::BoundingBox{N}) where {N}
-    return all(i -> box.intervals[i][1] <= coords[i] <= box.intervals[i][2], 1:N)
-end
-
 """A coordinate frame and the transform from that frame to the next step."""
 struct Step{F<:AbstractCoordinateFrame,T}
     frame::F
@@ -65,7 +42,10 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     backward = _inverse_transform_checked(forward)
     Nin = frame_dimension(first(compiled).frame)
     Nout = frame_dimension(last(compiled).frame)
-    bounding_box === nothing || length(bounding_box.intervals) == Nin || throw(DimensionMismatch("bounding box has $(length(bounding_box.intervals)) axes, expected $Nin"))
+    if bounding_box !== nothing
+        bounding_box isa AbstractBoundingBox || throw(ArgumentError("bounding_box must be an AbstractBoundingBox or nothing"))
+        input_dimension(bounding_box) == Nin || throw(DimensionMismatch("bounding box has input dimension $(input_dimension(bounding_box)), expected $Nin"))
+    end
     pixel_shape === nothing || length(pixel_shape) == Nin || throw(DimensionMismatch("pixel shape has length $(length(pixel_shape)), expected $Nin"))
     shape = pixel_shape === nothing ? nothing : Tuple(Int.(pixel_shape))
     return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape)}(compiled, forward, backward, String(name), shape, bounding_box)
@@ -82,24 +62,33 @@ function fix_inputs(wcs::WCS{Nin}, fixed; atol=nothing, rtol=nothing) where {Nin
     end
     fixed_transform = fix_inputs(first(wcs.steps).transform, transform_indexed; atol, rtol)
 
-    for (index, value) in native_indexed
-        if wcs.bounding_box !== nothing
-            lower, upper = wcs.bounding_box.intervals[index]
-            lower <= value <= upper || throw(DomainError(value, "fixed input $(frame.axes_names[index]) lies outside the WCS bounding box"))
-        end
-    end
-
     fixed_indices = first.(native_indexed)
     free_indices = Tuple(filter(index -> !(index in fixed_indices), 1:Nin))
     reduced_frame = _subset_frame(frame, free_indices)
-    reduced_box = if wcs.bounding_box === nothing || isempty(free_indices)
-        nothing
-    else
-        BoundingBox(map(index -> wcs.bounding_box.intervals[index], free_indices))
-    end
+    reduced_box = wcs.bounding_box === nothing ? nothing : _reduce_bounding_box(wcs.bounding_box, native_indexed)
     reduced_shape = wcs.pixel_shape === nothing ? nothing : map(index -> wcs.pixel_shape[index], free_indices)
     steps = (Step(reduced_frame, fixed_transform), Base.tail(wcs.steps)...)
     return WCS(steps...; name=wcs.name, pixel_shape=reduced_shape, bounding_box=reduced_box)
+end
+
+function with_bounding_box(wcs::WCS, bounding_box)
+    return WCS(wcs.steps...; name=wcs.name, pixel_shape=wcs.pixel_shape, bounding_box)
+end
+
+function with_pixel_shape(wcs::WCS, pixel_shape)
+    return WCS(wcs.steps...; name=wcs.name, pixel_shape, bounding_box=wcs.bounding_box)
+end
+
+function _named_domain_pairs(frame::AbstractCoordinateFrame{N}, fixed) where {N}
+    return map(_domain_pairs(fixed)) do pair
+        _fixed_index(pair.first, frame.axes_names, N) => pair.second
+    end
+end
+
+function grid_from_bounding_box(wcs::WCS; step=1, center=true, selector=nothing, fixed=())
+    wcs.bounding_box === nothing && throw(ArgumentError("WCS has no bounding box"))
+    values = _named_domain_pairs(input_frame(wcs), fixed)
+    return grid_from_bounding_box(wcs.bounding_box; step, center, selector, fixed=values)
 end
 
 input_frame(wcs::WCS) = first(wcs.steps).frame
