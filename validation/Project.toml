@@ -1,0 +1,18 @@
+[deps]
+ASDF = "686f71d1-807d-59a4-a860-28280ea06d7b"
+GWCS = "17a4e446-17b6-4e6e-99b0-ac92d3d7deb5"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[sources]
+ASDF = {path = "../../ASDF.jl"}
+GWCS = {path = ".."}
+
+[compat]
+ASDF = "2"
+GWCS = "0.1"
+JSON = "1"
+OrderedCollections = "1"
+StaticArrays = "1"
+julia = "1.10"

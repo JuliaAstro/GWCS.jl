@@ -1,0 +1,29 @@
+name = "GWCS"
+uuid = "17a4e446-17b6-4e6e-99b0-ac92d3d7deb5"
+version = "0.1.0"
+authors = ["Chris Garling"]
+
+[deps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[weakdeps]
+ASDF = "686f71d1-807d-59a4-a860-28280ea06d7b"
+
+[extensions]
+GWCSASDFExt = "ASDF"
+
+[compat]
+ASDF = "2"
+ForwardDiff = "0.10"
+StaticArrays = "1"
+YAML = "0.4"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
