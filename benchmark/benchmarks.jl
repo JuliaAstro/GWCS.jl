@@ -147,6 +147,11 @@ const COMPOUND_DOMAIN_BOX = CompoundBoundingBox(Dict((1,) => SIMPLE_DOMAIN_BOX,
     (2,) => BoundingBox{3}(((10.0, 15.0), (10.0, 15.0)), (1, 2))), (3,))
 const SIMPLE_DOMAIN_WCS = GWCS.WCS(Step(DOMAIN_INPUT_FRAME, IdentityTransform{3}()), Step(DOMAIN_OUTPUT_FRAME); bounding_box=SIMPLE_DOMAIN_BOX)
 const COMPOUND_DOMAIN_WCS = GWCS.WCS(Step(DOMAIN_INPUT_FRAME, IdentityTransform{3}()), Step(DOMAIN_OUTPUT_FRAME); bounding_box=COMPOUND_DOMAIN_BOX)
+const SELECTOR_MAPPER = ArrayLabelMapper([0 2; 1 0]; no_label=0)
+const SELECTOR_LEFT = Shift(1.0) & Scale(1.0)
+const SELECTOR_RIGHT = Shift(2.0) & Scale(2.0)
+const SELECTOR_TRANSFORM = RegionSelector(SELECTOR_MAPPER, (1 => SELECTOR_LEFT, 2 => SELECTOR_RIGHT))
+const SELECTOR_WCS = GWCS.WCS(Step(PIXEL_FRAME, SELECTOR_TRANSFORM), Step(LINEAR_FRAME))
 
 const PIXEL = SVector(400.0, 300.0)
 const FIXED_PIXEL = SVector(400.0)
@@ -155,6 +160,10 @@ const PIXEL_3D = SVector(1.0, 2.0, 3.0)
 const DOMAIN_INSIDE = SVector(2.0, 3.0, 1.0)
 const DOMAIN_OUTSIDE = SVector(7.0, 3.0, 1.0)
 const DOMAIN_BATCH = [2.0 7.0 12.0; 3.0 3.0 12.0; 1.0 1.0 2.0]
+const SELECTOR_LEFT_PIXEL = SVector(0.0, 1.0)
+const SELECTOR_RIGHT_PIXEL = SVector(1.0, 0.0)
+const SELECTOR_MISSING_PIXEL = SVector(0.0, 0.0)
+const SELECTOR_BATCH = [0.0 1.0 0.0; 1.0 0.0 0.0]
 const CALLABLE_WORLD = CALLABLE_REFERENCE(PIXEL)
 const FIXED_WORLD = FIXED_REFERENCE(FIXED_PIXEL)
 const ORDERED_WORLD_3D = GWCS.pixel_to_world(ORDERED_3D_WCS, PIXEL_3D)
@@ -175,7 +184,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -229,6 +238,14 @@ SUITE["domains"]["mask/image/outside"] = @benchmarkable GWCS.in_image($COMPOUND_
 SUITE["domains"]["mask/batch"] = @benchmarkable GWCS.in_domain($COMPOUND_DOMAIN_WCS, $DOMAIN_BATCH) evals=1
 SUITE["domains"]["grid/simple"] = @benchmarkable grid_from_bounding_box($SIMPLE_DOMAIN_BOX; fixed=(3 => 1.0,)) evals=1
 SUITE["domains"]["grid/compound"] = @benchmarkable grid_from_bounding_box($COMPOUND_DOMAIN_BOX; selector=1) evals=1
+SUITE["selectors"]["mapper/array/hit"] = @benchmarkable map_label($SELECTOR_MAPPER, $SELECTOR_LEFT_PIXEL) evals=100
+SUITE["selectors"]["mapper/array/miss"] = @benchmarkable map_label($SELECTOR_MAPPER, $SELECTOR_MISSING_PIXEL) evals=100
+SUITE["selectors"]["branch/direct"] = @benchmarkable $SELECTOR_LEFT($SELECTOR_LEFT_PIXEL) evals=100
+SUITE["selectors"]["transform/left"] = @benchmarkable $SELECTOR_TRANSFORM($SELECTOR_LEFT_PIXEL) evals=100
+SUITE["selectors"]["transform/right"] = @benchmarkable $SELECTOR_TRANSFORM($SELECTOR_RIGHT_PIXEL) evals=100
+SUITE["selectors"]["transform/missing"] = @benchmarkable $SELECTOR_TRANSFORM($SELECTOR_MISSING_PIXEL) evals=100
+SUITE["selectors"]["wcs/forward"] = @benchmarkable GWCS.pixel_to_world($SELECTOR_WCS, $SELECTOR_LEFT_PIXEL) evals=100
+SUITE["selectors"]["wcs/batch"] = @benchmarkable GWCS.pixel_to_world($SELECTOR_WCS, $SELECTOR_BATCH) evals=1
 
 if abspath(PROGRAM_FILE) == @__FILE__
     for name in keys(SUITE)

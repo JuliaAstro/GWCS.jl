@@ -64,6 +64,29 @@
     @test_throws "selector is required" grid_from_bounding_box(compound)
 end
 
+@testset "Region selectors with compound domains" begin
+    input = CoordinateFrame{3}(name="detector", axes_names=("x", "y", "slice"))
+    output = CoordinateFrame{3}(name="world")
+    mapper = CallableLabelMapper{3,Int}((x, y, slice) -> slice == 1 ? 1 : slice == 2 ? 2 : nothing; dependencies=(false, false, true))
+    paired_mapper = WithInverseLabelMapper(mapper, mapper)
+    selector = RegionSelector(paired_mapper, (1 => (Shift(1) & Shift(0) & Shift(0)), 2 => (Shift(2) & Shift(0) & Shift(0))))
+    boxes = Dict((1,) => BoundingBox{3}(((0.0, 5.0), (0.0, 5.0)), (1, 2)),
+                 (2,) => BoundingBox{3}(((10.0, 15.0), (10.0, 15.0)), (1, 2)))
+    compound = CompoundBoundingBox(boxes, (3,))
+    wcs = WCS(Step(input, selector), Step(output); bounding_box=compound)
+
+    @test pixel_to_world(wcs, 2.0, 3.0, 1.0) == SVector(3.0, 3.0, 1.0)
+    @test pixel_to_world(wcs, 12.0, 13.0, 2.0) == SVector(14.0, 13.0, 2.0)
+    @test all(isnan, pixel_to_world(wcs, 7.0, 3.0, 1.0))
+    @test all(isnan, pixel_to_world(wcs, 2.0, 3.0, 3.0; with_bounding_box=false))
+    @test world_to_pixel(wcs, 3.0, 3.0, 1.0) == SVector(2.0, 3.0, 1.0)
+    @test world_to_pixel(wcs, 14.0, 13.0, 2.0) == SVector(12.0, 13.0, 2.0)
+    @test in_image(wcs, 3.0, 3.0, 1.0)
+    @test in_image(wcs, 14.0, 13.0, 2.0)
+    @test !in_image(wcs, 8.0, 3.0, 1.0)
+    @test axis_correlation_matrix(wcs) == @SMatrix [true false true; false true true; false false true]
+end
+
 @testset "WCS compound domains" begin
     input = CoordinateFrame{3}(name="input", axes_names=("x", "y", "slice"))
     output = CoordinateFrame{3}(name="output")

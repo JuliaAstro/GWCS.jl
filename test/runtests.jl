@@ -6,6 +6,7 @@ using Test
 @testset "GWCS" begin
     include("test_transforms.jl")
     include("test_callable.jl")
+    include("test_selectors.jl")
     include("test_annotations.jl")
     include("test_fixed_inputs.jl")
     include("test_composition.jl")
