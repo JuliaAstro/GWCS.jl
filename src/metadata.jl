@@ -172,6 +172,25 @@ function _numeric_matrix(value, path)
     return matrix
 end
 
+function _metadata_matrix(value, path)
+    materialized, declared_shape = _array_metadata(value, path)
+    matrix = if materialized isa AbstractMatrix
+        map(metadata_value, materialized)
+    elseif materialized isa AbstractVector
+        isempty(materialized) && _metadata_error(path, "expected a nonempty two-dimensional array")
+        all(row -> row isa AbstractVector, materialized) || _metadata_error(path, "expected a two-dimensional array")
+        width = length(first(materialized))
+        width > 0 || _metadata_error(path, "expected a nonempty two-dimensional array")
+        all(row -> length(row) == width, materialized) || _metadata_error(path, "array rows must have equal lengths")
+        rows = map(row -> map(metadata_value, row), materialized)
+        permutedims(reduce(hcat, rows))
+    else
+        _metadata_error(path, "expected a two-dimensional array")
+    end
+    declared_shape === nothing || declared_shape == size(matrix) || _metadata_error("$path/shape", "declared shape $declared_shape does not match array size $(size(matrix))")
+    return matrix
+end
+
 function _metadata_axis_names(node, key, count, boundary, context)
     path = _property_path(context, key)
     values = node[key]
@@ -362,6 +381,158 @@ function _parse_remap(node, context)
     return RemapAxes{n_inputs}(mapping)
 end
 
+_remap_axes(transform::RemapAxes) = transform
+_remap_axes(transform::AnnotatedTransform) = _remap_axes(transform.transform)
+_remap_axes(transform) = nothing
+
+function _metadata_inputs(node, context; default=nothing)
+    haskey(node, "inputs") || return default
+    values = node["inputs"]
+    values isa AbstractVector || _metadata_error(_property_path(context, "inputs"), "expected an array of strings")
+    inputs = map(enumerate(values)) do (index, value)
+        unwrapped = metadata_value(value)
+        unwrapped isa AbstractString || _metadata_error("$(_property_path(context, "inputs"))/$index", "expected a string")
+        String(unwrapped)
+    end
+    isempty(inputs) && _metadata_error(_property_path(context, "inputs"), "label-mapper inputs must not be empty")
+    length(unique(inputs)) == length(inputs) || _metadata_error(_property_path(context, "inputs"), "label-mapper inputs must be unique")
+    return Tuple(inputs)
+end
+
+function _parse_mapper_mapping(node, context, inputs, default_dimension)
+    haskey(node, "inputs_mapping") || return inputs === nothing ? ntuple(identity, default_dimension) : ntuple(identity, min(length(inputs), default_dimension))
+    path = _property_path(context, "inputs_mapping")
+    transform = parse_transform(node["inputs_mapping"]; path, registry=context.registry)
+    remap = _remap_axes(transform)
+    remap === nothing && _metadata_error(path, "expected a remap_axes transform")
+    inputs === nothing || input_dimension(remap) == length(inputs) || _metadata_error(path, "input mapping has input dimension $(input_dimension(remap)), expected $(length(inputs))")
+    output_dimension(remap) == default_dimension || _metadata_error(path, "input mapping has output dimension $(output_dimension(remap)), expected $default_dimension")
+    return remap.mapping
+end
+
+function _metadata_label_type(labels, path)
+    isempty(labels) && _metadata_error(path, "selector labels must not be empty")
+    types = unique(typeof.(labels))
+    length(types) == 1 || _metadata_error(path, "selector labels must have one concrete type")
+    type = only(types)
+    isconcretetype(type) || _metadata_error(path, "selector label type must be concrete")
+    return type
+end
+
+function _parse_label_mapper(node, context; expected_label_type=nothing)
+    _tag_name(node) == "label_mapper" || _metadata_error(metadata_path(context), "expected a GWCS label_mapper metadata node")
+    mapper_value = _metadata_property(node, "mapper", context)
+    inputs = _metadata_inputs(node, context)
+    name = haskey(node, "name") ? _metadata_string(node, "name", context) : nothing
+    no_label = haskey(node, "no_label") ? metadata_value(node["no_label"]) : nothing
+    path = _property_path(context, "mapper")
+    materialized, _ = _array_metadata(mapper_value, path)
+
+    if materialized isa AbstractMatrix || materialized isa AbstractVector
+        labels = _metadata_matrix(mapper_value, path)
+        if expected_label_type !== nothing && eltype(labels) != expected_label_type
+            labels = try
+                map(expected_label_type, labels)
+            catch error
+                error isa InexactError || error isa MethodError || error isa ArgumentError || rethrow()
+                _metadata_error(path, "array labels cannot be converted from $(eltype(labels)) to $expected_label_type")
+            end
+        end
+        ninputs = inputs === nothing ? 2 : length(inputs)
+        mapping = _parse_mapper_mapping(node, context, inputs, 2)
+        ninputs = max(ninputs, maximum(mapping))
+        default_no_label = eltype(labels) <: Number ? zero(eltype(labels)) : eltype(labels) <: AbstractString ? "" : nothing
+        no_label = default_no_label
+        mapper = try
+            ArrayLabelMapper{ninputs}(labels; inputs_mapping=mapping, no_label, inputs, name)
+        catch error
+            error isa ArgumentError || error isa DimensionMismatch || rethrow()
+            _metadata_error(metadata_path(context), sprint(showerror, error))
+        end
+        return mapper
+    end
+
+    tagged = try
+        _tag(mapper_value)
+    catch error
+        error isa ArgumentError || rethrow()
+        nothing
+    end
+    if tagged !== nothing
+        transform = parse_transform(mapper_value; path, registry=context.registry)
+        inputs === nothing && (inputs = _asdf_input_names(transform))
+        mapping = _parse_mapper_mapping(node, context, inputs, input_dimension(transform))
+        if mapping != ntuple(identity, length(mapping)) || input_dimension(transform) != length(inputs)
+            transform = compose(RemapAxes{length(inputs)}(mapping), transform)
+        end
+        L = expected_label_type === nothing ? Float64 : expected_label_type
+        return TransformLabelMapper{L}(transform; no_label, inputs, name)
+    end
+
+    materialized isa AbstractDict || _metadata_error(path, "expected an array, transform, or label/model mapping")
+    labels = _metadata_property(materialized, "labels", TransformParseContext(context.tag, context.version, path, context.registry))
+    models = _metadata_property(materialized, "models", TransformParseContext(context.tag, context.version, path, context.registry))
+    labels isa AbstractVector || _metadata_error("$path/labels", "expected an array")
+    models isa AbstractVector || _metadata_error("$path/models", "expected an array")
+    length(labels) == length(models) || _metadata_error(path, "label and model arrays must have equal lengths")
+    inputs === nothing && _metadata_error(_property_path(context, "inputs"), "dictionary and range label mappers require inputs")
+    parsed_models = map(enumerate(models)) do (index, model)
+        parse_transform(model; path="$path/models/$index", registry=context.registry)
+    end
+    L = expected_label_type === nothing ? Float64 : expected_label_type
+    first_label = metadata_value(first(labels))
+    mapping = _parse_mapper_mapping(node, context, inputs, 1)
+    mapper_entries = if first_label isa AbstractVector
+        map(enumerate(labels), parsed_models) do index_label, model
+            index, label = index_label
+            length(label) == 2 || _metadata_error("$path/labels/$index", "range labels must contain two bounds")
+            (_numeric_metadata(label[1], "$path/labels/$index/1"), _numeric_metadata(label[2], "$path/labels/$index/2")) => model
+        end
+    else
+        map(enumerate(labels), parsed_models) do index_label, model
+            index, label = index_label
+            _numeric_metadata(label, "$path/labels/$index") => model
+        end
+    end
+    try
+        if first_label isa AbstractVector
+            return RangeLabelMapper{length(inputs),L}(Tuple(mapper_entries); inputs_mapping=mapping, inputs, name)
+        end
+        atol = haskey(node, "atol") ? _numeric_property(node, "atol", context) : 1e-8
+        return DictionaryLabelMapper{length(inputs),L}(Tuple(mapper_entries); inputs_mapping=mapping, atol, inputs, name)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(metadata_path(context), sprint(showerror, error))
+    end
+end
+
+function _parse_region_selector(node, context)
+    path = metadata_path(context)
+    selector = _metadata_property(node, "selector", context)
+    selector isa AbstractDict || _metadata_error(_property_path(context, "selector"), "expected a mapping")
+    labels = _metadata_property(selector, "labels", TransformParseContext(context.tag, context.version, "$path/selector", context.registry))
+    transforms = _metadata_property(selector, "transforms", TransformParseContext(context.tag, context.version, "$path/selector", context.registry))
+    labels isa AbstractVector || _metadata_error("$path/selector/labels", "expected an array")
+    transforms isa AbstractVector || _metadata_error("$path/selector/transforms", "expected an array")
+    length(labels) == length(transforms) || _metadata_error("$path/selector", "label and transform arrays must have equal lengths")
+    label_values = map(metadata_value, labels)
+    L = _metadata_label_type(label_values, "$path/selector/labels")
+    mapper_node = _metadata_property(node, "label_mapper", context)
+    mapper_context = TransformParseContext(context.tag, context.version, "$path/label_mapper", context.registry)
+    mapper = _parse_label_mapper(mapper_node, mapper_context; expected_label_type=L)
+    parsed_transforms = map(enumerate(transforms)) do (index, transform)
+        parse_transform(transform; path="$path/selector/transforms/$index", registry=context.registry)
+    end
+    entries = ntuple(index -> label_values[index] => parsed_transforms[index], length(label_values))
+    undefined_value = haskey(node, "undefined_transform_value") ? _numeric_property(node, "undefined_transform_value", context) : NaN
+    try
+        return RegionSelector(mapper, entries; undefined_value)
+    catch error
+        error isa ArgumentError || error isa DimensionMismatch || rethrow()
+        _metadata_error(path, sprint(showerror, error))
+    end
+end
+
 function _parse_polynomial(node, context)
     coefficients = _coefficient_array(required_metadata(node, "coefficients", context))
     domain, window = _domain_window(node)
@@ -460,6 +631,7 @@ function _register_builtin_transform_parsers!()
     register_transform!("$asdf_transform/polynomial", _parse_polynomial)
     register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation; max_version=v"1.3.0")
     register_transform!("tag:stsci.edu:gwcs/spherical_cartesian", _parse_spherical_cartesian)
+    register_transform!("tag:stsci.edu:gwcs/regions_selector", _parse_region_selector)
     return nothing
 end
 

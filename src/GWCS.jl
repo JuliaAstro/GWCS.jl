@@ -15,9 +15,11 @@ include("transforms/annotations.jl")
 include("transforms/fixed.jl")
 include("transforms/callable.jl")
 include("transforms/elementary.jl")
+include("selectors.jl")
 include("transforms/polynomial.jl")
 include("transforms/geometry.jl")
 include("transforms/composition.jl")
+include("transforms/selectors.jl")
 include("transforms/dependencies.jl")
 include("metadata_registry.jl")
 include("frames.jl")
@@ -27,24 +29,24 @@ include("api.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 
-export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, CallableTransform, CartesianToSpherical,
+export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, ArrayLabelMapper, CallableLabelMapper, CallableTransform, CartesianToSpherical,
        AbstractBoundingBox, AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompoundBoundingBox, CompositeFrame,
        CelestialToNative,
-       ComposedTransform, ConstantTransform, CoordinateFrame, FixedInputsTransform,
+       ComposedTransform, ConstantTransform, CoordinateFrame, DictionaryLabelMapper, FixedInputsTransform,
        Frame2D, IdentityTransform,
        NativeToCelestial, NativeToTangentPlane, NoInverse,
-       ParallelTransform, Polynomial1D, Polynomial2D, RemapAxes, Rotation3D,
+       ParallelTransform, Polynomial1D, Polynomial2D, RangeLabelMapper, RegionSelector, RemapAxes, Rotation3D,
        PIXEL, SPATIAL, SPECTRAL, STOKES, TIME, UNDEFINED,
        Scale, Shift, SpectralFrame, SphericalToCartesian, Step, StokesFrame, TangentPlaneToNative, TemporalFrame, WCS,
-       WithInverse, TransformParseContext, TransformRegistry, available_frames,
+       TransformLabelMapper, WithInverse, WithInverseLabelMapper, TransformParseContext, TransformRegistry, available_frames,
        annotate_transform, axis_names, axis_physical_types, axis_types, axis_units, bounded_axes, bounds,
-       compile_transform, compose, default_transform_registry, degree, elementwise,
+       compile_label_mapper, compile_transform, compose, default_transform_registry, degree, elementwise,
        axis_correlation_matrix, fix_inputs, frame_dimension, get_transform, grid_from_bounding_box, has_inverse, ignored_axes, input_dimension, input_frame,
-       in_domain, in_image, input_names, inverse_transform, materialize_metadata, metadata_path, metadata_tag,
+       in_domain, in_image, input_names, inverse_label_mapper, inverse_transform, label_dependencies, label_mapper_name, label_type, map_label, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,
        offset_to_time, output_names, parallel, pixel_axis_names, pixel_axis_physical_types, pixel_axis_types,
        pixel_axis_units, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
-       parse_transform, parse_wcs, register_transform!, required_metadata, select_bounding_box, selector_axes, selector_ignored,
+       parse_transform, parse_wcs, register_transform!, required_metadata, select_bounding_box, selected_transform, selector_axes, selector_ignored,
        time_to_offset, transform, transform_dependencies, transform_jacobian, transform_name,
        with_bounding_box, with_pixel_shape, world_axis_names, world_axis_physical_types, world_axis_types, world_axis_units, world_n_dim, world_to_pixel
 

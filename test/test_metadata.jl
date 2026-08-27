@@ -113,6 +113,49 @@
     @test_throws "same input cannot be fixed more than once" parse_transform(GWCS._load_tagged_yaml(duplicate))
 end
 
+@testset "ASDF region selectors" begin
+    metadata = read(joinpath(@__DIR__, "fixtures", "asdf_selectors.yaml"), String)
+    fixture = GWCS._load_tagged_yaml(metadata)
+
+    array = parse_transform(fixture["array"])
+    @test array isa AnnotatedTransform
+    @test input_names(array) == ("x", "y")
+    @test output_names(array) == ("u", "v")
+    @test array(SVector(0.0, 1.0)) == SVector(1.0, 1.0)
+    @test array(SVector(1.0, 0.0)) == SVector(3.0, 0.0)
+    @test array(SVector(0.0, 0.0)) == SVector(-100.0, -100.0)
+    ignored_array_sentinel = parse_transform(GWCS._load_tagged_yaml(replace(metadata, "no_label: 0" => "no_label: 99"))["array"])
+    @test ignored_array_sentinel(SVector(0.0, 0.0)) == SVector(-100.0, -100.0)
+
+    dictionary = parse_transform(fixture["dictionary"])
+    @test dictionary(SVector(-2.0005, 8.0)) == SVector(10.0)
+    @test dictionary(SVector(3.0, 8.0)) == SVector(20.0)
+    @test all(isnan, dictionary(SVector(0.0, 8.0)))
+
+    range = parse_transform(fixture["range"])
+    @test range(SVector(1.0, 8.0)) == SVector(10.0)
+    @test range(SVector(3.0, 8.0)) == SVector(20.0)
+    @test all(isnan, range(SVector(2.0, 8.0)))
+
+    transform_mapper = parse_transform(fixture["transform"])
+    @test transform_mapper(SVector(99.0, 8.0)) == SVector(10.0)
+
+    allocated_parsed_selector(transform, coordinate) = @allocated transform(coordinate)
+    array(SVector(0.0, 1.0))
+    @test @inferred(array(SVector(0.0, 1.0))) == SVector(1.0, 1.0)
+    @test allocated_parsed_selector(array, SVector(0.0, 1.0)) == 0
+
+    @test_throws "label and transform arrays must have equal lengths at transform/selector" parse_transform(GWCS._load_tagged_yaml(replace(metadata, "labels: [1, 2]" => "labels: [1]"; count=1))["array"])
+    converted_labels = parse_transform(GWCS._load_tagged_yaml(replace(metadata, "labels: [1, 2]" => "labels: [1.0, 2.0]"; count=1))["array"])
+    @test converted_labels(SVector(0.0, 1.0)) == SVector(1.0, 1.0)
+    nonintegral = replace(metadata, "mapper: [[0, 2], [1, 0]]" => "mapper: [[0.0, 2.0], [1.5, 0.0]]"; count=1)
+    @test_throws "array labels cannot be converted from Float64 to Int64 at transform/label_mapper/mapper" parse_transform(GWCS._load_tagged_yaml(nonintegral)["array"])
+    bad_mapping = replace(metadata, "mapping: [0]" => "mapping: [0, 1]"; count=1)
+    @test_throws "input mapping has output dimension 2, expected 1 at transform/label_mapper/inputs_mapping" parse_transform(GWCS._load_tagged_yaml(bad_mapping)["dictionary"])
+    overlapping = replace(metadata, "labels: [[0.0, 2.0], [2.0, 4.0]]" => "labels: [[0.0, 3.0], [2.0, 4.0]]")
+    @test_throws "range label-mapper intervals must not overlap at transform/label_mapper" parse_transform(GWCS._load_tagged_yaml(overlapping)["range"])
+end
+
 @testset "ASDF bounding-box metadata" begin
     fixture = GWCS._load_tagged_yaml(read(joinpath(@__DIR__, "fixtures", "asdf_bounding_boxes.yaml"), String))
 

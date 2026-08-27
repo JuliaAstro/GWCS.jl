@@ -127,6 +127,30 @@ A one-output function may return a scalar. Multi-output functions return a tuple
 
 Use `CallableTransform` for local functions, prototypes, and closures over calibration values. Define a dedicated `AbstractTransform` subtype when a transform needs stable metadata tags, serialization, specialized compilation, parameter introspection, or a reusable package API. Arbitrary functions are not automatically serializable, and allocations or type instability inside user callables remain visible during evaluation.
 
+### Region-selected transforms
+
+`RegionSelector` implements discontinuous transforms such as IFU slices, detector regions, and spectral orders. A label mapper chooses a label from the full input coordinate, then the selector evaluates the transform registered for that label:
+
+```julia
+labels = [0 2; 1 0]
+mapper = ArrayLabelMapper(labels; no_label=0)
+regions = RegionSelector(mapper, (
+    1 => (Shift(1.0) & Scale(1.0)),
+    2 => (Shift(2.0) & Scale(2.0))
+))
+
+regions(SVector(0.0, 1.0)) # [1.0, 1.0]
+regions(SVector(1.0, 0.0)) # [3.0, 0.0]
+```
+
+Array lookup follows the GWCS pixel convention: `(x, y)` coordinates are zero-origin pixel centers, converted with `floor(value + 0.5)`, and used to index the label array as `[y, x]`. Nonfinite and out-of-array coordinates have no label. `DictionaryLabelMapper` supports tolerance-based numeric keys, `RangeLabelMapper` uses validated nonoverlapping open intervals, `TransformLabelMapper` adapts a one-output numeric transform, and `CallableLabelMapper{N,L}` accepts arbitrary label logic returning `L` or `nothing`.
+
+GWCS.jl represents no match as `nothing`, so numeric zero and the empty string remain available as ordinary labels. A missing label or a label without a registered branch returns `undefined_value` in every output, defaulting to `NaN`. `selected_transform(regions, label)` retrieves one branch explicitly.
+
+`WithInverseLabelMapper` pairs forward- and world-side label mappers. A `RegionSelector` has an analytical inverse only when the paired inverse mapper and every selected transform are invertible. Dependencies conservatively include both branch calculations and inputs used to choose the branch; Jacobians use the selected branch and raise `DomainError` where no branch applies.
+
+Region selection and compound bounding boxes remain separate. The compound box determines whether an input is in the declared WCS domain, while the label mapper determines which transform applies there. This allows `in_domain` to report domain membership independently of whether a region transform is defined.
+
 ### Fixed inputs, constants, and axis names
 
 A closure is sufficient for one-off partial application, but `fix_inputs` creates a lower-dimensional transform that remains visible to composition, Jacobian propagation, metadata parsing, and inversion:
@@ -179,6 +203,7 @@ Composition uses boolean dependency propagation, parallel transforms produce blo
 - ICRS, structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
 - compose, concatenate, elementwise arithmetic, identity, shift, scale, affine, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
+- array-, dictionary-, range-, and transform-backed label mappers and region selectors
 - TAN/gnomonic projections, native/celestial rotations, Cartesian and spherical rotation sequences, and spherical/cartesian conversions
 - serialized explicit inverses
 
@@ -256,4 +281,4 @@ julia --project=validation validation/validate_asdf_bounding_boxes.jl
 julia --project=validation validation/compare_roman.jl FILE...
 ```
 
-The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, and bounding-box behavior against Astropy and Python GWCS. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
+The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
