@@ -217,7 +217,7 @@ file = ASDF.load("roman_cal.asdf"; extensions=true, validate_checksum=false)
 wcs = parse_wcs(file["roman"]["meta"]["wcs"])
 ```
 
-Unknown tags, unsupported schema versions, malformed dimensions, and missing required properties raise path-aware errors. Built-in parsers register only the schema-version intervals verified against the corresponding ASDF schemas instead of assuming that every future `1.x` version is compatible. Unit-bearing transform parameters require a future units extension and are not silently stripped in the numeric core.
+Unknown tags, unsupported schema versions, malformed dimensions, and missing required properties raise path-aware errors. Built-in parsers register the exact tag versions present in the corresponding ASDF schema packages instead of assuming that every future `1.x` version is compatible. Version-specific validation runs before construction, and legacy representations such as pre-1.4 constants are normalized to the current internal form. Unit-bearing transform parameters require a future units extension and are not silently stripped in the numeric core.
 
 ### Registering external transforms
 
@@ -246,13 +246,13 @@ function parse_offset(node, context)
 end
 
 function __init__()
-    register_transform!("tag:example.org:gwcs/offset", parse_offset; min_version=v"1.0.0", max_version=v"2.0.0")
+    register_transform!("tag:example.org:gwcs/offset", parse_offset; versions=(v"1.0.0", v"1.1.0"))
 end
 
 end
 ```
 
-Tags use their full namespace and omit the trailing schema version. Version intervals are half-open, and overlapping registrations are rejected. Register from an extension package's `__init__` so the process-wide default registry is populated at runtime. For deterministic or restricted parsing, use `registry = copy(default_transform_registry())`, register additional transforms into that isolated registry, and pass it to `parse_transform` or `parse_wcs`.
+Tags use their full namespace and omit the trailing schema version. Prefer `versions` when support is known for exact schema tags. Half-open `min_version`/`max_version` intervals remain available when an external schema explicitly guarantees compatibility, and overlapping registrations are rejected. Optional `validate` and `normalize` callbacks receive the source node and `TransformParseContext`; validation runs first, then normalization may return a canonical mapping for the constructor without changing the original metadata. Register from an extension package's `__init__` so the process-wide default registry is populated at runtime. For deterministic or restricted parsing, use `registry = copy(default_transform_registry())`, register additional transforms into that isolated registry, and pass it to `parse_transform` or `parse_wcs`.
 
 Registration and metadata callbacks run only while constructing a transform. A parsed `WCS` stores concrete compiled transforms, so scalar evaluation performs no registry lookup or dynamic metadata dispatch. Registered constructors must return an `AbstractTransform`; custom inverse and compilation methods are checked for compatible dimensions before the pipeline is accepted.
 
@@ -278,7 +278,8 @@ julia --project=validation validation/compare_asdf_parsers.jl
 julia --project=validation validation/compare_arithmetic.jl
 julia --project=validation validation/compare_bounding_boxes.jl
 julia --project=validation validation/validate_asdf_bounding_boxes.jl
+julia --project=validation validation/check_schema_versions.jl
 julia --project=validation validation/compare_roman.jl FILE...
 ```
 
-The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
+The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. `check_schema_versions.jl` verifies that the built-in exact-version table matches the installed ASDF schema packages. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.

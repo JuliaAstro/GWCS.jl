@@ -56,14 +56,6 @@ function _load_tagged_yaml(metadata::AbstractString)
     return YAML.load(IOBuffer(metadata), constructors; dicttype=Dict{Any,Any})
 end
 
-function _tag_name(node)
-    tag = _tag(node)
-    matched = match(r"/([^/]+)-(\d+\.\d+\.\d+)$", tag)
-    matched === nothing && throw(ArgumentError("unsupported metadata tag $tag"))
-    VersionNumber(matched.captures[2]).major == 1 || throw(ArgumentError("unsupported metadata tag version $tag"))
-    return matched.captures[1]
-end
-
 function _metadata_error(path, message)
     throw(ArgumentError("$message at $path"))
 end
@@ -120,13 +112,17 @@ end
 function _array_metadata(value, path)
     materialized = materialize_metadata(value)
     if materialized isa AbstractDict
-        name = try
-            _tag_name(materialized)
+        tag = try
+            _tag(materialized)
         catch error
             error isa ArgumentError || rethrow()
             nothing
         end
-        if name == "ndarray"
+        if tag !== nothing
+            family, _ = _split_metadata_tag(tag, path)
+        end
+        if tag !== nothing && family == "tag:stsci.edu:asdf/core/ndarray"
+            materialized, _ = _prepare_metadata(materialized, path, default_transform_registry())
             data = _required(materialized, "data", path)
             shape = haskey(materialized, "shape") ? Tuple(Int(_unwrap(axis)) for axis in materialized["shape"]) : nothing
             return data, shape
@@ -306,9 +302,8 @@ end
 
 function _parse_constant(node, context)
     value = metadata_value(required_metadata(node, "value", context))
-    metadata_version(context) < v"1.4.0" && return ConstantTransform(value)
     dimensions = Int(metadata_value(required_metadata(node, "dimensions", context)))
-    dimensions in (1, 2) || _metadata_error(metadata_path(context), "constant dimensions must be 1 or 2")
+    dimensions in (0, 1, 2) || _metadata_error(metadata_path(context), "constant dimensions must be 0, 1, or 2")
     return ConstantTransform(value; n_inputs=dimensions)
 end
 
@@ -419,8 +414,9 @@ function _metadata_label_type(labels, path)
     return type
 end
 
-function _parse_label_mapper(node, context; expected_label_type=nothing)
-    _tag_name(node) == "label_mapper" || _metadata_error(metadata_path(context), "expected a GWCS label_mapper metadata node")
+function _parse_label_mapper(node, path, registry; expected_label_type=nothing)
+    node, context = _prepare_metadata(node, path, registry)
+    metadata_tag(context) == "$_GWCS_TAG/label_mapper" || _metadata_error(path, "expected a GWCS label_mapper metadata node")
     mapper_value = _metadata_property(node, "mapper", context)
     inputs = _metadata_inputs(node, context)
     name = haskey(node, "name") ? _metadata_string(node, "name", context) : nothing
@@ -518,8 +514,7 @@ function _parse_region_selector(node, context)
     label_values = map(metadata_value, labels)
     L = _metadata_label_type(label_values, "$path/selector/labels")
     mapper_node = _metadata_property(node, "label_mapper", context)
-    mapper_context = TransformParseContext(context.tag, context.version, "$path/label_mapper", context.registry)
-    mapper = _parse_label_mapper(mapper_node, mapper_context; expected_label_type=L)
+    mapper = _parse_label_mapper(mapper_node, "$path/label_mapper", context.registry; expected_label_type=L)
     parsed_transforms = map(enumerate(transforms)) do (index, transform)
         parse_transform(transform; path="$path/selector/transforms/$index", registry=context.registry)
     end
@@ -596,7 +591,8 @@ function parse_transform(node; path="transform", registry=default_transform_regi
     tag, version = _split_metadata_tag(_tag(node), path)
     registration = _lookup_transform_registration(registry, tag, version, path)
     context = TransformParseContext(tag, version, String(path), registry)
-    transform = registration.constructor(node, context)
+    prepared = _prepare_transform_metadata(registration, node, context)
+    transform = registration.constructor(prepared, context)
     transform isa AbstractTransform || _metadata_error(path, "registered constructor for $tag returned $(typeof(transform)), expected AbstractTransform")
     if haskey(node, "inverse")
         backward = parse_transform(node["inverse"]; path="$path/inverse", registry)
@@ -612,40 +608,43 @@ end
 
 function _register_builtin_transform_parsers!()
     asdf_transform = "tag:stsci.edu:asdf/transform"
-    register_transform!("$asdf_transform/compose", _parse_compose)
-    register_transform!("$asdf_transform/concatenate", _parse_concatenate)
-    register_transform!("$asdf_transform/add", _parse_add; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/subtract", _parse_subtract; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/multiply", _parse_multiply; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/divide", _parse_divide; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/power", _parse_power; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/shift", _parse_shift)
-    register_transform!("$asdf_transform/scale", _parse_scale)
-    register_transform!("$asdf_transform/identity", _parse_identity; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/affine", _parse_affine; max_version=v"1.6.0")
-    register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; max_version=v"1.5.0")
-    register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; max_version=v"1.6.0")
-    register_transform!("$asdf_transform/constant", _parse_constant)
-    register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; min_version=v"1.1.0")
-    register_transform!("$asdf_transform/remap_axes", _parse_remap)
-    register_transform!("$asdf_transform/polynomial", _parse_polynomial)
-    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation; max_version=v"1.3.0")
-    register_transform!("tag:stsci.edu:gwcs/spherical_cartesian", _parse_spherical_cartesian)
-    register_transform!("tag:stsci.edu:gwcs/regions_selector", _parse_region_selector)
+    register_transform!("$asdf_transform/compose", _parse_compose; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_compound_transform)
+    register_transform!("$asdf_transform/concatenate", _parse_concatenate; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_compound_transform)
+    for (name, parser) in (("add", _parse_add), ("subtract", _parse_subtract), ("multiply", _parse_multiply), ("divide", _parse_divide), ("power", _parse_power))
+        register_transform!("$asdf_transform/$name", parser; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_binary_transform)
+    end
+    register_transform!("$asdf_transform/shift", _parse_shift; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "offset"))
+    register_transform!("$asdf_transform/scale", _parse_scale; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "factor"))
+    register_transform!("$asdf_transform/identity", _parse_identity; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_identity_schema)
+    register_transform!("$asdf_transform/affine", _parse_affine; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_affine_schema)
+    register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+    register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_rotate3d_schema)
+    register_transform!("$asdf_transform/constant", _parse_constant; versions=_SCHEMA_VERSIONS_1_0_TO_1_6, validate=_validate_constant_schema, normalize=_normalize_constant_schema)
+    register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; versions=(v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"), validate=_validate_fixed_inputs_schema)
+    register_transform!("$asdf_transform/remap_axes", _parse_remap; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_remap_schema)
+    register_transform!("$asdf_transform/polynomial", _parse_polynomial; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_polynomial_schema)
+    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_rotation_sequence_schema)
+    register_transform!("$_GWCS_TAG/spherical_cartesian", _parse_spherical_cartesian; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_spherical_cartesian_schema)
+    register_transform!("$_GWCS_TAG/regions_selector", _parse_region_selector; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_region_selector_schema)
     return nothing
 end
 
 _register_builtin_transform_parsers!()
+_register_builtin_metadata_schemas!()
 
-function _parse_reference_frame(value)
+function _parse_reference_frame(value, path, registry)
     value === nothing && return nothing
-    try
+    tag = try
         _tag(value)
     catch error
         error isa ArgumentError || rethrow()
         return _unwrap(value)
     end
-    value isa AbstractDict && _tag_name(value) == "icrs" && return :ICRS
+    family, version = _split_metadata_tag(tag, path)
+    if family == "tag:astropy.org:astropy/coordinates/frames/icrs"
+        _lookup_metadata_schema(registry, family, version, path)
+        return :ICRS
+    end
     return value
 end
 
@@ -669,9 +668,9 @@ function _frame_axis_types(node, count)
     return Tuple(_axis_type(String(_unwrap(value))) for value in values)
 end
 
-function _temporal_reference(node)
+function _temporal_reference(node, path, registry)
     node === nothing && return nothing, nothing, "", "", nothing
-    reference = _parse_reference_frame(node)
+    reference = _parse_reference_frame(node, path, registry)
     node isa AbstractDict || return reference, _unwrap(node), "", "", nothing
     epoch = haskey(node, "value") ? _unwrap(node["value"]) : nothing
     scale = haskey(node, "scale") ? String(_unwrap(node["scale"])) : ""
@@ -680,12 +679,12 @@ function _temporal_reference(node)
     return reference, epoch, scale, format, location
 end
 
-function _parse_composite_frame(node, path)
+function _parse_composite_frame(node, path, registry)
     length(node) == 2 || _metadata_error(path, "composite frame must contain only name and frames")
     frame_name = String(_unwrap(_required(node, "name", path)))
     values = _required(node, "frames", path)
     frames = map(enumerate(values)) do (index, value)
-        _parse_frame(value, "$path/frames/$index"; validate_order=false)
+        _parse_frame(value, "$path/frames/$index"; validate_order=false, registry)
     end
     try
         return CompositeFrame(frames; name=frame_name)
@@ -695,9 +694,10 @@ function _parse_composite_frame(node, path)
     end
 end
 
-function _parse_frame(node, path; validate_order=true)
-    name = _tag_name(node)
-    name == "composite_frame" && return _parse_composite_frame(node, path)
+function _parse_frame(node, path; validate_order=true, registry=default_transform_registry())
+    node, context = _prepare_metadata(node, path, registry)
+    name = split(metadata_tag(context), '/')[end]
+    name == "composite_frame" && return _parse_composite_frame(node, path, registry)
     name in ("frame", "frame2d", "celestial_frame", "spectral_frame", "temporal_frame", "stokes_frame") || _metadata_error(path, "unsupported coordinate frame tag $(_tag(node))")
     frame_name = String(_unwrap(_required(node, "name", path)))
     try
@@ -708,7 +708,7 @@ function _parse_frame(node, path; validate_order=true)
             axis_types = _frame_axis_types(node, N)
             physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
             units = _metadata_frame_strings(node, "unit", ntuple(_ -> "", N))
-            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
             CoordinateFrame{N}(; name=frame_name, axes_names, axes_order, axis_types, axis_physical_types=physical_types, unit=units, reference_frame)
         elseif name == "frame2d"
             axes_names = _metadata_frame_strings(node, "axes_names", ("x", "y"))
@@ -716,7 +716,7 @@ function _parse_frame(node, path; validate_order=true)
             axis_types = haskey(node, "axes_type") ? _frame_axis_types(node, 2) : nothing
             physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
             units = _metadata_frame_strings(node, "unit", ("", ""))
-            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
             Frame2D(; name=frame_name, axes_names, axes_order, axis_types, axis_physical_types=physical_types, unit=units, reference_frame)
         elseif name == "celestial_frame"
             N = haskey(node, "axes_names") ? length(_metadata_sequence(node["axes_names"])) :
@@ -726,14 +726,14 @@ function _parse_frame(node, path; validate_order=true)
             axes_order = _frame_order(node, N)
             physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
             units = _metadata_frame_strings(node, "unit", ntuple(i -> i <= 2 ? "deg" : "", N))
-            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
             CelestialFrame{N}(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
         elseif name == "spectral_frame"
             axes_names = _metadata_frame_strings(node, "axes_names", ("spectral",))
             axes_order = _frame_order(node, 1)
             physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
             units = _metadata_frame_strings(node, "unit", ("",))
-            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing))
+            reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
             reference_position = String(_unwrap(get(node, "reference_position", "geocenter")))
             SpectralFrame(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame, reference_position)
         elseif name == "temporal_frame"
@@ -741,7 +741,7 @@ function _parse_frame(node, path; validate_order=true)
             axes_order = _frame_order(node, 1)
             physical_types = _metadata_frame_strings(node, "axis_physical_types", ("time",))
             units = _metadata_frame_strings(node, "unit", ("s",))
-            reference, epoch, scale, format, location = _temporal_reference(get(node, "reference_frame", nothing))
+            reference, epoch, scale, format, location = _temporal_reference(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
             TemporalFrame(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units,
                 reference_frame=reference, reference_epoch=epoch, time_scale=scale, time_format=format, location)
         elseif name == "stokes_frame"
@@ -758,18 +758,11 @@ function _parse_frame(node, path; validate_order=true)
 end
 
 function _parse_step(node, path, registry)
-    _tag_name(node) == "step" || _metadata_error(path, "expected a GWCS step")
-    frame = _parse_frame(_required(node, "frame", path), "$path/frame")
+    node, context = _prepare_metadata(node, path, registry)
+    metadata_tag(context) == "$_GWCS_TAG/step" || _metadata_error(path, "expected a GWCS step")
+    frame = _parse_frame(_required(node, "frame", path), "$path/frame"; registry)
     transform_node = get(node, "transform", nothing)
     return transform_node === nothing ? Step(frame) : Step(frame, parse_transform(transform_node; path="$path/transform", registry))
-end
-
-function _bounding_box_tag(node, expected, path)
-    family, version = _split_metadata_tag(_tag(node), path)
-    target = "tag:stsci.edu:asdf/transform/property/$expected"
-    family == target || _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
-    v"1.0.0" <= version < v"1.3.0" || _metadata_error(path, "unsupported bounding-box tag version $family-$version; supported range is [1.0.0, 1.3.0)")
-    return version
 end
 
 function _bounding_box_order(node, path)
@@ -801,7 +794,6 @@ function _bounding_box_name_axes(values, names, path)
 end
 
 function _parse_simple_bounding_box(node, names, path; implicit_ignored=())
-    _bounding_box_tag(node, "bounding_box", path)
     _bounding_box_order(node, path)
     raw_intervals = _required(node, "intervals", path)
     raw_intervals isa AbstractDict || _metadata_error("$path/intervals", "expected a mapping of input names to intervals")
@@ -852,8 +844,7 @@ function _parse_selector_args(node, names, path)
     return axes, Tuple(last.(selectors))
 end
 
-function _parse_compound_bounding_box(node, names, path)
-    _bounding_box_tag(node, "compound_bounding_box", path)
+function _parse_compound_bounding_box(node, names, path, registry)
     _bounding_box_order(node, path)
     selectors, selector_flags = _parse_selector_args(node, names, path)
     globally_ignored = haskey(node, "ignore") ? _bounding_box_name_axes(node["ignore"], names, "$path/ignore") : ()
@@ -874,6 +865,8 @@ function _parse_compound_bounding_box(node, names, path)
         key in seen && _metadata_error("$item_path/key", "compound bounding-box selector keys must be unique")
         push!(seen, key)
         nested = _required(value, "bbox", item_path)
+        nested, nested_context = _prepare_metadata(nested, "$item_path/bbox", registry)
+        metadata_tag(nested_context) == "$_ASDF_TRANSFORM_TAG/property/bounding_box" || _metadata_error("$item_path/bbox", "expected a simple bounding box")
         box = _parse_simple_bounding_box(nested, names, "$item_path/bbox"; implicit_ignored)
         push!(entries, key => box)
     end
@@ -885,11 +878,11 @@ function _parse_compound_bounding_box(node, names, path)
     end
 end
 
-function _parse_bounding_box(node, transform, path)
+function _parse_bounding_box(node, transform, path, registry)
+    node, context = _prepare_metadata(node, path, registry)
     names = _bounding_box_names(transform)
-    name = _tag_name(node)
-    name == "bounding_box" && return _parse_simple_bounding_box(node, names, path)
-    name == "compound_bounding_box" && return _parse_compound_bounding_box(node, names, path)
+    metadata_tag(context) == "$_ASDF_TRANSFORM_TAG/property/bounding_box" && return _parse_simple_bounding_box(node, names, path)
+    metadata_tag(context) == "$_ASDF_TRANSFORM_TAG/property/compound_bounding_box" && return _parse_compound_bounding_box(node, names, path, registry)
     _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
 end
 
@@ -899,14 +892,15 @@ function _metadata_native_order(values, frame::AbstractCoordinateFrame{N}, path)
 end
 
 function parse_wcs(node::AbstractDict; registry=default_transform_registry())
-    _tag_name(node) == "wcs" || throw(ArgumentError("expected a GWCS WCS metadata node"))
+    node, context = _prepare_metadata(node, "wcs", registry)
+    metadata_tag(context) == "$_GWCS_TAG/wcs" || _metadata_error("wcs", "expected a GWCS WCS metadata node")
     raw_steps = _required(node, "steps", "wcs")
     steps = map(enumerate(raw_steps)) do (index, value)
         _parse_step(value, "wcs/steps/$index", registry)
     end
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
-    parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, first(steps).transform, "wcs/steps/1/transform/bounding_box")
+    parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, first(steps).transform, "wcs/steps/1/transform/bounding_box", registry)
     input = first(steps).frame
     parsed_box === nothing || (parsed_box = _remap_bounding_box(parsed_box, input.axes_order))
     name = String(_unwrap(get(node, "name", "")))
