@@ -258,6 +258,34 @@ function _validate_frame_axes_order(frame::AbstractCoordinateFrame{N}) where {N}
     return frame
 end
 
+function _rename_frame(frame::CoordinateFrame{N}, name) where {N}
+    return CoordinateFrame{N}(; name, axes_names=frame.axes_names, axes_order=frame.axes_order, axis_types=frame.axis_types,
+        axis_physical_types=frame.axis_physical_types, unit=frame.unit, reference_frame=frame.reference_frame)
+end
+
+function _rename_frame(frame::CelestialFrame{N}, name) where {N}
+    return CelestialFrame{N}(; name, axes_names=frame.axes_names, axes_order=frame.axes_order,
+        axis_physical_types=frame.axis_physical_types, unit=frame.unit, reference_frame=frame.reference_frame)
+end
+
+function _rename_frame(frame::SpectralFrame, name)
+    return SpectralFrame(; name, axes_names=frame.axes_names, axes_order=frame.axes_order, axis_physical_types=frame.axis_physical_types,
+        unit=frame.unit, reference_frame=frame.reference_frame, reference_position=frame.reference_position)
+end
+
+function _rename_frame(frame::TemporalFrame, name)
+    return TemporalFrame(; name, axes_names=frame.axes_names, axes_order=frame.axes_order, axis_physical_types=frame.axis_physical_types,
+        unit=frame.unit, reference_frame=frame.reference_frame, reference_epoch=frame.reference_epoch, time_scale=frame.time_scale,
+        time_format=frame.time_format, location=frame.location)
+end
+
+function _rename_frame(frame::StokesFrame, name)
+    return StokesFrame(; name, axes_names=frame.axes_names, axes_order=frame.axes_order, axis_physical_types=frame.axis_physical_types)
+end
+
+_rename_frame(frame::CompositeFrame, name) = CompositeFrame(frame.frames; name)
+_rename_frame(frame::AbstractCoordinateFrame, name) = throw(ArgumentError("renaming frame type $(typeof(frame)) is not supported"))
+
 _identity_axes_order(order) = all(index -> order[index] == index, eachindex(order))
 
 function _frame_to_transform(frame::AbstractCoordinateFrame{N}) where {N}

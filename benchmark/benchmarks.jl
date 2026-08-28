@@ -152,6 +152,16 @@ const SELECTOR_LEFT = Shift(1.0) & Scale(1.0)
 const SELECTOR_RIGHT = Shift(2.0) & Scale(2.0)
 const SELECTOR_TRANSFORM = RegionSelector(SELECTOR_MAPPER, (1 => SELECTOR_LEFT, 2 => SELECTOR_RIGHT))
 const SELECTOR_WCS = GWCS.WCS(Step(PIXEL_FRAME, SELECTOR_TRANSFORM), Step(LINEAR_FRAME))
+const EDIT_FRAME = Frame2D(name="edit")
+const EDIT_INSERTED_WCS = insert_frame(GWCS_LINEAR, PIXEL_FRAME, IdentityTransform{2}(), EDIT_FRAME)
+
+function edit_sequence(wcs)
+    builder = WCSBuilder(wcs)
+    insert_frame!(builder, input_frame(wcs), IdentityTransform{2}(), EDIT_FRAME)
+    set_transform!(builder, input_frame(wcs), EDIT_FRAME, Shift(0.0) & Shift(0.0))
+    remove_frame!(builder, EDIT_FRAME)
+    return GWCS.WCS(builder)
+end
 
 const PIXEL = SVector(400.0, 300.0)
 const FIXED_PIXEL = SVector(400.0)
@@ -202,6 +212,11 @@ end
 SUITE["construction"]["affine/GWCS"] = @benchmarkable affine_wcs($(FITS_LINEAR.crpix), $(FITS_LINEAR.crval), $(FITS_LINEAR.cd)) evals=1
 SUITE["construction"]["TAN/GWCS"] = @benchmarkable tan_wcs($FITS_TAN) evals=1
 SUITE["construction"]["TAN-SIP/GWCS"] = @benchmarkable tan_sip_wcs($FITS_SIP, $SIP_A, $SIP_B, $SIP_AP, $SIP_BP) evals=1
+SUITE["construction"]["editing/builder"] = @benchmarkable WCSBuilder($GWCS_LINEAR) evals=1
+SUITE["construction"]["editing/set_transform"] = @benchmarkable set_transform($GWCS_LINEAR, $PIXEL_FRAME, $LINEAR_FRAME, AffineTransform($(FITS_LINEAR.cd))) evals=1
+SUITE["construction"]["editing/insert_frame"] = @benchmarkable insert_frame($GWCS_LINEAR, $PIXEL_FRAME, IdentityTransform{2}(), $EDIT_FRAME) evals=1
+SUITE["construction"]["editing/remove_frame"] = @benchmarkable remove_frame($EDIT_INSERTED_WCS, $EDIT_FRAME) evals=1
+SUITE["construction"]["editing/sequence"] = @benchmarkable edit_sequence($GWCS_LINEAR) evals=1
 
 SUITE["callable"]["forward/native"] = @benchmarkable $NATIVE_CALLABLE_REFERENCE($PIXEL) evals=100
 SUITE["callable"]["forward/wrapper"] = @benchmarkable $CALLABLE_REFERENCE($PIXEL) evals=100
