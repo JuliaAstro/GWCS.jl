@@ -24,6 +24,30 @@ Coordinates use each boundary frame's native order. `axes_order[i]` gives the on
 
 `pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`.
 
+### Editing a pipeline
+
+`WCS` values are immutable. Editing functions return a newly validated and compiled WCS, leaving the source unchanged:
+
+```julia
+recalibrated = set_transform(wcs, "detector", "world", new_transform)
+with_extra_step = insert_transform(recalibrated, "world", correction)
+with_frame = insert_frame(with_extra_step, "detector", IdentityTransform{2}(), Frame2D(name="corrected"))
+renamed = rename_frame(with_frame, "corrected", "focal")
+```
+
+`set_transform` requires adjacent frames. `insert_transform` composes before the named frame by default or after it with `after=true`; it changes coordinate values without changing frame metadata. `insert_frame(input, transform, output)` requires exactly one endpoint to already exist and injects a new edge, so it does not preserve the overall mapping unless the added transform is an identity. `remove_frame` removes an intermediate frame while composing its adjacent transforms. `prepend_transform`, `append_transform`, `prepend_frame`, and `append_frame` provide boundary conveniences. Use `get_frame(wcs, name)` to retrieve the canonical frame stored in the pipeline.
+
+For several edits, use `WCSBuilder`. Every bang operation constructs a complete candidate WCS before committing it, so a failed edit leaves the builder unchanged:
+
+```julia
+builder = WCSBuilder(wcs)
+set_transform!(builder, "detector", "world", new_transform)
+insert_frame!(builder, "detector", IdentityTransform{2}(), Frame2D(name="focal"))
+edited = WCS(builder)
+```
+
+The builder is a construction-time object whose stored WCS type may change after each edit. Extract the immutable result with `WCS(builder)` before performance-critical evaluation. Edits that keep the input frame preserve `pixel_shape` and `bounding_box`. Prepending a new input frame requires explicit replacements, or explicit `nothing` values to clear existing input-domain metadata because GWCS cannot infer that metadata in the new coordinate system.
+
 Use `in_domain(wcs, pixels...)` when only the validity decision is needed. It returns `true` for finite input coordinates accepted by the WCS domain; the matrix form returns one Boolean per coordinate column. `in_image(wcs, world...)` performs the corresponding world-side test by requiring a successful finite inverse in the input domain:
 
 ```julia

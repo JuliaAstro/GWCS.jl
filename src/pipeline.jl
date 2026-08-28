@@ -51,6 +51,20 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape)}(compiled, forward, backward, String(name), shape, bounding_box)
 end
 
+"""
+    WCSBuilder(wcs)
+    WCSBuilder(steps...; name="", pixel_shape=nothing, bounding_box=nothing)
+
+Checked construction-time wrapper whose state is always a valid immutable
+`WCS`. Use `WCS(builder)` to obtain the current compiled snapshot.
+"""
+mutable struct WCSBuilder
+    _wcs::WCS
+end
+
+WCSBuilder(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing) = WCSBuilder(WCS(steps...; name, pixel_shape, bounding_box))
+WCS(builder::WCSBuilder) = builder._wcs
+
 function fix_inputs(wcs::WCS{Nin}, fixed; atol=nothing, rtol=nothing) where {Nin}
     frame = input_frame(wcs)
     input_pairs = _fixed_pairs(fixed)
@@ -104,13 +118,150 @@ world_axis_units(wcs::WCS) = axis_units(output_frame(wcs))
 pixel_axis_types(wcs::WCS) = axis_types(input_frame(wcs))
 world_axis_types(wcs::WCS) = axis_types(output_frame(wcs))
 
-function _frame_index(wcs::WCS, frame::AbstractString)
-    index = findfirst(==(frame), available_frames(wcs))
+_frame_name(frame::AbstractString) = String(frame)
+_frame_name(frame::Symbol) = String(frame)
+_frame_name(frame::AbstractCoordinateFrame) = frame.name
+_frame_name(frame) = throw(ArgumentError("frame must be a name, symbol, or coordinate frame"))
+
+function _find_frame_index(wcs::WCS, frame)
+    name = _frame_name(frame)
+    return findfirst(==(name), available_frames(wcs))
+end
+
+function _frame_index(wcs::WCS, frame)
+    name = _frame_name(frame)
+    index = _find_frame_index(wcs, name)
     index === nothing && throw(ArgumentError("frame $frame is not in the pipeline"))
     return index
 end
 
-_frame_index(wcs::WCS, frame::AbstractCoordinateFrame) = _frame_index(wcs, frame.name)
+"""Return the canonical frame stored in `wcs` for a name, symbol, or frame object."""
+get_frame(wcs::WCS, frame) = wcs.steps[_frame_index(wcs, frame)].frame
+
+_replace_step(steps::Tuple, index, step) = ntuple(i -> i == index ? step : steps[i], length(steps))
+_insert_step(steps::Tuple, index, step) = (steps[1:(index - 1)]..., step, steps[index:end]...)
+_remove_step(steps::Tuple, index) = (steps[1:(index - 1)]..., steps[(index + 1):end]...)
+
+function _rebuild_wcs(wcs::WCS, steps::Tuple; pixel_shape=wcs.pixel_shape, bounding_box=wcs.bounding_box)
+    return WCS(steps...; name=wcs.name, pixel_shape, bounding_box)
+end
+
+"""Return a new WCS with the transform between adjacent frames replaced."""
+function set_transform(wcs::WCS, from_frame, to_frame, transform::AbstractTransform)
+    from_index = _frame_index(wcs, from_frame)
+    to_index = _frame_index(wcs, to_frame)
+    from_index + 1 == to_index || throw(ArgumentError("frames $(_frame_name(from_frame)) and $(_frame_name(to_frame)) are not adjacent in forward order"))
+    steps = _replace_step(wcs.steps, from_index, Step(wcs.steps[from_index].frame, transform))
+    return _rebuild_wcs(wcs, steps)
+end
+
+"""
+    insert_transform(wcs, frame, transform; after=false)
+
+Return a new WCS with `transform` composed onto the edge before or after
+`frame`. Frame metadata is not changed when coordinate values change.
+"""
+function insert_transform(wcs::WCS, frame, transform::AbstractTransform; after=false)
+    index = _frame_index(wcs, frame)
+    edge = after ? index : index - 1
+    edge >= 1 || throw(ArgumentError("a transform cannot be inserted before the first frame"))
+    edge < length(wcs.steps) || throw(ArgumentError("a transform cannot be inserted after the last frame"))
+    current = wcs.steps[edge].transform
+    combined = after ? compose(transform, current) : compose(current, transform)
+    steps = _replace_step(wcs.steps, edge, Step(wcs.steps[edge].frame, combined))
+    return _rebuild_wcs(wcs, steps)
+end
+
+prepend_transform(wcs::WCS, transform::AbstractTransform) = insert_transform(wcs, input_frame(wcs), transform; after=true)
+append_transform(wcs::WCS, transform::AbstractTransform) = insert_transform(wcs, output_frame(wcs), transform)
+
+struct _UnspecifiedPipelineMetadata end
+const _UNSPECIFIED_PIPELINE_METADATA = _UnspecifiedPipelineMetadata()
+
+function _prepended_metadata(existing, replacement, property)
+    replacement !== _UNSPECIFIED_PIPELINE_METADATA && return replacement
+    existing === nothing && return nothing
+    throw(ArgumentError("prepending an input frame requires an explicit $property replacement; pass $property=nothing to clear it"))
+end
+
+"""
+    insert_frame(wcs, input_frame, transform, output_frame)
+
+Insert a new frame connected by `transform`. Exactly one endpoint must already
+exist. The added transform changes the overall mapping unless it is an identity.
+"""
+function insert_frame(wcs::WCS, input, transform::AbstractTransform, output; pixel_shape=_UNSPECIFIED_PIPELINE_METADATA, bounding_box=_UNSPECIFIED_PIPELINE_METADATA)
+    input_index = _find_frame_index(wcs, input)
+    output_index = _find_frame_index(wcs, output)
+    input_index === nothing || output_index === nothing || throw(ArgumentError("exactly one inserted-frame endpoint must already exist in the pipeline"))
+    input_index === nothing && output_index === nothing && throw(ArgumentError("exactly one inserted-frame endpoint must already exist in the pipeline"))
+
+    if input_index === nothing
+        input isa AbstractCoordinateFrame || throw(ArgumentError("new input endpoint must be a coordinate frame"))
+        steps = _insert_step(wcs.steps, output_index, Step(input, transform))
+        if output_index == 1
+            shape = _prepended_metadata(wcs.pixel_shape, pixel_shape, "pixel_shape")
+            box = _prepended_metadata(wcs.bounding_box, bounding_box, "bounding_box")
+            return _rebuild_wcs(wcs, steps; pixel_shape=shape, bounding_box=box)
+        end
+        pixel_shape === _UNSPECIFIED_PIPELINE_METADATA || throw(ArgumentError("pixel_shape can only be changed when prepending an input frame"))
+        bounding_box === _UNSPECIFIED_PIPELINE_METADATA || throw(ArgumentError("bounding_box can only be changed when prepending an input frame"))
+        return _rebuild_wcs(wcs, steps)
+    end
+
+    output isa AbstractCoordinateFrame || throw(ArgumentError("new output endpoint must be a coordinate frame"))
+    pixel_shape === _UNSPECIFIED_PIPELINE_METADATA || throw(ArgumentError("pixel_shape can only be changed when prepending an input frame"))
+    bounding_box === _UNSPECIFIED_PIPELINE_METADATA || throw(ArgumentError("bounding_box can only be changed when prepending an input frame"))
+    current = wcs.steps[input_index].transform
+    replaced = _replace_step(wcs.steps, input_index, Step(wcs.steps[input_index].frame, transform))
+    step = current === nothing ? Step(output) : Step(output, current)
+    steps = _insert_step(replaced, input_index + 1, step)
+    return _rebuild_wcs(wcs, steps)
+end
+
+"""Remove an intermediate frame and compose its adjacent transforms."""
+function remove_frame(wcs::WCS, frame)
+    index = _frame_index(wcs, frame)
+    1 < index < length(wcs.steps) || throw(ArgumentError("only an intermediate frame can be removed"))
+    incoming = wcs.steps[index - 1].transform
+    outgoing = wcs.steps[index].transform
+    combined = compose(incoming, outgoing)
+    replaced = _replace_step(wcs.steps, index - 1, Step(wcs.steps[index - 1].frame, combined))
+    return _rebuild_wcs(wcs, _remove_step(replaced, index))
+end
+
+"""Return a new WCS with one frame renamed and all other frame metadata preserved."""
+function rename_frame(wcs::WCS, frame, name)
+    index = _frame_index(wcs, frame)
+    new_name = String(name)
+    isempty(new_name) && throw(ArgumentError("frame name must not be empty"))
+    any(==(new_name), available_frames(wcs)) && new_name != wcs.steps[index].frame.name && throw(ArgumentError("frame name $new_name is already in the pipeline"))
+    renamed = _rename_frame(wcs.steps[index].frame, new_name)
+    steps = _replace_step(wcs.steps, index, Step(renamed, wcs.steps[index].transform))
+    return _rebuild_wcs(wcs, steps)
+end
+
+function prepend_frame(wcs::WCS, frame::AbstractCoordinateFrame, transform::AbstractTransform; pixel_shape=_UNSPECIFIED_PIPELINE_METADATA, bounding_box=_UNSPECIFIED_PIPELINE_METADATA)
+    return insert_frame(wcs, frame, transform, input_frame(wcs); pixel_shape, bounding_box)
+end
+
+append_frame(wcs::WCS, transform::AbstractTransform, frame::AbstractCoordinateFrame) = insert_frame(wcs, output_frame(wcs), transform, frame)
+
+function _commit!(builder::WCSBuilder, operation, args...; kwargs...)
+    candidate = operation(builder._wcs, args...; kwargs...)
+    builder._wcs = candidate
+    return builder
+end
+
+set_transform!(builder::WCSBuilder, args...) = _commit!(builder, set_transform, args...)
+insert_transform!(builder::WCSBuilder, args...; kwargs...) = _commit!(builder, insert_transform, args...; kwargs...)
+prepend_transform!(builder::WCSBuilder, args...) = _commit!(builder, prepend_transform, args...)
+append_transform!(builder::WCSBuilder, args...) = _commit!(builder, append_transform, args...)
+insert_frame!(builder::WCSBuilder, args...; kwargs...) = _commit!(builder, insert_frame, args...; kwargs...)
+remove_frame!(builder::WCSBuilder, args...) = _commit!(builder, remove_frame, args...)
+rename_frame!(builder::WCSBuilder, args...) = _commit!(builder, rename_frame, args...)
+prepend_frame!(builder::WCSBuilder, args...; kwargs...) = _commit!(builder, prepend_frame, args...; kwargs...)
+append_frame!(builder::WCSBuilder, args...) = _commit!(builder, append_frame, args...)
 
 function get_transform(wcs::WCS, from_frame, to_frame)
     from_index = _frame_index(wcs, from_frame)

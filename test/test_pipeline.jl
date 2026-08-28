@@ -1,3 +1,8 @@
+struct PipelineCompileFailure <: AbstractTransform{2,2} end
+
+(::PipelineCompileFailure)(coords::StaticVector{2}) = coords
+GWCS.compile_transform(::PipelineCompileFailure) = error("pipeline compilation failed")
+
 @testset "WCS pipeline" begin
     detector = Frame2D(name="detector", axes_names=("x", "y"), unit=("pixel", "pixel"))
     focal = Frame2D(name="focal", axes_names=("u", "v"), unit=("deg", "deg"))
@@ -49,6 +54,150 @@
     @test pixel_to_world(constant_wcs, ()) ≈ pixel_to_world(wcs, 11.0, 20.0)
     @test world_to_pixel(constant_wcs, pixel_to_world(constant_wcs)) == SVector{0,Float64}()
     @test eltype(world_to_pixel(constant_wcs, pixel_to_world(constant_wcs))) === Float64
+end
+
+@testset "Pipeline editing" begin
+    input = Frame2D(name="input", axes_names=("x", "y"))
+    middle = Frame2D(name="middle", axes_names=("u", "v"))
+    output = Frame2D(name="output", axes_names=("a", "b"))
+    first_transform = Shift(1.0) & Shift(2.0)
+    second_transform = Scale(2.0) & Scale(3.0)
+    box = BoundingBox(((0.0, 9.0), (0.0, 19.0)))
+    wcs = WCS(Step(input, first_transform), Step(middle, second_transform), Step(output); name="editable", pixel_shape=(10, 20), bounding_box=box)
+    pixel = SVector(1.0, 2.0)
+    world = SVector(4.0, 12.0)
+
+    @test get_frame(wcs, "middle") === middle
+    @test get_frame(wcs, :middle) === middle
+    @test get_frame(wcs, Frame2D(name="middle")) === middle
+    @test_throws "frame missing is not in the pipeline" get_frame(wcs, :missing)
+
+    replaced = set_transform(wcs, "input", "middle", IdentityTransform{2}())
+    @test pixel_to_world(replaced, pixel) == SVector(2.0, 6.0)
+    @test pixel_to_world(wcs, pixel) == world
+    @test_throws "not adjacent in forward order" set_transform(wcs, "input", "output", IdentityTransform{2}())
+    @test_throws DimensionMismatch set_transform(wcs, "input", "middle", Shift(1.0))
+    singular = set_transform(wcs, "middle", "output", AffineTransform(@SMatrix [1.0 0.0; 0.0 0.0]))
+    @test !has_inverse(singular.forward)
+
+    before_middle = insert_transform(wcs, "middle", Scale(10.0) & Scale(10.0))
+    after_middle = insert_transform(wcs, "middle", Scale(10.0) & Scale(10.0); after=true)
+    @test pixel_to_world(before_middle, pixel) == SVector(40.0, 120.0)
+    @test pixel_to_world(after_middle, pixel) == SVector(40.0, 120.0)
+    @test transform(before_middle, "input", "middle", pixel) == SVector(20.0, 40.0)
+    @test transform(after_middle, "input", "middle", pixel) == SVector(2.0, 4.0)
+    @test transform(after_middle, "middle", "output", 2.0, 4.0) == SVector(40.0, 120.0)
+    @test_throws "before the first frame" insert_transform(wcs, "input", IdentityTransform{2}())
+    @test_throws "after the last frame" insert_transform(wcs, "output", IdentityTransform{2}(); after=true)
+    @test pixel_to_world(prepend_transform(wcs, Scale(10.0) & Scale(10.0)), pixel) == SVector(22.0, 66.0)
+    @test pixel_to_world(append_transform(wcs, Shift(1.0) & Shift(1.0)), pixel) == SVector(5.0, 13.0)
+
+    inserted_before = insert_frame(wcs, Frame2D(name="inserted_before"), Scale(10.0) & Scale(10.0), middle)
+    @test available_frames(inserted_before) == ("input", "inserted_before", "middle", "output")
+    @test transform(inserted_before, "input", "inserted_before", pixel) == SVector(2.0, 4.0)
+    @test transform(inserted_before, "inserted_before", "middle", 2.0, 4.0) == SVector(20.0, 40.0)
+    @test pixel_to_world(inserted_before, pixel) == SVector(40.0, 120.0)
+
+    inserted_after = insert_frame(wcs, middle, Scale(10.0) & Scale(10.0), Frame2D(name="inserted_after"))
+    @test available_frames(inserted_after) == ("input", "middle", "inserted_after", "output")
+    @test transform(inserted_after, "middle", "inserted_after", 2.0, 4.0) == SVector(20.0, 40.0)
+    @test transform(inserted_after, "inserted_after", "output", 20.0, 40.0) == SVector(40.0, 120.0)
+    @test pixel_to_world(inserted_after, pixel) == SVector(40.0, 120.0)
+    @test_throws "exactly one inserted-frame endpoint" insert_frame(wcs, input, IdentityTransform{2}(), output)
+    @test_throws "exactly one inserted-frame endpoint" insert_frame(wcs, Frame2D(name="new1"), IdentityTransform{2}(), Frame2D(name="new2"))
+    @test_throws "new input endpoint must be a coordinate frame" insert_frame(wcs, "new", IdentityTransform{2}(), middle)
+
+    removable = insert_frame(wcs, middle, IdentityTransform{2}(), Frame2D(name="temporary"))
+    removed = remove_frame(removable, "temporary")
+    @test available_frames(removed) == available_frames(wcs)
+    @test pixel_to_world(removed, pixel) == world
+    @test world_to_pixel(removed, world) ≈ pixel
+    @test_throws "only an intermediate frame" remove_frame(wcs, "input")
+    @test_throws "only an intermediate frame" remove_frame(wcs, "output")
+
+    renamed = rename_frame(wcs, "middle", "focal")
+    @test available_frames(renamed) == ("input", "focal", "output")
+    @test pixel_to_world(renamed, pixel) == world
+    @test_throws "already in the pipeline" rename_frame(wcs, "middle", "input")
+    @test_throws "must not be empty" rename_frame(wcs, "middle", "")
+
+    frame_families = (
+        CoordinateFrame{1}(name="coordinate"),
+        CelestialFrame(name="celestial"),
+        SpectralFrame(name="spectral"),
+        TemporalFrame(name="temporal"),
+        StokesFrame(name="stokes"),
+        CompositeFrame((CelestialFrame(name="sky"), SpectralFrame(name="wave", axes_order=3)); name="composite")
+    )
+    for frame in frame_families
+        dimension = frame_dimension(frame)
+        family_wcs = WCS(Step(frame, IdentityTransform{dimension}()), Step(CoordinateFrame{dimension}(name="terminal")))
+        family_renamed = rename_frame(family_wcs, frame, "renamed")
+        @test typeof(input_frame(family_renamed)) == typeof(frame)
+        @test input_frame(family_renamed).name == "renamed"
+        @test axis_names(input_frame(family_renamed)) == axis_names(frame)
+        @test axis_units(input_frame(family_renamed)) == axis_units(frame)
+    end
+
+    @test_throws "explicit pixel_shape replacement" prepend_frame(wcs, Frame2D(name="new_input"), IdentityTransform{2}())
+    @test_throws "explicit bounding_box replacement" prepend_frame(wcs, Frame2D(name="new_input"), IdentityTransform{2}(); pixel_shape=(30, 40))
+    prepended = prepend_frame(wcs, Frame2D(name="new_input"), IdentityTransform{2}(); pixel_shape=(30, 40), bounding_box=BoundingBox(((0.0, 29.0), (0.0, 39.0))))
+    @test available_frames(prepended) == ("new_input", "input", "middle", "output")
+    @test prepended.pixel_shape == (30, 40)
+    @test prepended.bounding_box.intervals == ((0.0, 29.0), (0.0, 39.0))
+    @test pixel_to_world(prepended, pixel) == world
+    cleared = prepend_frame(wcs, Frame2D(name="unbounded_input"), IdentityTransform{2}(); pixel_shape=nothing, bounding_box=nothing)
+    @test cleared.pixel_shape === nothing
+    @test cleared.bounding_box === nothing
+
+    appended = append_frame(wcs, IdentityTransform{2}(), Frame2D(name="new_output"))
+    @test available_frames(appended) == ("input", "middle", "output", "new_output")
+    @test appended.pixel_shape == wcs.pixel_shape
+    @test appended.bounding_box === box
+    @test pixel_to_world(appended, pixel) == world
+
+    builder = WCSBuilder(wcs)
+    @test WCS(builder) === wcs
+    set_transform!(builder, "input", "middle", IdentityTransform{2}())
+    @test pixel_to_world(WCS(builder), pixel) == SVector(2.0, 6.0)
+    rename_frame!(builder, "middle", "focal")
+    insert_frame!(builder, "focal", IdentityTransform{2}(), Frame2D(name="temporary"))
+    remove_frame!(builder, "temporary")
+    @test available_frames(WCS(builder)) == ("input", "focal", "output")
+
+    snapshot = WCS(builder)
+    @test_throws DimensionMismatch set_transform!(builder, "input", "focal", Shift(1.0))
+    @test WCS(builder) === snapshot
+    @test_throws "pipeline compilation failed" set_transform!(builder, "input", "focal", PipelineCompileFailure())
+    @test WCS(builder) === snapshot
+
+    insert_builder = WCSBuilder(wcs)
+    insert_transform!(insert_builder, "middle", Scale(10.0) & Scale(10.0))
+    @test pixel_to_world(WCS(insert_builder), pixel) == pixel_to_world(before_middle, pixel)
+    prepend_builder = WCSBuilder(wcs)
+    prepend_transform!(prepend_builder, Scale(10.0) & Scale(10.0))
+    @test pixel_to_world(WCS(prepend_builder), pixel) == pixel_to_world(prepend_transform(wcs, Scale(10.0) & Scale(10.0)), pixel)
+    append_builder = WCSBuilder(wcs)
+    append_transform!(append_builder, Shift(1.0) & Shift(1.0))
+    @test pixel_to_world(WCS(append_builder), pixel) == SVector(5.0, 13.0)
+    prepend_frame_builder = WCSBuilder(wcs)
+    prepend_frame!(prepend_frame_builder, Frame2D(name="builder_input"), IdentityTransform{2}(); pixel_shape=nothing, bounding_box=nothing)
+    @test available_frames(WCS(prepend_frame_builder)) == ("builder_input", "input", "middle", "output")
+    append_frame_builder = WCSBuilder(wcs)
+    append_frame!(append_frame_builder, IdentityTransform{2}(), Frame2D(name="builder_output"))
+    @test available_frames(WCS(append_frame_builder)) == ("input", "middle", "output", "builder_output")
+
+    constructed = WCSBuilder(Step(input, first_transform), Step(middle, second_transform), Step(output); name="built")
+    @test WCS(constructed).name == "built"
+
+    allocated_forward(edited, coords) = @allocated pixel_to_world(edited, coords)
+    allocated_backward(edited, coords) = @allocated world_to_pixel(edited, coords)
+    pixel_to_world(renamed, pixel)
+    world_to_pixel(renamed, world)
+    @test @inferred(pixel_to_world(renamed, pixel)) == world
+    @test @inferred(world_to_pixel(renamed, world)) ≈ pixel
+    @test allocated_forward(renamed, pixel) == 0
+    @test allocated_backward(renamed, world) == 0
 end
 
 @testset "Frame axis ordering" begin
