@@ -5,6 +5,7 @@ using StaticArrays
 import GWCS: compile_transform, inverse_transform
 
 const parsed_context = Ref{Any}()
+const validated_context = Ref{Any}()
 
 struct OffsetTransform{T<:Real} <: AbstractTransform{1,1}
     offset::T
@@ -47,6 +48,18 @@ end
 
 parse_default(node, context) = OffsetTransform(metadata_value(required_metadata(node, "offset", context)))
 parse_other(node, context) = OffsetTransform(10 * metadata_value(required_metadata(node, "offset", context)))
+
+function validate_legacy(node, context)
+    validated_context[] = (metadata_tag(context), metadata_version(context), metadata_path(context))
+    required_metadata(node, "legacy_offset", context)
+    return nothing
+end
+
+function normalize_legacy(node, context)
+    normalized = Dict{Any,Any}(node)
+    normalized["offset"] = metadata_value(node["legacy_offset"])
+    return normalized
+end
 
 end
 
@@ -142,6 +155,28 @@ end
     @test parse_transform(GWCS._load_tagged_yaml(versioned_metadata); registry=versioned_registry)(SVector(1.0)) == SVector(21.0)
     unsupported_version = replace(versioned_metadata, "versioned-2.0.0" => "versioned-3.0.0")
     @test_throws "unsupported transform tag version" parse_transform(GWCS._load_tagged_yaml(unsupported_version); registry=versioned_registry)
+
+    exact_registry = copy(default_transform_registry())
+    register_transform!(exact_registry, "tag:example.org:gwcs/exact", RegistrationFixture.parse_offset; versions=(v"1.0.0", v"1.2.0"), validate=RegistrationFixture.validate_legacy, normalize=RegistrationFixture.normalize_legacy)
+    exact_metadata = "!<tag:example.org:gwcs/exact-1.2.0> {legacy_offset: 2.0}"
+    @test parse_transform(GWCS._load_tagged_yaml(exact_metadata); registry=exact_registry)(SVector(1.0)) == SVector(3.0)
+    @test RegistrationFixture.validated_context[] == ("tag:example.org:gwcs/exact", v"1.2.0", "transform")
+    @test_throws "supported versions are {1.0.0, 1.2.0}" parse_transform(GWCS._load_tagged_yaml(replace(exact_metadata, "exact-1.2.0" => "exact-1.1.0")); registry=exact_registry)
+    @test_throws "cannot be combined" register_transform!(exact_registry, "tag:example.org:gwcs/mixed", RegistrationFixture.parse_offset; versions=(v"1.0.0",), min_version=v"1.0.0")
+
+    fresh_registry = TransformRegistry()
+    register_transform!(fresh_registry, "tag:example.org:gwcs/offset", RegistrationFixture.parse_offset; versions=(v"1.0.0",))
+    fresh_wcs = parse_wcs("""
+    !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: custom
+    steps:
+      - !<tag:stsci.edu:gwcs/step-1.3.0>
+        frame: !<tag:stsci.edu:gwcs/frame-1.2.0> {name: input, naxes: 1}
+        transform: !<tag:example.org:gwcs/offset-1.0.0> {offset: 2.0}
+      - !<tag:stsci.edu:gwcs/step-1.3.0>
+        frame: !<tag:stsci.edu:gwcs/frame-1.2.0> {name: output, naxes: 1}
+    """; registry=fresh_registry)
+    @test pixel_to_world(fresh_wcs, 1.0) == SVector(3.0)
 
     bad_registry = copy(default_transform_registry())
     register_transform!(bad_registry, "tag:example.org:gwcs/bad", (node, context) -> 1)

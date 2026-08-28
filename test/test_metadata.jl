@@ -113,6 +113,99 @@
     @test_throws "same input cannot be fixed more than once" parse_transform(GWCS._load_tagged_yaml(duplicate))
 end
 
+@testset "Metadata schema versions" begin
+    registry = default_transform_registry()
+    transform_versions = Dict(
+        "compose" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "concatenate" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "add" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "subtract" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "multiply" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "divide" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "power" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "shift" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "scale" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "identity" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "affine" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
+        "gnomonic" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "rotate3d" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
+        "constant" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0", v"1.6.0"),
+        "remap_axes" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
+        "polynomial" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0"),
+        "rotate_sequence_3d" => (v"1.0.0", v"1.1.0", v"1.2.0")
+    )
+    for (name, versions) in transform_versions
+        registration = only(registry.registrations["tag:stsci.edu:asdf/transform/$name"])
+        @test registration.versions == versions
+    end
+    @test only(registry.registrations["tag:stsci.edu:asdf/transform/fix_inputs"]).versions == (v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0")
+    @test only(registry.registrations["tag:stsci.edu:gwcs/spherical_cartesian"]).versions == (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0")
+    @test only(registry.registrations["tag:stsci.edu:gwcs/regions_selector"]).versions == (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0")
+    @test registry.schemas["tag:stsci.edu:gwcs/wcs"].versions == (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0")
+    @test registry.schemas["tag:stsci.edu:gwcs/step"].versions == (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0")
+    @test registry.schemas["tag:stsci.edu:gwcs/frame"].versions == (v"1.0.0", v"1.1.0", v"1.2.0")
+    @test registry.schemas["tag:stsci.edu:gwcs/label_mapper"].versions == (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0")
+    @test registry.schemas["tag:stsci.edu:asdf/transform/property/bounding_box"].versions == (v"1.0.0", v"1.1.0", v"1.2.0")
+    @test registry.schemas["tag:astropy.org:astropy/coordinates/frames/icrs"].versions == (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0")
+    @test registry.schemas["tag:stsci.edu:asdf/core/ndarray"].versions == (v"1.0.0", v"1.1.0", v"1.2.0")
+
+    function minimal_wcs(wcs_version, step_version, frame_version; pixel_shape=false)
+        shape = pixel_shape ? "pixel_shape: [10]\n" : ""
+        return """
+        !<tag:stsci.edu:gwcs/wcs-$wcs_version>
+        name: versioned
+        $(shape)steps:
+          - !<tag:stsci.edu:gwcs/step-$step_version>
+            frame: !<tag:stsci.edu:gwcs/frame-$frame_version>
+              name: input
+              naxes: 1
+            transform: !<tag:stsci.edu:asdf/transform/identity-1.4.0> {n_dims: 1}
+          - !<tag:stsci.edu:gwcs/step-$step_version>
+            frame: !<tag:stsci.edu:gwcs/frame-$frame_version>
+              name: output
+              naxes: 1
+        """
+    end
+
+    cases = (
+        (v"1.0.0", v"1.0.0", v"1.0.0"),
+        (v"1.1.0", v"1.1.0", v"1.0.0"),
+        (v"1.2.0", v"1.1.0", v"1.0.0"),
+        (v"1.3.0", v"1.2.0", v"1.1.0"),
+        (v"1.4.0", v"1.3.0", v"1.2.0")
+    )
+    for (wcs_version, step_version, frame_version) in cases
+        wcs = parse_wcs(minimal_wcs(wcs_version, step_version, frame_version; pixel_shape=wcs_version >= v"1.2.0"))
+        @test pixel_to_world(wcs, 2.0) == SVector(2.0)
+    end
+
+    @test_throws "unsupported metadata tag version tag:stsci.edu:gwcs/wcs-1.5.0" parse_wcs(minimal_wcs(v"1.5.0", v"1.3.0", v"1.2.0"; pixel_shape=true))
+    wrong_step = replace(minimal_wcs(v"1.0.0", v"1.0.0", v"1.0.0"), "gwcs/step-1.0.0" => "gwcs/frame-1.0.0"; count=1)
+    @test_throws "expected metadata tag tag:stsci.edu:gwcs/step" parse_wcs(wrong_step)
+    @test_throws "property pixel_shape is not supported" parse_wcs(minimal_wcs(v"1.1.0", v"1.1.0", v"1.0.0"; pixel_shape=true))
+    @test_throws "expected a string at wcs/name" parse_wcs(replace(minimal_wcs(v"1.4.0", v"1.3.0", v"1.2.0"), "name: versioned" => "name: 1"))
+    @test_throws "expected an array at wcs/steps" parse_wcs("!<tag:stsci.edu:gwcs/wcs-1.4.0> {name: bad, steps: {}}")
+    @test_throws "unsupported transform tag version tag:stsci.edu:asdf/transform/shift-1.5.0" parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/shift-1.5.0> {offset: 1}"))
+
+    @test parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/constant-1.3.0> {value: 2}"))(SVector{0,Float64}()) == SVector(2)
+    @test_throws "property dimensions is not supported" parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/constant-1.3.0> {value: 2, dimensions: 1}"))
+    @test_throws "missing required property dimensions" parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/constant-1.4.0> {value: 2}"))
+    @test_throws "expected a unitless numeric value at transform/value" parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/constant-1.6.0> {value: bad, dimensions: 1}"))
+
+    affine_ndarray = """
+    !<tag:stsci.edu:asdf/transform/affine-1.5.0>
+    matrix: !<tag:stsci.edu:asdf/core/ndarray-9.0.0>
+      data: [[1.0, 0.0], [0.0, 1.0]]
+      shape: [2, 2]
+    """
+    @test_throws "unsupported metadata tag version tag:stsci.edu:asdf/core/ndarray-9.0.0" parse_transform(GWCS._load_tagged_yaml(affine_ndarray))
+
+    roman = read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String)
+    for version in ("1.2.0", "1.3.0")
+        @test output_frame(parse_wcs(replace(roman, "icrs-1.1.0" => "icrs-$version"))).reference_frame === :ICRS
+    end
+end
+
 @testset "ASDF region selectors" begin
     metadata = read(joinpath(@__DIR__, "fixtures", "asdf_selectors.yaml"), String)
     fixture = GWCS._load_tagged_yaml(metadata)
@@ -186,7 +279,7 @@ end
     end
 
     bad_version = replace(metadata, "property/bounding_box-1.2.0" => "property/bounding_box-1.3.0"; count=1)
-    @test_throws "supported range is [1.0.0, 1.3.0)" parse_wcs(GWCS._load_tagged_yaml(bad_version)["simple_ignored"])
+    @test_throws "supported versions are {1.0.0, 1.1.0, 1.2.0}" parse_wcs(GWCS._load_tagged_yaml(bad_version)["simple_ignored"])
 
     @test_throws "is not among" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "x: [0.0, 5.0]" => "bad: [0.0, 5.0]"; count=1))["simple_ignored"])
     @test_throws "account for every transform input" parse_wcs(GWCS._load_tagged_yaml(replace(metadata, "ignore: [slice]" => "ignore: []"; count=1))["simple_ignored"])
@@ -247,7 +340,7 @@ end
     @test @inferred(parsed(SVector(3.0))) == SVector(24.0)
     @test allocated_parsed_arithmetic(parsed, SVector(3.0)) == 0
 
-    @test_throws "expected an array containing two transforms at transform/forward" parse_transform(GWCS._load_tagged_yaml("""
+    @test_throws "expected an array at transform/forward" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/add-1.4.0>
     forward: invalid
     """))
@@ -427,17 +520,17 @@ end
     axes_order: xyz
     rotation_type: spherical
     """))
-    @test_throws "registered ranges are [1.0.0, 1.5.0)" parse_transform(GWCS._load_tagged_yaml("""
+    @test_throws "supported versions are {1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.4.0}" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/identity-1.5.0> {n_dims: 1}
     """))
-    @test_throws "registered ranges are [1.0.0, 1.6.0)" parse_transform(GWCS._load_tagged_yaml("""
+    @test_throws "supported versions are {1.0.0, 1.1.0, 1.2.0, 1.3.0, 1.4.0, 1.5.0}" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate3d-1.6.0>
     phi: 1.0
     theta: 2.0
     psi: 3.0
     direction: xyz
     """))
-    @test_throws "registered ranges are [1.0.0, 1.3.0)" parse_transform(GWCS._load_tagged_yaml("""
+    @test_throws "supported versions are {1.0.0, 1.1.0, 1.2.0}" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate_sequence_3d-1.3.0>
     angles: [1.0]
     axes_order: x

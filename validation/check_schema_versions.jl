@@ -1,0 +1,77 @@
+using GWCS
+
+const PYTHON = get(ENV, "PYTHON", expanduser("~/.venvs/311_main/bin/python"))
+
+function resource_path(package)
+    isfile(PYTHON) || error("Python executable not found at $PYTHON; set PYTHON to an environment containing $package")
+    code = "import importlib.resources; root = importlib.resources.files('$package'); print(root if hasattr(root, '__fspath__') else next(iter(root.iterdir())).parent)"
+    return strip(read(`$PYTHON -c $code`, String))
+end
+
+function available_versions(root, family)
+    prefix = family * "-"
+    versions = VersionNumber[]
+    for path in readdir(root)
+        startswith(path, prefix) && endswith(path, ".yaml") || continue
+        push!(versions, VersionNumber(path[(length(prefix) + 1):(end - 5)]))
+    end
+    return Tuple(sort!(versions))
+end
+
+function available_versions(roots::Tuple, family)
+    versions = VersionNumber[]
+    for root in roots
+        append!(versions, available_versions(root, family))
+    end
+    return Tuple(sort!(unique!(versions)))
+end
+
+function registered_versions(registry, family)
+    registrations = registry.registrations[family]
+    length(registrations) == 1 || error("expected one built-in registration for $family")
+    versions = only(registrations).versions
+    versions === nothing && error("built-in registration for $family uses a version interval")
+    return versions
+end
+
+registry = default_transform_registry()
+transform_root = joinpath(resource_path("asdf_transform_schemas.resources"), "stsci.edu", "schemas")
+gwcs_root = joinpath(resource_path("asdf_wcs_schemas.resources"), "schemas", "stsci.edu", "gwcs")
+
+for family in ("compose", "concatenate", "add", "subtract", "multiply", "divide", "power", "shift", "scale", "identity", "affine", "gnomonic", "rotate3d", "constant", "fix_inputs", "remap_axes", "polynomial", "rotate_sequence_3d")
+    registered = registered_versions(registry, "tag:stsci.edu:asdf/transform/$family")
+    available = available_versions(transform_root, family)
+    registered == available || error("$family versions differ: GWCS.jl has $registered, schema package has $available")
+end
+
+for family in ("wcs", "step", "frame", "frame2d", "celestial_frame", "spectral_frame", "temporal_frame", "stokes_frame", "composite_frame", "label_mapper")
+    registered = registry.schemas["tag:stsci.edu:gwcs/$family"].versions
+    available = available_versions(gwcs_root, family)
+    registered == available || error("$family versions differ: GWCS.jl has $registered, schema package has $available")
+end
+
+for family in ("spherical_cartesian", "regions_selector")
+    registered = registered_versions(registry, "tag:stsci.edu:gwcs/$family")
+    available = available_versions(gwcs_root, family)
+    registered == available || error("$family versions differ: GWCS.jl has $registered, schema package has $available")
+end
+
+property_root = joinpath(transform_root, "property")
+for family in ("bounding_box", "compound_bounding_box")
+    registered = registry.schemas["tag:stsci.edu:asdf/transform/property/$family"].versions
+    available = available_versions(property_root, family)
+    registered == available || error("$family versions differ: GWCS.jl has $registered, schema package has $available")
+end
+
+coordinate_root = joinpath(resource_path("asdf_coordinates_schemas.resources"), "schemas", "frames")
+registered_icrs = registry.schemas["tag:astropy.org:astropy/coordinates/frames/icrs"].versions
+available_icrs = available_versions(coordinate_root, "icrs")
+registered_icrs == available_icrs || error("ICRS versions differ: GWCS.jl has $registered_icrs, schema package has $available_icrs")
+
+asdf_root = resource_path("asdf_standard.resources")
+ndarray_roots = (joinpath(asdf_root, "stable", "schemas", "stsci.edu", "asdf", "core"), joinpath(asdf_root, "unstable", "schemas", "stsci.edu", "asdf", "core"))
+registered_ndarray = registry.schemas["tag:stsci.edu:asdf/core/ndarray"].versions
+available_ndarray = available_versions(ndarray_roots, "ndarray")
+registered_ndarray == available_ndarray || error("ndarray versions differ: GWCS.jl has $registered_ndarray, schema package has $available_ndarray")
+
+println("GWCS.jl metadata schema versions match the installed ASDF schema packages")
