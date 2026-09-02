@@ -17,26 +17,36 @@ struct MetadataSchemaRegistration{V,N,S}
     normalizer::N
 end
 
+"""Canonical metadata serializer registered for one transform type."""
+struct TransformSerializerRegistration{F}
+    transform_type
+    tag::String
+    version::VersionNumber
+    serializer::F
+end
+
 """
     TransformRegistry()
 
-Mutable construction-time registry for metadata transform constructors.
+Mutable construction-time registry for metadata transform constructors and
+serializers.
 """
 mutable struct TransformRegistry
     registrations::Dict{String,Vector{Any}}
     schemas::Dict{String,MetadataSchemaRegistration}
+    serializers::Vector{Any}
     lock::ReentrantLock
 end
 
 function TransformRegistry()
     schemas = isdefined(@__MODULE__, :_DEFAULT_TRANSFORM_REGISTRY) ? copy(_DEFAULT_TRANSFORM_REGISTRY.schemas) : Dict{String,MetadataSchemaRegistration}()
-    return TransformRegistry(Dict{String,Vector{Any}}(), schemas, ReentrantLock())
+    return TransformRegistry(Dict{String,Vector{Any}}(), schemas, Any[], ReentrantLock())
 end
 
 function Base.copy(registry::TransformRegistry)
     return lock(registry.lock) do
         registrations = Dict(tag => copy(values) for (tag, values) in registry.registrations)
-        TransformRegistry(registrations, copy(registry.schemas), ReentrantLock())
+        TransformRegistry(registrations, copy(registry.schemas), copy(registry.serializers), ReentrantLock())
     end
 end
 
@@ -56,6 +66,18 @@ end
 metadata_tag(context::TransformParseContext) = context.tag
 metadata_version(context::TransformParseContext) = context.version
 metadata_path(context::TransformParseContext) = context.path
+
+"""Metadata tag, version, path, and registry supplied to a serializer."""
+struct TransformWriteContext
+    tag::String
+    version::VersionNumber
+    path::String
+    registry::TransformRegistry
+end
+
+metadata_tag(context::TransformWriteContext) = context.tag
+metadata_version(context::TransformWriteContext) = context.version
+metadata_path(context::TransformWriteContext) = context.path
 
 function _version_range(registration::TransformRegistration)
     registration.versions === nothing && return "[$(registration.min_version), $(registration.max_version))"
@@ -129,6 +151,51 @@ end
 
 function register_transform!(tag::AbstractString, constructor; registry=default_transform_registry(), kwargs...)
     return register_transform!(registry, tag, constructor; kwargs...)
+end
+
+"""
+    register_transform_serializer!([registry], type, tag, serializer; version)
+
+Register a canonical metadata serializer for an `AbstractTransform` subtype.
+The serializer receives the transform and a `TransformWriteContext` and must
+return an untagged mapping. The registry attaches `tag-version`.
+"""
+function register_transform_serializer!(registry::TransformRegistry, transform_type, tag::AbstractString, serializer; version)
+    transform_type <: AbstractTransform || throw(ArgumentError("transform serializer type must subtype AbstractTransform"))
+    version isa VersionNumber || throw(ArgumentError("transform serializer version must be a VersionNumber"))
+    version >= v"0.0.0" || throw(ArgumentError("transform serializer version must be non-negative"))
+    family = String(tag)
+    isempty(family) && throw(ArgumentError("transform serializer tag must not be empty"))
+    occursin(r"-\d+\.\d+\.\d+$", family) && throw(ArgumentError("transform serializer tag must omit the schema version: $family"))
+    registration = TransformSerializerRegistration(transform_type, family, version, serializer)
+    lock(registry.lock) do
+        parsers = get(registry.registrations, family, Any[])
+        any(parser -> _registration_accepts(parser, version), parsers) || throw(ArgumentError("transform serializer tag $family-$version has no matching parser registration"))
+        any(existing -> existing.transform_type == transform_type, registry.serializers) && throw(ArgumentError("transform serializer for $transform_type is already registered"))
+        push!(registry.serializers, registration)
+    end
+    return registry
+end
+
+function register_transform_serializer!(transform_type, tag::AbstractString, serializer; registry=default_transform_registry(), version)
+    return register_transform_serializer!(registry, transform_type, tag, serializer; version)
+end
+
+function _lookup_transform_serializer(registry::TransformRegistry, transform::AbstractTransform, path)
+    transform_type = typeof(transform)
+    candidates = lock(registry.lock) do
+        filter(registration -> transform_type <: registration.transform_type, registry.serializers)
+    end
+    isempty(candidates) && _metadata_error(path, "no metadata serializer is registered for $transform_type")
+    selected = first(candidates)
+    for candidate in Iterators.drop(candidates, 1)
+        if candidate.transform_type <: selected.transform_type
+            selected = candidate
+        elseif !(selected.transform_type <: candidate.transform_type)
+            _metadata_error(path, "metadata serializers for $(selected.transform_type) and $(candidate.transform_type) are ambiguous for $transform_type")
+        end
+    end
+    return selected
 end
 
 function _split_metadata_tag(tag::AbstractString, path)
