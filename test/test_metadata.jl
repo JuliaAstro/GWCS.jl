@@ -128,6 +128,13 @@ end
         "identity" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
         "affine" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
         "gnomonic" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "zenithal_perspective" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
+        "slant_zenithal_perspective" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "stereographic" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "slant_orthographic" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "zenithal_equidistant" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "zenithal_equal_area" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
+        "airy" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"),
         "rotate3d" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
         "constant" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0", v"1.6.0"),
         "remap_axes" => (v"1.0.0", v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0", v"1.5.0"),
@@ -408,10 +415,33 @@ end
     !<tag:stsci.edu:asdf/transform/gnomonic-1.4.0>
     direction: sky2pix
     """))
-    @test pix2sky isa TangentPlaneToNative
-    @test sky2pix isa NativeToTangentPlane
+    @test pix2sky isa IntermediateToNative{GnomonicProjection}
+    @test sky2pix isa NativeToIntermediate{GnomonicProjection}
     @test pix2sky(SVector(0.0, 0.0)) == SVector(0.0, 90.0)
     @test sky2pix(pix2sky(SVector(1.0, 2.0))) ≈ SVector(1.0, 2.0) atol=1e-14
+
+    projection_metadata = (
+        ("zenithal_perspective-1.5.0", "{direction: sky2pix, mu: 1.5, gamma: 15.0}", ZenithalPerspective),
+        ("slant_zenithal_perspective-1.4.0", "{direction: sky2pix, mu: 1.5, phi0: 15.0, theta0: 80.0}", SlantZenithalPerspective),
+        ("stereographic-1.4.0", "{direction: sky2pix}", StereographicProjection),
+        ("slant_orthographic-1.4.0", "{direction: sky2pix, xi: 0.1, eta: 0.2}", SlantOrthographic),
+        ("zenithal_equidistant-1.4.0", "{direction: sky2pix}", ZenithalEquidistant),
+        ("zenithal_equal_area-1.4.0", "{direction: sky2pix}", ZenithalEqualArea),
+        ("airy-1.4.0", "{direction: sky2pix, theta_b: 75.8}", AiryProjection)
+    )
+    for (tag, properties, projection_type) in projection_metadata
+        parsed = parse_transform(GWCS._load_tagged_yaml("""
+        !<tag:stsci.edu:asdf/transform/$tag> $properties
+        """))
+        @test parsed isa NativeToIntermediate
+        @test parsed.projection isa projection_type
+        @test inverse_transform(parsed)(parsed(SVector(30.0, 60.0))) ≈ SVector(30.0, 60.0) atol=1e-10
+    end
+    default_azp = parse_transform(GWCS._load_tagged_yaml("""
+    !<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0> {}
+    """))
+    @test default_azp.projection.mu == 0
+    @test default_azp.projection.gamma == 0
 
     native_to_celestial = parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate3d-1.5.0>
@@ -494,6 +524,13 @@ end
     """))
     @test_throws "expected one of pix2sky, sky2pix, got sideways at transform/direction" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/gnomonic-1.4.0> {direction: sideways}
+    """))
+    @test_throws "zenithal perspective projection is undefined for mu = -1 at transform" parse_transform(GWCS._load_tagged_yaml("""
+    !<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0> {mu: -1}
+    """))
+    @test_throws "expected a unitless numeric value at transform/gamma" parse_transform(GWCS._load_tagged_yaml("""
+    !<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0>
+    gamma: !<tag:stsci.edu:asdf/unit/quantity-1.2.0> {value: 15.0, unit: deg}
     """))
     @test_throws "missing required property psi at transform" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate3d-1.5.0>

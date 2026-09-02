@@ -111,11 +111,20 @@ function _validate_affine_schema(node, context)
     return nothing
 end
 
-function _validate_gnomonic_schema(node, context)
+function _validate_projection_schema(node, context, parameters=())
     _validate_required_transform(node, context, ())
-    haskey(node, "direction") && _schema_string(metadata_value(node["direction"]), "$(metadata_path(context))/direction")
+    path = metadata_path(context)
+    if haskey(node, "direction")
+        direction = _schema_string(metadata_value(node["direction"]), "$path/direction")
+        direction in ("pix2sky", "sky2pix") || _metadata_error("$path/direction", "expected one of pix2sky, sky2pix, got $direction")
+    end
+    for parameter in parameters
+        haskey(node, parameter) && _schema_number(metadata_value(node[parameter]), "$path/$parameter")
+    end
     return nothing
 end
+
+_validate_gnomonic_schema(node, context) = _validate_projection_schema(node, context)
 
 function _validate_rotate3d_schema(node, context)
     _validate_required_transform(node, context, ("phi", "theta", "psi", "direction"))

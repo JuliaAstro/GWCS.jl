@@ -52,7 +52,7 @@ end
 
 function tan_wcs(fits)
     linear = AffineTransform(fits.cd, -(fits.cd * fits.crpix))
-    transform = compose(linear, TangentPlaneToNative(), NativeToCelestial(fits.alpha_p, fits.delta_p, fits.lonpole))
+    transform = compose(linear, IntermediateToNative(GnomonicProjection()), NativeToCelestial(fits.alpha_p, fits.delta_p, fits.lonpole))
     return GWCS.WCS(Step(PIXEL_FRAME, transform), Step(WORLD_FRAME))
 end
 
@@ -73,7 +73,7 @@ end
 function tan_sip_wcs(fits, a, b, ap, bp)
     distortion = sip_distortion(fits.crpix, a, b, ap, bp)
     linear = AffineTransform(fits.cd, -(fits.cd * fits.crpix))
-    transform = compose(distortion, linear, TangentPlaneToNative(), NativeToCelestial(fits.alpha_p, fits.delta_p, fits.lonpole))
+    transform = compose(distortion, linear, IntermediateToNative(GnomonicProjection()), NativeToCelestial(fits.alpha_p, fits.delta_p, fits.lonpole))
     return GWCS.WCS(Step(PIXEL_FRAME, transform), Step(WORLD_FRAME))
 end
 
@@ -194,7 +194,7 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "projections", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -217,6 +217,38 @@ SUITE["construction"]["editing/set_transform"] = @benchmarkable set_transform($G
 SUITE["construction"]["editing/insert_frame"] = @benchmarkable insert_frame($GWCS_LINEAR, $PIXEL_FRAME, IdentityTransform{2}(), $EDIT_FRAME) evals=1
 SUITE["construction"]["editing/remove_frame"] = @benchmarkable remove_frame($EDIT_INSERTED_WCS, $EDIT_FRAME) evals=1
 SUITE["construction"]["editing/sequence"] = @benchmarkable edit_sequence($GWCS_LINEAR) evals=1
+
+const PROJECTION_COORDS = SVector(1.0, 2.0)
+const NATIVE_COORDS = SVector(30.0, 60.0)
+
+function fits_intermediate_to_native(projection, coords)
+    phi, theta = FITSWCS.intermediate_to_native(projection, coords...)
+    return SVector(rad2deg(phi), rad2deg(theta))
+end
+
+function fits_native_to_intermediate(projection, coords)
+    return SVector(FITSWCS.native_to_intermediate(projection, deg2rad(coords[1]), deg2rad(coords[2])))
+end
+
+for (name, fits_projection, gwcs_projection) in (
+    ("TAN", FITSWCS.TAN(), GnomonicProjection()),
+    ("AZP", FITSWCS.AZP(1.5, 15.0), ZenithalPerspective(1.5, 15.0)),
+    ("SZP", FITSWCS.SZP(1.5, 15.0, 80.0), SlantZenithalPerspective(1.5, 15.0, 80.0)),
+    ("STG", FITSWCS.STG(), StereographicProjection()),
+    ("SIN", FITSWCS.SIN(0.1, 0.2), SlantOrthographic(0.1, 0.2)),
+    ("ARC", FITSWCS.ARC(), ZenithalEquidistant()),
+    ("ZEA", FITSWCS.ZEA(), ZenithalEqualArea()),
+    ("AIR", FITSWCS.AIR(75.8), AiryProjection(75.8))
+)
+    to_native = IntermediateToNative(gwcs_projection)
+    to_intermediate = NativeToIntermediate(gwcs_projection)
+    @assert to_native(PROJECTION_COORDS) ≈ fits_intermediate_to_native(fits_projection, PROJECTION_COORDS) atol=1e-10
+    @assert to_intermediate(NATIVE_COORDS) ≈ fits_native_to_intermediate(fits_projection, NATIVE_COORDS) atol=1e-10
+    SUITE["projections"]["$name/intermediate_to_native/FITSWCS"] = @benchmarkable fits_intermediate_to_native($fits_projection, $PROJECTION_COORDS) evals=100
+    SUITE["projections"]["$name/intermediate_to_native/GWCS"] = @benchmarkable $to_native($PROJECTION_COORDS) evals=100
+    SUITE["projections"]["$name/native_to_intermediate/FITSWCS"] = @benchmarkable fits_native_to_intermediate($fits_projection, $NATIVE_COORDS) evals=100
+    SUITE["projections"]["$name/native_to_intermediate/GWCS"] = @benchmarkable $to_intermediate($NATIVE_COORDS) evals=100
+end
 
 SUITE["callable"]["forward/native"] = @benchmarkable $NATIVE_CALLABLE_REFERENCE($PIXEL) evals=100
 SUITE["callable"]["forward/wrapper"] = @benchmarkable $CALLABLE_REFERENCE($PIXEL) evals=100

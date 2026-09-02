@@ -295,9 +295,56 @@ function _parse_affine(node, context)
     return AffineTransform(matrix, translation)
 end
 
-function _parse_gnomonic(node, context)
+function _parse_projection(node, context, projection)
     direction = _metadata_enum(node, "direction", ("pix2sky", "sky2pix"), context; default="pix2sky")
-    return direction == "pix2sky" ? TangentPlaneToNative() : NativeToTangentPlane()
+    return direction == "pix2sky" ? IntermediateToNative(projection) : NativeToIntermediate(projection)
+end
+
+_parse_gnomonic(node, context) = _parse_projection(node, context, GnomonicProjection())
+
+function _projection_parameter(node, key, default)
+    return haskey(node, key) ? metadata_value(node[key]) : default
+end
+
+function _construct_projection(constructor, context)
+    try
+        return constructor()
+    catch error
+        error isa ArgumentError || rethrow()
+        _metadata_error(metadata_path(context), sprint(showerror, error))
+    end
+end
+
+function _parse_zenithal_perspective(node, context)
+    projection = _construct_projection(context) do
+        ZenithalPerspective(_projection_parameter(node, "mu", 0), _projection_parameter(node, "gamma", 0))
+    end
+    return _parse_projection(node, context, projection)
+end
+
+function _parse_slant_zenithal_perspective(node, context)
+    projection = _construct_projection(context) do
+        SlantZenithalPerspective(_projection_parameter(node, "mu", 0), _projection_parameter(node, "phi0", 0), _projection_parameter(node, "theta0", 90))
+    end
+    return _parse_projection(node, context, projection)
+end
+
+_parse_stereographic(node, context) = _parse_projection(node, context, StereographicProjection())
+
+function _parse_slant_orthographic(node, context)
+    projection = _construct_projection(context) do
+        SlantOrthographic(_projection_parameter(node, "xi", 0), _projection_parameter(node, "eta", 0))
+    end
+    return _parse_projection(node, context, projection)
+end
+
+_parse_zenithal_equidistant(node, context) = _parse_projection(node, context, ZenithalEquidistant())
+_parse_zenithal_equal_area(node, context) = _parse_projection(node, context, ZenithalEqualArea())
+function _parse_airy(node, context)
+    projection = _construct_projection(context) do
+        AiryProjection(_projection_parameter(node, "theta_b", 90))
+    end
+    return _parse_projection(node, context, projection)
 end
 
 function _parse_constant(node, context)
@@ -619,6 +666,13 @@ function _register_builtin_transform_parsers!()
     register_transform!("$asdf_transform/identity", _parse_identity; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_identity_schema)
     register_transform!("$asdf_transform/affine", _parse_affine; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_affine_schema)
     register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+    register_transform!("$asdf_transform/zenithal_perspective", _parse_zenithal_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "gamma")))
+    register_transform!("$asdf_transform/slant_zenithal_perspective", _parse_slant_zenithal_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "phi0", "theta0")))
+    register_transform!("$asdf_transform/stereographic", _parse_stereographic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+    register_transform!("$asdf_transform/slant_orthographic", _parse_slant_orthographic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("xi", "eta")))
+    register_transform!("$asdf_transform/zenithal_equidistant", _parse_zenithal_equidistant; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+    register_transform!("$asdf_transform/zenithal_equal_area", _parse_zenithal_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+    register_transform!("$asdf_transform/airy", _parse_airy; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("theta_b",)))
     register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_rotate3d_schema)
     register_transform!("$asdf_transform/constant", _parse_constant; versions=_SCHEMA_VERSIONS_1_0_TO_1_6, validate=_validate_constant_schema, normalize=_normalize_constant_schema)
     register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; versions=(v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"), validate=_validate_fixed_inputs_schema)

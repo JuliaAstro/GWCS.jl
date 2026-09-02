@@ -27,15 +27,16 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P0** Parse ASDF `gnomonic` projection nodes directly into the existing TAN transforms.
 - [x] **P0** Parse ASDF `rotate3d` nodes for native-to-celestial, celestial-to-native, and general Euler rotations.
 - [x] **P0** Parse spherical rotation sequences in addition to the currently supported Cartesian rotation sequences.
-- [ ] **P1** Add the remaining FITS Paper II zenithal projections: AZP, SZP, STG, SIN, ARC, ZEA, and AIR.
+- [x] **P1** Add the remaining FITS Paper II zenithal projections: AZP, SZP, STG, SIN, ARC, ZEA, and AIR.
 - [ ] **P1** Add cylindrical projections: CYP, CEA, CAR, and MER.
 - [ ] **P1** Add pseudocylindrical projections: SFL, PAR, MOL, and AIT.
 - [ ] **P1** Add conic projections: COP, COE, COD, COO, and BON.
 - [ ] **P1** Add polyconic and spherical-cube projections: PCO, TSC, CSC, and QSC.
 - [ ] **P1** Add HEALPix-family projections: HPX and XPH.
-- [ ] **P1** Support projection parameters and analytical inverses with the same domain conventions as FITSWCS.jl and wcslib.
+- [x] **P1** Support zenithal projection parameters and explicit inverses with the same domain conventions as Astropy and wcslib.
+- [ ] **P1** Support parameters and explicit inverses for the remaining projection families with the same domain conventions as FITSWCS.jl and wcslib.
 - [ ] **P1** Add a general 2D rotation transform and named Euler-angle rotation transform.
-- [ ] **P1** Add automatic `LONPOLE` computation for arbitrary supported celestial projections.
+- [x] **P1** Add automatic `LONPOLE` computation and general native-pole solving for supported celestial projections.
 - [ ] **P1** Support celestial reference frames beyond ICRS, including Galactic, FK4, FK5, ecliptic, and supergalactic frames.
 - [ ] **P2** Add optional conversion between Julia celestial-coordinate objects and numeric longitude/latitude pipeline values.
 
@@ -168,7 +169,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P0** Parse direction-cosine, FITS-imaging, and spectroscopy GWCS tags as their transform implementations become available.
 - [x] **P0** Parse ASDF fixed-input compound-transform tags.
 - [x] **P0** Parse ASDF compound-transform tags for arithmetic operations.
-- [ ] **P0** Parse orthogonal-polynomial, tabular, spline, mathematical-function, and projection tags as their implementations become available.
+- [x] **P0** Parse all implemented zenithal projection tags.
+- [ ] **P0** Parse orthogonal-polynomial, tabular, spline, mathematical-function, and remaining projection tags as their implementations become available.
 - [x] **P0** Support compound bounding-box metadata.
 - [x] **P0** Validate tag properties and dimensions against supported schema versions rather than relying only on constructor errors.
 - [x] **P0** Add explicit schema-version dispatch and migrations for known incompatible metadata versions.
@@ -209,7 +211,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Preserve zero-allocation scalar evaluation as new transforms and frame features are added.
 - [ ] **P1** Keep unit conversion, high-level coordinate construction, and metadata bookkeeping outside the compiled numeric kernel.
 - [x] **P1** Add benchmark coverage for selectors.
-- [ ] **P1** Add benchmark coverage for every new projection family, tabular interpolation, mixed-axis frames, and batch inversion.
+- [x] **P1** Add benchmark coverage for the zenithal projection family.
+- [ ] **P1** Add benchmark coverage for remaining projection families, tabular interpolation, mixed-axis frames, and batch inversion.
 - [x] **P1** Add construction benchmarks for mutation/recompilation.
 - [ ] **P1** Add construction benchmarks for large metadata-defined pipelines.
 - [x] **P1** Define a stable interface for transforms to provide optimized compilation, inversion, Jacobian, and separability methods.
@@ -220,7 +223,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 ## Validation and compatibility coverage
 
 - [ ] **P0** Build a corpus of Python GWCS ASDF examples covering every supported frame and transform tag.
-- [ ] **P0** Cross-check each newly supported projection against Python GWCS, Astropy, and FITSWCS.jl where an equivalent exists.
+- [x] **P0** Cross-check the zenithal projection family against Astropy/wcslib and FITSWCS.jl.
+- [ ] **P0** Cross-check each remaining newly supported projection against Python GWCS, Astropy, and FITSWCS.jl where an equivalent exists.
 - [ ] **P1** Add round-trip ASDF serialization tests between Julia and Python.
 - [ ] **P1** Add FITS import/export round-trip tests with measured approximation errors.
 - [x] **P1** Add selector and compound-bounding-box fixtures from IFU-style pipelines.

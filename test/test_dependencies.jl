@@ -30,7 +30,7 @@ GWCS.transform_dependencies(::BadDependencyValues) = SMatrix{1,1}(2)
 
     @test axis_correlation_matrix(SphericalToCartesian()) == @SMatrix [true true; true true; false true]
     @test axis_correlation_matrix(CartesianToSpherical()) == @SMatrix [true true false; true true true]
-    @test all(axis_correlation_matrix(TangentPlaneToNative()))
+    @test all(axis_correlation_matrix(IntermediateToNative(GnomonicProjection())))
     @test axis_correlation_matrix(Rotation3D(@SMatrix [1.0 0.0 0.0; 0.0 0.0 -1.0; 0.0 1.0 0.0])) == @SMatrix [true false false; false false true; false true false]
 
     composed = compose(RemapAxes{2}((2, 1)), AffineTransform(@SMatrix [1.0 0.0; 0.0 0.0]))

@@ -173,8 +173,23 @@ function _serialize_polynomial(transform::Polynomial2D, context)
     return properties
 end
 
-_serialize_gnomonic(::TangentPlaneToNative, context) = Dict("direction" => "pix2sky")
-_serialize_gnomonic(::NativeToTangentPlane, context) = Dict("direction" => "sky2pix")
+_projection_direction(::IntermediateToNative) = "pix2sky"
+_projection_direction(::NativeToIntermediate) = "sky2pix"
+
+_projection_properties(::GnomonicProjection) = Dict{String,Any}()
+_projection_properties(::StereographicProjection) = Dict{String,Any}()
+_projection_properties(::ZenithalEquidistant) = Dict{String,Any}()
+_projection_properties(::ZenithalEqualArea) = Dict{String,Any}()
+_projection_properties(projection::ZenithalPerspective) = Dict{String,Any}("mu" => projection.mu, "gamma" => projection.gamma)
+_projection_properties(projection::SlantZenithalPerspective) = Dict{String,Any}("mu" => projection.mu, "phi0" => projection.phi0, "theta0" => projection.theta0)
+_projection_properties(projection::SlantOrthographic) = Dict{String,Any}("xi" => projection.xi, "eta" => projection.eta)
+_projection_properties(projection::AiryProjection) = Dict{String,Any}("theta_b" => projection.theta_b)
+
+function _serialize_projection(transform::Union{IntermediateToNative,NativeToIntermediate}, context)
+    properties = _projection_properties(transform.projection)
+    properties["direction"] = _projection_direction(transform)
+    return properties
+end
 
 function _serialize_native_rotation(transform::NativeToCelestial, context)
     return Dict("phi" => transform.alpha_p, "theta" => transform.delta_p, "psi" => transform.phi_p, "direction" => "native2celestial")
@@ -270,8 +285,19 @@ function _register_builtin_transform_serializers!()
     register_transform_serializer!(registry, RemapAxes, "$_ASDF_TRANSFORM_TAG/remap_axes", _serialize_remap; version=v"1.5.0")
     register_transform_serializer!(registry, Polynomial1D, "$_ASDF_TRANSFORM_TAG/polynomial", _serialize_polynomial; version=v"1.3.0")
     register_transform_serializer!(registry, Polynomial2D, "$_ASDF_TRANSFORM_TAG/polynomial", _serialize_polynomial; version=v"1.3.0")
-    register_transform_serializer!(registry, TangentPlaneToNative, "$_ASDF_TRANSFORM_TAG/gnomonic", _serialize_gnomonic; version=v"1.4.0")
-    register_transform_serializer!(registry, NativeToTangentPlane, "$_ASDF_TRANSFORM_TAG/gnomonic", _serialize_gnomonic; version=v"1.4.0")
+    for (projection_type, tag, version) in (
+        (GnomonicProjection, "gnomonic", v"1.4.0"),
+        (ZenithalPerspective, "zenithal_perspective", v"1.5.0"),
+        (SlantZenithalPerspective, "slant_zenithal_perspective", v"1.4.0"),
+        (StereographicProjection, "stereographic", v"1.4.0"),
+        (SlantOrthographic, "slant_orthographic", v"1.4.0"),
+        (ZenithalEquidistant, "zenithal_equidistant", v"1.4.0"),
+        (ZenithalEqualArea, "zenithal_equal_area", v"1.4.0"),
+        (AiryProjection, "airy", v"1.4.0")
+    )
+        register_transform_serializer!(registry, IntermediateToNative{<:projection_type}, "$_ASDF_TRANSFORM_TAG/$tag", _serialize_projection; version)
+        register_transform_serializer!(registry, NativeToIntermediate{<:projection_type}, "$_ASDF_TRANSFORM_TAG/$tag", _serialize_projection; version)
+    end
     register_transform_serializer!(registry, NativeToCelestial, "$_ASDF_TRANSFORM_TAG/rotate3d", _serialize_native_rotation; version=v"1.5.0")
     register_transform_serializer!(registry, CelestialToNative, "$_ASDF_TRANSFORM_TAG/rotate3d", _serialize_native_rotation; version=v"1.5.0")
     register_transform_serializer!(registry, Rotation3D, "$_ASDF_TRANSFORM_TAG/rotate_sequence_3d", _serialize_rotation; version=v"1.2.0")
