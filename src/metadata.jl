@@ -420,7 +420,8 @@ function _parse_label_mapper(node, path, registry; expected_label_type=nothing)
     mapper_value = _metadata_property(node, "mapper", context)
     inputs = _metadata_inputs(node, context)
     name = haskey(node, "name") ? _metadata_string(node, "name", context) : nothing
-    no_label = haskey(node, "no_label") ? metadata_value(node["no_label"]) : nothing
+    has_no_label = haskey(node, "no_label")
+    no_label = has_no_label ? metadata_value(node["no_label"]) : nothing
     path = _property_path(context, "mapper")
     materialized, _ = _array_metadata(mapper_value, path)
 
@@ -438,7 +439,7 @@ function _parse_label_mapper(node, path, registry; expected_label_type=nothing)
         mapping = _parse_mapper_mapping(node, context, inputs, 2)
         ninputs = max(ninputs, maximum(mapping))
         default_no_label = eltype(labels) <: Number ? zero(eltype(labels)) : eltype(labels) <: AbstractString ? "" : nothing
-        no_label = default_no_label
+        has_no_label || (no_label = default_no_label)
         mapper = try
             ArrayLabelMapper{ninputs}(labels; inputs_mapping=mapping, no_label, inputs, name)
         catch error

@@ -18,4 +18,5 @@ using Test
     include("test_numerical_inverse.jl")
     include("test_metadata.jl")
     include("test_registration.jl")
+    include("test_serialization.jl")
 end

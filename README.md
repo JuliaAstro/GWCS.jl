@@ -243,6 +243,31 @@ wcs = parse_wcs(file["roman"]["meta"]["wcs"])
 
 Unknown tags, unsupported schema versions, malformed dimensions, and missing required properties raise path-aware errors. Built-in parsers register the exact tag versions present in the corresponding ASDF schema packages instead of assuming that every future `1.x` version is compatible. Version-specific validation runs before construction, and legacy representations such as pre-1.4 constants are normalized to the current internal form. Unit-bearing transform parameters require a future units extension and are not silently stripped in the numeric core.
 
+### Serializing metadata
+
+`to_metadata` returns a canonical tagged tree for supported transforms, frames, bounding boxes, steps, WCS pipelines, label mappers, and region selectors. The result can be inspected directly, rendered with YAML.jl, or parsed back through the same validated readers:
+
+```julia
+using YAML
+
+tree = to_metadata(wcs)
+text = YAML.write(tree)
+reparsed = parse_wcs(tree)
+```
+
+Serialization represents the compiled Julia object, not the exact source tree. Construction-time fusion may therefore replace a sequence with an equivalent affine transform, and output uses the latest exact schema versions supported by the writer. Unknown optional source properties and original tag versions are not preserved yet. Unsupported values such as callable closures, callable label mappers, nonstandard affine dimensions, and unregistered external transforms raise explicit errors instead of producing incomplete metadata.
+
+Loading ASDF.jl adds `write_asdf`. It converts canonical tagged nodes to ASDF.jl's container representation and delegates file and block handling to ASDF.jl:
+
+```julia
+using ASDF
+
+write_asdf("calibration.asdf", wcs)
+write_asdf("product.asdf", Dict("meta" => Dict("wcs" => wcs), "data" => image))
+```
+
+The WCS form writes under the key `"wcs"` by default; use `key` to choose another key. Array-valued transform and selector metadata is currently written inline. Lazy, external, compressed, and explicit block-placement policies are deferred to a later ASDF integration.
+
 ### Registering external transforms
 
 External packages can add metadata support for native `AbstractTransform` subtypes without modifying GWCS.jl. Dimensions are encoded in the subtype, while analytical inverses, Jacobians, and optimized execution forms use ordinary Julia method extensions:
@@ -269,14 +294,17 @@ function parse_offset(node, context)
     return OffsetTransform(offset)
 end
 
+serialize_offset(transform, context) = Dict("offset" => transform.offset)
+
 function __init__()
     register_transform!("tag:example.org:gwcs/offset", parse_offset; versions=(v"1.0.0", v"1.1.0"))
+    register_transform_serializer!(OffsetTransform, "tag:example.org:gwcs/offset", serialize_offset; version=v"1.1.0")
 end
 
 end
 ```
 
-Tags use their full namespace and omit the trailing schema version. Prefer `versions` when support is known for exact schema tags. Half-open `min_version`/`max_version` intervals remain available when an external schema explicitly guarantees compatibility, and overlapping registrations are rejected. Optional `validate` and `normalize` callbacks receive the source node and `TransformParseContext`; validation runs first, then normalization may return a canonical mapping for the constructor without changing the original metadata. Register from an extension package's `__init__` so the process-wide default registry is populated at runtime. For deterministic or restricted parsing, use `registry = copy(default_transform_registry())`, register additional transforms into that isolated registry, and pass it to `parse_transform` or `parse_wcs`.
+Tags use their full namespace and omit the trailing schema version. Prefer `versions` when support is known for exact schema tags. Half-open `min_version`/`max_version` intervals remain available when an external schema explicitly guarantees compatibility, and overlapping registrations are rejected. Optional `validate` and `normalize` callbacks receive the source node and `TransformParseContext`; validation runs first, then normalization may return a canonical mapping for the constructor without changing the original metadata. A serializer receives the transform and a write context and returns an untagged mapping; its exact `version` must have a matching parser registration. Register parser and serializer support from an extension package's `__init__` so the process-wide default registry is populated at runtime. For deterministic or restricted conversion, use `registry = copy(default_transform_registry())`, register additional transforms into that isolated registry, and pass it to `parse_transform`, `parse_wcs`, or `to_metadata`.
 
 Registration and metadata callbacks run only while constructing a transform. A parsed `WCS` stores concrete compiled transforms, so scalar evaluation performs no registry lookup or dynamic metadata dispatch. Registered constructors must return an `AbstractTransform`; custom inverse and compilation methods are checked for compatible dimensions before the pipeline is accepted.
 
