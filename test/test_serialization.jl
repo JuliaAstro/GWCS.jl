@@ -54,8 +54,25 @@ end
     test_transform_roundtrip(RemapAxes{3}((3, 1)), SVector(1.0, 2.0, 3.0))
     test_transform_roundtrip(Polynomial1D([1.0, 2.0, 3.0]; domain=(-1.0, 1.0), window=(0.0, 2.0)), SVector(0.25))
     test_transform_roundtrip(Polynomial2D([1.0 2.0; 3.0 0.0]; domain=((-1.0, 1.0), (-2.0, 2.0)), window=((0.0, 1.0), (0.0, 1.0))), SVector(0.25, 0.5))
-    test_transform_roundtrip(TangentPlaneToNative(), SVector(1.0, 2.0))
-    test_transform_roundtrip(NativeToTangentPlane(), SVector(10.0, 45.0); atol=1e-14)
+    test_transform_roundtrip(IntermediateToNative(GnomonicProjection()), SVector(1.0, 2.0))
+    test_transform_roundtrip(NativeToIntermediate(GnomonicProjection()), SVector(10.0, 45.0); atol=1e-14)
+    for projection in (
+        ZenithalPerspective(1.5, 15.0),
+        SlantZenithalPerspective(1.5, 15.0, 80.0),
+        StereographicProjection(),
+        SlantOrthographic(0.1, 0.2),
+        ZenithalEquidistant(),
+        ZenithalEqualArea(),
+        AiryProjection(75.8)
+    )
+        test_transform_roundtrip(IntermediateToNative(projection), SVector(1.0, 2.0); atol=1e-12)
+        test_transform_roundtrip(NativeToIntermediate(projection), SVector(30.0, 60.0); atol=1e-12)
+    end
+    azp_node = to_metadata(IntermediateToNative(ZenithalPerspective(1.5, 15.0)))
+    @test azp_node.tag == "tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0"
+    @test azp_node["direction"] == "pix2sky"
+    @test azp_node["mu"] == 1.5
+    @test azp_node["gamma"] == 15.0
     test_transform_roundtrip(NativeToCelestial(1.0, 2.0, 3.0), SVector(10.0, 45.0); atol=1e-12)
     test_transform_roundtrip(CelestialToNative(1.0, 2.0, 3.0), SVector(10.0, 45.0); atol=1e-12)
     test_transform_roundtrip(SphericalToCartesian(180), SVector(10.0, 45.0); atol=1e-15)

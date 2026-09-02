@@ -18,6 +18,7 @@ include("transforms/elementary.jl")
 include("selectors.jl")
 include("transforms/polynomial.jl")
 include("transforms/geometry.jl")
+include("transforms/projections.jl")
 include("transforms/composition.jl")
 include("transforms/selectors.jl")
 include("transforms/dependencies.jl")
@@ -32,22 +33,24 @@ include("metadata.jl")
 include("serialization.jl")
 
 export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, ArrayLabelMapper, CallableLabelMapper, CallableTransform, CartesianToSpherical,
+       AbstractSphericalProjection, AbstractZenithalProjection, AiryProjection,
        AbstractBoundingBox, AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompoundBoundingBox, CompositeFrame,
        CelestialToNative,
        ComposedTransform, ConstantTransform, CoordinateFrame, DictionaryLabelMapper, FixedInputsTransform,
-       Frame2D, IdentityTransform,
-       NativeToCelestial, NativeToTangentPlane, NoInverse,
+       Frame2D, GnomonicProjection, IdentityTransform, IntermediateToNative,
+       NativeToCelestial, NativeToIntermediate, NoInverse,
        ParallelTransform, Polynomial1D, Polynomial2D, RangeLabelMapper, RegionSelector, RemapAxes, Rotation3D,
        PIXEL, SPATIAL, SPECTRAL, STOKES, TIME, UNDEFINED,
-       Scale, Shift, SpectralFrame, SphericalToCartesian, Step, StokesFrame, TangentPlaneToNative, TemporalFrame, WCS, WCSBuilder,
+       Scale, Shift, SlantOrthographic, SlantZenithalPerspective, SpectralFrame, SphericalToCartesian, StereographicProjection, Step, StokesFrame,
+       TemporalFrame, WCS, WCSBuilder, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective,
        TransformLabelMapper,        WithInverse, WithInverseLabelMapper, TransformParseContext, TransformRegistry, TransformWriteContext, available_frames,
        annotate_transform, axis_names, axis_physical_types, axis_types, axis_units, bounded_axes, bounds,
-       compile_label_mapper, compile_transform, compose, default_transform_registry, degree, elementwise,
+       celestial_transform, compile_label_mapper, compile_transform, compose, default_lonpole, default_transform_registry, degree, elementwise,
        append_frame, append_frame!, append_transform, append_transform!, axis_correlation_matrix, fix_inputs, frame_dimension, get_frame, get_transform,
        grid_from_bounding_box, has_inverse, ignored_axes, input_dimension, input_frame, insert_frame, insert_frame!, insert_transform, insert_transform!,
        in_domain, in_image, input_names, inverse_label_mapper, inverse_transform, label_dependencies, label_mapper_name, label_type, map_label, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,
-       offset_to_time, output_names, parallel, pixel_axis_names, pixel_axis_physical_types, pixel_axis_types,
+       native_fiducial, offset_to_time, output_names, parallel, pixel_axis_names, pixel_axis_physical_types, pixel_axis_types,
        pixel_axis_units, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
        parse_transform, parse_wcs, register_transform!, required_metadata, select_bounding_box, selected_transform, selector_axes, selector_ignored,
        register_transform_serializer!,

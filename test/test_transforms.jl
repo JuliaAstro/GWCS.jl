@@ -57,7 +57,7 @@
     @test cartesian ≈ SVector(0.0, 1.0, 0.0) atol=1e-15
     @test inverse_transform(spherical)(cartesian) ≈ SVector(90.0, 0.0) atol=1e-14
 
-    tangent = TangentPlaneToNative()
+    tangent = IntermediateToNative(GnomonicProjection())
     native = tangent(SVector(1.0, 2.0))
     @test inverse_transform(tangent)(native) ≈ SVector(1.0, 2.0) atol=1e-14
 

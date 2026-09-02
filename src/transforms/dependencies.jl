@@ -28,8 +28,8 @@ end
 
 transform_dependencies(::SphericalToCartesian) = SMatrix{3,2,Bool}(true, true, false, true, true, true)
 transform_dependencies(::CartesianToSpherical) = SMatrix{2,3,Bool}(true, true, true, true, false, true)
-transform_dependencies(::TangentPlaneToNative) = _dense_dependencies(Val(2), Val(2))
-transform_dependencies(::NativeToTangentPlane) = _dense_dependencies(Val(2), Val(2))
+transform_dependencies(::IntermediateToNative) = _dense_dependencies(Val(2), Val(2))
+transform_dependencies(::NativeToIntermediate) = _dense_dependencies(Val(2), Val(2))
 transform_dependencies(::NativeToCelestial) = _dense_dependencies(Val(2), Val(2))
 transform_dependencies(::CelestialToNative) = _dense_dependencies(Val(2), Val(2))
 

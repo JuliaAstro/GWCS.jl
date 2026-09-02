@@ -112,7 +112,28 @@ Constituent `axes_order` values are global transform positions and must form a c
 
 ## Transforms and inverses
 
-The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and TAN/native/celestial projection transforms. `compose` and `parallel` are the function forms of `|` and `&`.
+The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and FITS Paper II zenithal projections. Supported zenithal algorithms are TAN, AZP, SZP, STG, SIN, ARC, ZEA, and AIR. `compose` and `parallel` are the function forms of `|` and `&`.
+
+Projection algorithms are separate from transform direction. `IntermediateToNative(projection)` converts projection-plane coordinates to native spherical longitude and latitude, while `NativeToIntermediate(projection)` provides the inverse direction. Both sides use degrees:
+
+```julia
+projection = ZenithalPerspective(1.5, 15.0)
+pix2sky = IntermediateToNative(projection)
+sky2pix = inverse_transform(pix2sky)
+```
+
+Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes: `ZenithalPerspective(mu, gamma)`, `SlantZenithalPerspective(mu, phi0, theta0)`, `SlantOrthographic(xi, eta)`, and `AiryProjection(theta_b)`. The parameter-free types are `GnomonicProjection`, `StereographicProjection`, `ZenithalEquidistant`, and `ZenithalEqualArea`. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches raise `DomainError`.
+
+`celestial_transform` combines a projection with the Paper II native-to-celestial rotation derived from a reference longitude and latitude. It computes the default `LONPOLE` when omitted and uses `LATPOLE` to disambiguate general pole solutions:
+
+```julia
+using StaticArrays
+
+sky = celestial_transform(GnomonicProjection(), (83.8221, -5.3911))
+sky(SVector(0.0, 0.0)) # reference longitude and latitude
+```
+
+This constructor returns a transform rather than a complete WCS or frame. It is the low-level construction surface used by future fiducial and FITS interoperability helpers.
 
 Compatible transforms can also be combined elementwise with `+`, `-`, `*`, `/`, and `^`. Both operands receive the same coordinates and must have matching input and output dimensions:
 
@@ -228,7 +249,7 @@ Composition uses boolean dependency propagation, parallel transforms produce blo
 - compose, concatenate, elementwise arithmetic, identity, shift, scale, affine, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
 - array-, dictionary-, range-, and transform-backed label mappers and region selectors
-- TAN/gnomonic projections, native/celestial rotations, Cartesian and spherical rotation sequences, and spherical/cartesian conversions
+- TAN, AZP, SZP, STG, SIN, ARC, ZEA, and AIR projections, native/celestial rotations, Cartesian and spherical rotation sequences, and spherical/cartesian conversions
 - serialized explicit inverses
 
 ASDF.jl is an optional dependency. Loading ASDF activates the package extension that adapts tagged nodes and lazy coefficient arrays:
@@ -255,7 +276,7 @@ text = YAML.write(tree)
 reparsed = parse_wcs(tree)
 ```
 
-Serialization represents the compiled Julia object, not the exact source tree. Construction-time fusion may therefore replace a sequence with an equivalent affine transform, and output uses the latest exact schema versions supported by the writer. Unknown optional source properties and original tag versions are not preserved yet. Unsupported values such as callable closures, callable label mappers, nonstandard affine dimensions, and unregistered external transforms raise explicit errors instead of producing incomplete metadata.
+Serialization represents the compiled Julia object, not the exact source tree. Construction-time fusion may therefore replace a sequence with an equivalent affine transform, and output uses the latest exact schema versions supported by the writer. Projection trees preserve their direction and canonical numeric parameters. Unknown optional source properties and original tag versions are not preserved yet. Unsupported values such as callable closures, callable label mappers, nonstandard affine dimensions, and unregistered external transforms raise explicit errors instead of producing incomplete metadata.
 
 Loading ASDF.jl adds `write_asdf`. It converts canonical tagged nodes to ASDF.jl's container representation and delegates file and block handling to ASDF.jl:
 

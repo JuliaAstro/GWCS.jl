@@ -41,34 +41,6 @@ end
 
 inverse_transform(transform::CartesianToSpherical) = SphericalToCartesian(transform.wrap_lon_at)
 
-"""Convert TAN intermediate-plane coordinates in degrees to native longitude and latitude."""
-struct TangentPlaneToNative <: AbstractTransform{2,2} end
-
-@inline function (::TangentPlaneToNative)(coords::StaticVector{2})
-    T = _evaluation_type(eltype(coords))
-    x, y = T(coords[1]), T(coords[2])
-    phi = iszero(x) && iszero(y) ? zero(T) : atan(x, -y)
-    theta = atan(rad2deg(one(T)), hypot(x, y))
-    return SVector(rad2deg(phi), rad2deg(theta))
-end
-
-inverse_transform(::TangentPlaneToNative) = NativeToTangentPlane()
-
-"""Convert native longitude and latitude in degrees to TAN intermediate-plane coordinates."""
-struct NativeToTangentPlane <: AbstractTransform{2,2} end
-
-@inline function (::NativeToTangentPlane)(coords::StaticVector{2})
-    T = _evaluation_type(eltype(coords))
-    phi = deg2rad(T(coords[1]))
-    theta = deg2rad(T(coords[2]))
-    sine, cosine = sincos(theta)
-    sine > zero(T) || throw(DomainError(theta, "TAN native latitude must be positive"))
-    radius = rad2deg(cosine / sine)
-    return SVector(radius * sin(phi), -radius * cos(phi))
-end
-
-inverse_transform(::NativeToTangentPlane) = TangentPlaneToNative()
-
 """Rotate native spherical coordinates in degrees to celestial coordinates."""
 struct NativeToCelestial{T<:Real} <: AbstractTransform{2,2}
     alpha_p::T
