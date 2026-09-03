@@ -6,7 +6,7 @@ Generalized world coordinate systems with composable, compiled transformations.
 module GWCS
 
 using ForwardDiff
-using LinearAlgebra: I, det, inv
+using LinearAlgebra: Diagonal, I, det, inv
 using StaticArrays: MMatrix, MVector, SMatrix, SVector, StaticMatrix, StaticVector
 using YAML
 
@@ -17,6 +17,8 @@ include("transforms/callable.jl")
 include("transforms/elementary.jl")
 include("selectors.jl")
 include("transforms/polynomial.jl")
+include("transforms/interpolation.jl")
+include("transforms/spectral.jl")
 include("transforms/geometry.jl")
 include("transforms/projections.jl")
 include("transforms/composition.jl")
@@ -27,22 +29,23 @@ include("metadata_schemas.jl")
 include("frames.jl")
 include("domains.jl")
 include("pipeline.jl")
+include("fits.jl")
 include("api.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 include("serialization.jl")
 
 export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, ArrayLabelMapper, CallableLabelMapper, CallableTransform, CartesianToSpherical,
-       AbstractSphericalProjection, AbstractZenithalProjection, AiryProjection,
+       AbstractConicProjection, AbstractSphericalProjection, AbstractZenithalProjection, AiryProjection, BonneProjection, COBESphericalCube, ConicEqualArea, ConicEquidistant, ConicOrthomorphic, ConicPerspective, CylindricalEqualArea, CylindricalPerspective,
        AbstractBoundingBox, AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompoundBoundingBox, CompositeFrame,
        CelestialToNative,
        ComposedTransform, ConstantTransform, CoordinateFrame, DictionaryLabelMapper, FixedInputsTransform,
-       Frame2D, GnomonicProjection, IdentityTransform, IntermediateToNative,
+       BilinearLookupTable, FITSGrismTransform, FITSLookupDistortion, FITSSpectralTransform, FITSTabularTable, FITSTabularTransform, Frame2D, GnomonicProjection, HammerAitoffProjection, IdentityTransform, IntermediateToNative,
        NativeToCelestial, NativeToIntermediate, NoInverse,
-       ParallelTransform, Polynomial1D, Polynomial2D, RangeLabelMapper, RegionSelector, RemapAxes, Rotation3D,
+       HEALPixPolarProjection, HEALPixProjection, MercatorProjection, MollweideProjection, ParabolicProjection, ParallelTransform, PlateCarreeProjection, PolyconicProjection, Polynomial1D, Polynomial2D, QuadrilateralizedSphericalCube, RangeLabelMapper, RegionSelector, RemapAxes, Rotation3D,
        PIXEL, SPATIAL, SPECTRAL, STOKES, TIME, UNDEFINED,
-       Scale, Shift, SlantOrthographic, SlantZenithalPerspective, SpectralFrame, SphericalToCartesian, StereographicProjection, Step, StokesFrame,
-       TemporalFrame, WCS, WCSBuilder, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective,
+       SansonFlamsteedProjection, Scale, Shift, SIPTransform, SlantOrthographic, SlantZenithalPerspective, SpectralFrame, SphericalToCartesian, StereographicProjection, Step, StokesFrame, TangentialSphericalCube,
+       TemporalFrame, TPVTransform, WCS, WCSBuilder, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective, ZenithalPolynomial,
        TransformLabelMapper,        WithInverse, WithInverseLabelMapper, TransformParseContext, TransformRegistry, TransformWriteContext, available_frames,
        annotate_transform, axis_names, axis_physical_types, axis_types, axis_units, bounded_axes, bounds,
        celestial_transform, compile_label_mapper, compile_transform, compose, default_lonpole, default_transform_registry, degree, elementwise,
@@ -52,7 +55,7 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransfo
        metadata_value, metadata_version, output_dimension, output_frame,
        native_fiducial, offset_to_time, output_names, parallel, pixel_axis_names, pixel_axis_physical_types, pixel_axis_types,
        pixel_axis_units, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
-       parse_transform, parse_wcs, register_transform!, required_metadata, select_bounding_box, selected_transform, selector_axes, selector_ignored,
+       parse_fits_wcs, find_all_fits_wcs, parse_transform, parse_wcs, register_transform!, required_metadata, select_bounding_box, selected_transform, selector_axes, selector_ignored,
        register_transform_serializer!,
        prepend_frame, prepend_frame!, prepend_transform, prepend_transform!, remove_frame, remove_frame!, rename_frame, rename_frame!,
        set_transform, set_transform!, time_to_offset, transform, transform_dependencies, transform_jacobian, transform_name,

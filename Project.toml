@@ -11,12 +11,18 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [weakdeps]
 ASDF = "686f71d1-807d-59a4-a860-28280ea06d7b"
+FITSFiles = "358a0a88-3548-4ad6-b652-8bdbf64af8e5"
+FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
 
 [extensions]
 GWCSASDFExt = "ASDF"
+GWCSFITSFilesExt = "FITSFiles"
+GWCSFITSIOExt = "FITSIO"
 
 [compat]
 ASDF = "2"
+FITSFiles = "0.2, 0.3, 0.4"
+FITSIO = "0.17"
 ForwardDiff = "0.10"
 StaticArrays = "1"
 YAML = "0.4"
@@ -24,8 +30,10 @@ julia = "1.10"
 
 [extras]
 ASDF = "686f71d1-807d-59a4-a860-28280ea06d7b"
+FITSFiles = "358a0a88-3548-4ad6-b652-8bdbf64af8e5"
+FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["ASDF", "Logging", "Test"]
+test = ["ASDF", "FITSFiles", "FITSIO", "Logging", "Test"]

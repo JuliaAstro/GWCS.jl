@@ -28,13 +28,13 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P0** Parse ASDF `rotate3d` nodes for native-to-celestial, celestial-to-native, and general Euler rotations.
 - [x] **P0** Parse spherical rotation sequences in addition to the currently supported Cartesian rotation sequences.
 - [x] **P1** Add the remaining FITS Paper II zenithal projections: AZP, SZP, STG, SIN, ARC, ZEA, and AIR.
-- [ ] **P1** Add cylindrical projections: CYP, CEA, CAR, and MER.
-- [ ] **P1** Add pseudocylindrical projections: SFL, PAR, MOL, and AIT.
-- [ ] **P1** Add conic projections: COP, COE, COD, COO, and BON.
-- [ ] **P1** Add polyconic and spherical-cube projections: PCO, TSC, CSC, and QSC.
-- [ ] **P1** Add HEALPix-family projections: HPX and XPH.
+- [x] **P1** Add cylindrical projections: CYP, CEA, CAR, and MER.
+- [x] **P1** Add pseudocylindrical projections: SFL, PAR, MOL, and AIT.
+- [x] **P1** Add conic projections: COP, COE, COD, COO, and BON.
+- [x] **P1** Add polyconic and spherical-cube projections: PCO, TSC, CSC, and QSC.
+- [x] **P1** Add HEALPix-family projections: HPX and XPH.
 - [x] **P1** Support zenithal projection parameters and explicit inverses with the same domain conventions as Astropy and wcslib.
-- [ ] **P1** Support parameters and explicit inverses for the remaining projection families with the same domain conventions as FITSWCS.jl and wcslib.
+- [x] **P1** Support parameters and explicit inverses for the remaining projection families with the same domain conventions as FITSWCS.jl and wcslib.
 - [ ] **P1** Add a general 2D rotation transform and named Euler-angle rotation transform.
 - [x] **P1** Add automatic `LONPOLE` computation and general native-pole solving for supported celestial projections.
 - [ ] **P1** Support celestial reference frames beyond ICRS, including Galactic, FK4, FK5, ecliptic, and supergalactic frames.
@@ -52,8 +52,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P2** Generalize tabular interpolation to arbitrary dimensions where a concrete use case requires it.
 - [ ] **P2** Add one-dimensional spline transforms and their ASDF representation.
 - [ ] **P1** Add serializable elementary mathematical transforms used in metadata-defined pipelines: trigonometric, inverse trigonometric, logarithmic, exponential, square root, absolute value, reciprocal, and degree/radian conversion.
-- [ ] **P1** Add a named SIP distortion constructor and inverse representation, even if it compiles internally to shifts and polynomials.
-- [ ] **P2** Add a TPV distortion transform or a bridge to the equivalent FITSWCS.jl representation.
+- [x] **P1** Add a named SIP distortion constructor and inverse representation, even if it compiles internally to shifts and polynomials.
+- [x] **P2** Add a native TPV/TPD distortion transform.
 
 ## Geometry, spectroscopy, and optical transforms
 
@@ -185,16 +185,19 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 ## FITS interoperability
 
-- [ ] **P0** Add a bridge from FITSWCS.jl WCS objects to equivalent GWCS.jl pipelines.
-- [ ] **P0** Construct GWCS pipelines from FITS headers using FITSWCS.jl as the authoritative parser.
-- [ ] **P1** Cover linear, celestial, spectral, time, Stokes, distortion, and lookup-table axes supported by FITSWCS.jl.
-- [ ] **P1** Add conversion for SIP, TPV, Paper IV lookup distortions, and `-TAB` transforms.
+- [x] **P0** Add native `parse_fits_wcs` and `find_all_fits_wcs` interfaces that construct ordinary compiled GWCS pipelines without a second execution hierarchy.
+- [x] **P0** Parse FITS image-header axis counts, CRPIX/CRVAL/CDELT, PC/CD/CROTA, primary and alternate keys, units, names, and partial image shapes.
+- [x] **P0** Cover linear, celestial, linear spectral, linear time, Stokes, and mixed/interleaved axis WCSes.
+- [x] **P1** Add native SIP and TPV/TPD transforms, including SCAMP TAN-plus-PV recognition and numerical inversion when explicit inverse coefficients are absent.
+- [x] **P1** Add Paper IV D2IM/CPDIS lookup distortions and construction-time external image-array resolution.
+- [x] **P1** Add statically dimensioned multilinear `-TAB` transforms with direct separable monotonic 1D inverses and checked numerical inversion for coupled tables.
+- [x] **P1** Add Paper III nonlinear spectral algorithms and grism models.
 - [ ] **P1** Add `to_fits_sip` to fit a two-dimensional celestial GWCS with configurable forward and inverse degree/error limits.
 - [ ] **P1** Add `to_fits_tab` for non-celestial and multidimensional WCS approximations.
 - [ ] **P1** Add a combined `to_fits` path that chooses linear, SIP, and `-TAB` representations by separable axis group.
 - [ ] **P1** Return approximation diagnostics and verify the generated FITS representation over the requested bounding box.
-- [ ] **P1** Preserve FITS pixel-origin conventions explicitly at the bridge boundary.
-- [ ] **P2** Add optional FITSIO.jl adapters for reading and writing headers and table extensions without making FITSIO.jl a core dependency.
+- [x] **P1** Preserve FITS 1-based pixel-origin conventions explicitly in the parsed affine stage.
+- [x] **P2** Add optional FITSIO.jl and FITSFiles.jl adapters for detached headers, linked HDUs, and construction-time lookup-image resolution without making either package a core dependency.
 
 ## Other declarative and text formats
 
@@ -212,7 +215,9 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Keep unit conversion, high-level coordinate construction, and metadata bookkeeping outside the compiled numeric kernel.
 - [x] **P1** Add benchmark coverage for selectors.
 - [x] **P1** Add benchmark coverage for the zenithal projection family.
-- [ ] **P1** Add benchmark coverage for remaining projection families, tabular interpolation, mixed-axis frames, and batch inversion.
+- [x] **P1** Add benchmark coverage for the remaining projection families.
+- [x] **P1** Add benchmark coverage for FITS lookup tables, tabular interpolation, nonlinear spectral algorithms, and grisms.
+- [ ] **P1** Add benchmark coverage for mixed-axis frames and batch inversion.
 - [x] **P1** Add construction benchmarks for mutation/recompilation.
 - [ ] **P1** Add construction benchmarks for large metadata-defined pipelines.
 - [x] **P1** Define a stable interface for transforms to provide optimized compilation, inversion, Jacobian, and separability methods.
@@ -224,7 +229,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 - [ ] **P0** Build a corpus of Python GWCS ASDF examples covering every supported frame and transform tag.
 - [x] **P0** Cross-check the zenithal projection family against Astropy/wcslib and FITSWCS.jl.
-- [ ] **P0** Cross-check each remaining newly supported projection against Python GWCS, Astropy, and FITSWCS.jl where an equivalent exists.
+- [x] **P0** Cross-check each remaining newly supported projection against Astropy/wcslib and FITSWCS.jl where an equivalent exists.
 - [ ] **P1** Add round-trip ASDF serialization tests between Julia and Python.
 - [ ] **P1** Add FITS import/export round-trip tests with measured approximation errors.
 - [x] **P1** Add selector and compound-bounding-box fixtures from IFU-style pipelines.
@@ -245,6 +250,6 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - **Do not copy Python GWCS's deprecated aliases, indexing shims, warning classes, or historical serialization quirks unless they are required to read real files.**
 - **Do not copy Python GWCS's exact fixed-point numerical-inverse algorithm or SciPy fallback.** The ForwardDiff-based damped Newton solver is more idiomatic in Julia. We should add the useful batch diagnostics and initialization strategies while retaining a Julia-native solver architecture.
 - **Do not copy the legacy polygon scan-line implementation.** Region support should use a robust Julia geometry or rasterization implementation with clearly defined boundary semantics.
-- **Do not reimplement FITS or ASDF container libraries inside GWCS.jl.** FITS parsing should delegate to FITSWCS.jl/FITSIO.jl, and ASDF container handling should delegate to ASDF.jl. GWCS.jl should own conversion between those representations and compiled WCS pipelines.
+- **Do not reimplement FITS or ASDF container libraries inside GWCS.jl.** FITSIO.jl and FITSFiles.jl should provide FITS container access, and ASDF container handling should delegate to ASDF.jl. GWCS.jl should own FITS WCS interpretation and conversion into compiled pipelines.
 - **Do not mirror Astropy's exact NumPy broadcasting and scalar-squeezing rules.** Julia APIs should use normal broadcasting, arrays, tuples, and static vectors while remaining explicit about coordinate-axis layout.
 - **Do not make observatory-specific optics and selector machinery mandatory core dependencies.** Grating, Sellmeier, IFU-region, and similar features should be lightweight internal modules or optional extensions unless they become broadly used.
