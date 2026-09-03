@@ -1,0 +1,222 @@
+"""A construction-time-copied two-dimensional bilinear lookup table."""
+struct BilinearLookupTable{T<:AbstractFloat,A<:AbstractMatrix{T}} <: AbstractTransform{2,1}
+    data::A
+    crpix::SVector{2,T}
+    crval::SVector{2,T}
+    cdelt::SVector{2,T}
+end
+
+function BilinearLookupTable(data::AbstractMatrix; crpix=(1, 1), crval=(0, 0), cdelt=(1, 1))
+    isempty(data) && throw(ArgumentError("lookup table data must not be empty"))
+    values = float.(data)
+    T = eltype(values)
+    reference_pixel = SVector{2,T}(crpix)
+    reference_value = SVector{2,T}(crval)
+    increment = SVector{2,T}(cdelt)
+    all(isfinite, reference_pixel) && all(isfinite, reference_value) && all(isfinite, increment) || throw(ArgumentError("lookup table coordinates must be finite"))
+    all(value -> !iszero(value), increment) || throw(ArgumentError("lookup table CDELT values must be nonzero"))
+    return BilinearLookupTable{T,typeof(values)}(values, reference_pixel, reference_value, increment)
+end
+
+@inline function _lookup_cell(index, length)
+    length == 1 && return 1, 1, zero(index)
+    coordinate = clamp(index, one(index), typeof(index)(length))
+    lower = min(floor(Int, coordinate), length - 1)
+    return lower, lower + 1, coordinate - lower
+end
+
+@inline function (table::BilinearLookupTable)(coords::StaticVector{2})
+    T = promote_type(eltype(coords), eltype(table.data))
+    x = (T(coords[1]) - T(table.crval[1])) / T(table.cdelt[1]) + T(table.crpix[1])
+    y = (T(coords[2]) - T(table.crval[2])) / T(table.cdelt[2]) + T(table.crpix[2])
+    x0, x1, tx = _lookup_cell(x, size(table.data, 1))
+    y0, y1, ty = _lookup_cell(y, size(table.data, 2))
+    v00, v10 = T(table.data[x0, y0]), T(table.data[x1, y0])
+    v01, v11 = T(table.data[x0, y1]), T(table.data[x1, y1])
+    value = (1 - tx) * (1 - ty) * v00 + tx * (1 - ty) * v10 + (1 - tx) * ty * v01 + tx * ty * v11
+    return SVector(value)
+end
+
+struct FITSLookupDistortion{N,D,S,C} <: AbstractTransform{N,N}
+    detector_to_image::D
+    sip::S
+    cpdis::C
+end
+
+function FITSLookupDistortion(::Val{N}, detector_to_image, sip, cpdis) where {N}
+    N >= 2 || throw(ArgumentError("FITS lookup distortions require at least two pixel axes"))
+    length(detector_to_image) == 2 && length(cpdis) == 2 || throw(ArgumentError("FITS lookup distortion stages require two axis tables"))
+    input_dimension(sip) == N && output_dimension(sip) == N || throw(DimensionMismatch("SIP transform must map $N axes to $N axes"))
+    return FITSLookupDistortion{N,typeof(detector_to_image),typeof(sip),typeof(cpdis)}(detector_to_image, sip, cpdis)
+end
+
+@inline function _lookup_offsets(tables, coords::StaticVector{N,T}) where {N,T}
+    x = tables[1] === nothing ? zero(T) : T(only(tables[1](SVector(coords[1], coords[2]))))
+    y = tables[2] === nothing ? zero(T) : T(only(tables[2](SVector(coords[1], coords[2]))))
+    return SVector{N,T}(ntuple(i -> i == 1 ? x : i == 2 ? y : zero(T), Val(N)))
+end
+
+@inline function (transform::FITSLookupDistortion{N})(coords::StaticVector{N}) where {N}
+    detector = coords + _lookup_offsets(transform.detector_to_image, coords)
+    corrected = transform.sip(detector)
+    return corrected + _lookup_offsets(transform.cpdis, detector)
+end
+
+struct FITSTabularTable{M,A,I}
+    axes::NTuple{M,Int}
+    coordinates::A
+    indices::I
+
+    function FITSTabularTable{M,A,I}(axes, coordinates, indices) where {M,A,I}
+        return new{M,A,I}(axes, coordinates, indices)
+    end
+end
+
+function FITSTabularTable(axes::NTuple{M,Int}, coordinates, indices) where {M}
+    M >= 1 || throw(ArgumentError("TAB tables must control at least one axis"))
+    allunique(axes) || throw(ArgumentError("TAB table axes must be distinct"))
+    values = Array{Float64}(coordinates)
+    ndims(values) == M + 1 || throw(ArgumentError("TAB coordinate array has $(ndims(values) - 1) table axes, expected $M"))
+    size(values, 1) == M || throw(ArgumentError("TAB coordinate array must have a leading component dimension of length $M"))
+    all(isfinite, values) || throw(ArgumentError("TAB coordinate array values must be finite"))
+    index_values = ntuple(M) do axis
+        vector = Float64.(vec(indices[axis]))
+        length(vector) == size(values, axis + 1) || throw(ArgumentError("TAB index vector $axis has length $(length(vector)), expected $(size(values, axis + 1))"))
+        all(isfinite, vector) || throw(ArgumentError("TAB index vector $axis values must be finite"))
+        if length(vector) > 1
+            increasing = all(i -> vector[i] <= vector[i + 1], 1:(length(vector) - 1))
+            decreasing = all(i -> vector[i] >= vector[i + 1], 1:(length(vector) - 1))
+            (increasing || decreasing) && vector[1] != vector[end] || throw(ArgumentError("TAB index vector $axis must be monotonic"))
+        end
+        vector
+    end
+    return FITSTabularTable{M,typeof(values),typeof(index_values)}(axes, values, index_values)
+end
+
+function _tabular_fractional_index(index, value)
+    T = promote_type(eltype(index), typeof(float(value)))
+    if length(index) == 1
+        abs(value - only(index)) <= T(0.5) || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
+        return one(T)
+    end
+    increasing = index[end] > index[1]
+    if increasing
+        index[1] - (index[2] - index[1]) / 2 <= value <= index[end] + (index[end] - index[end - 1]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
+        position = value < index[1] ? 1 : value > index[end] ? length(index) - 1 : 0
+        if iszero(position)
+            for i in 1:(length(index) - 1)
+                if index[i] == value < index[i + 1] || index[i] < value <= index[i + 1]
+                    position = i
+                    break
+                end
+            end
+        end
+    else
+        index[end] - (index[end - 1] - index[end]) / 2 <= value <= index[1] + (index[1] - index[2]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
+        position = value > index[1] ? 1 : value < index[end] ? length(index) - 1 : 0
+        if iszero(position)
+            for i in 1:(length(index) - 1)
+                if index[i] == value > index[i + 1] || index[i] > value >= index[i + 1]
+                    position = i
+                    break
+                end
+            end
+        end
+    end
+    position > 0 || throw(DomainError(value, "TAB coordinate does not lie in a nondegenerate index-vector interval"))
+    first, second = T(index[position]), T(index[position + 1])
+    return T(position) + (value - first) / (second - first)
+end
+
+@inline function _tabular_cell(coordinate, length)
+    length == 1 && return 1, 1, zero(coordinate)
+    T = typeof(coordinate)
+    T(0.5) <= coordinate <= T(length) + T(0.5) || throw(DomainError(coordinate, "TAB fractional index is outside interpolation bounds"))
+    lower = floor(Int, coordinate)
+    fraction = coordinate - lower
+    lower == 0 && return 1, 2, fraction - 1
+    lower == length && return length - 1, length, fraction + 1
+    return lower, lower + 1, fraction
+end
+
+@inline function _tabular_index_value(index, coordinate)
+    length(index) == 1 && return oftype(coordinate, only(index))
+    lower, upper, weight = _tabular_cell(coordinate, length(index))
+    return (1 - weight) * index[lower] + weight * index[upper]
+end
+
+@inline function _tabular_values(table::FITSTabularTable{M}, coords) where {M}
+    cells = ntuple(M) do axis
+        fractional = _tabular_fractional_index(table.indices[axis], coords[table.axes[axis]])
+        _tabular_cell(fractional, size(table.coordinates, axis + 1))
+    end
+    return ntuple(M) do component
+        total = zero(coords[1])
+        for corner in 0:(2^M - 1)
+            indices = ntuple(M) do axis
+                lower, upper, fraction = cells[axis]
+                high = !iszero((corner >> (axis - 1)) & 1)
+                high ? upper : lower
+            end
+            weight = prod(ntuple(M) do axis
+                fraction = cells[axis][3]
+                iszero((corner >> (axis - 1)) & 1) ? 1 - fraction : fraction
+            end)
+            total += weight * table.coordinates[component, indices...]
+        end
+        total
+    end
+end
+
+struct FITSTabularTransform{N,T,S} <: AbstractTransform{N,N}
+    tables::T
+    scales::S
+end
+
+function FITSTabularTransform(::Val{N}, tables, scales) where {N}
+    length(scales) == N || throw(DimensionMismatch("TAB output scaling has length $(length(scales)), expected $N"))
+    used = Int[]
+    for table in tables, axis in table.axes
+        1 <= axis <= N || throw(ArgumentError("TAB table references axis $axis outside 1:$N"))
+        axis in used && throw(ArgumentError("multiple TAB tables control axis $axis"))
+        push!(used, axis)
+    end
+    return FITSTabularTransform{N,typeof(tables),typeof(Tuple(scales))}(tables, Tuple(scales))
+end
+
+@inline function (transform::FITSTabularTransform{N})(coords::StaticVector{N}) where {N}
+    result = SVector(coords)
+    for table in transform.tables
+        values = _tabular_values(table, coords)
+        for component in eachindex(table.axes)
+            axis = table.axes[component]
+            result = Base.setindex(result, values[component] * transform.scales[axis], axis)
+        end
+    end
+    return SVector(result)
+end
+
+struct FITSTabularInverse{N,T,S} <: AbstractTransform{N,N}
+    tables::T
+    scales::S
+end
+
+function inverse_transform(transform::FITSTabularTransform{N}) where {N}
+    all(table -> length(table.axes) == 1 && _tabular_monotonic(table.coordinates), transform.tables) || return NoInverse()
+    return FITSTabularInverse{N,typeof(transform.tables),typeof(transform.scales)}(transform.tables, transform.scales)
+end
+
+_tabular_monotonic(values) = length(values) <= 1 || values[1] != values[end] &&
+    (all(i -> values[i] <= values[i + 1], 1:(length(values) - 1)) || all(i -> values[i] >= values[i + 1], 1:(length(values) - 1)))
+
+@inline function (transform::FITSTabularInverse{N})(coords::StaticVector{N}) where {N}
+    result = SVector(coords)
+    for table in transform.tables
+        axis = only(table.axes)
+        fractional = _tabular_fractional_index(table.coordinates, coords[axis] / transform.scales[axis])
+        result = Base.setindex(result, _tabular_index_value(only(table.indices), fractional), axis)
+    end
+    return SVector(result)
+end
+
+inverse_transform(transform::FITSTabularInverse{N}) where {N} = FITSTabularTransform(Val(N), transform.tables, transform.scales)

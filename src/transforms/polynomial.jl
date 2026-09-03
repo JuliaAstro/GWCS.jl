@@ -80,3 +80,62 @@ degree(::Polynomial2D{N}) where {N} = N - 1
     end
     return SVector(result)
 end
+
+"""A two-dimensional SIP correction `(u, v) -> (u + A(u,v), v + B(u,v))`."""
+struct SIPTransform{A<:Polynomial2D,B<:Polynomial2D} <: AbstractTransform{2,2}
+    a::A
+    b::B
+end
+
+function _tpd_term_descriptor(index)
+    remaining = index
+    degree = 0
+    while true
+        monomials = degree + 1
+        if remaining < monomials
+            return (false, degree - remaining, remaining)
+        end
+        remaining -= monomials
+        if isodd(degree)
+            iszero(remaining) && return (true, degree, 0)
+            remaining -= 1
+        end
+        degree += 1
+    end
+end
+
+"""A TPV/TPD plane polynomial using FITS sequent-polynomial term ordering."""
+struct TPVTransform{NX,NY,T,TX,TY} <: AbstractTransform{2,2}
+    xcoeff::NTuple{NX,T}
+    ycoeff::NTuple{NY,T}
+    xterms::TX
+    yterms::TY
+end
+
+function TPVTransform(xcoeff, ycoeff)
+    xvalues, yvalues = Tuple(float.(xcoeff)), Tuple(float.(ycoeff))
+    T = promote_type(map(typeof, (xvalues..., yvalues...))...)
+    xterms = ntuple(index -> _tpd_term_descriptor(index - 1), length(xvalues))
+    yterms = ntuple(index -> _tpd_term_descriptor(index - 1), length(yvalues))
+    return TPVTransform{length(xvalues),length(yvalues),T,typeof(xterms),typeof(yterms)}(T.(xvalues), T.(yvalues), xterms, yterms)
+end
+
+@inline function _tpd_evaluate(coefficients, terms, x, y)
+    radius = hypot(x, y)
+    result = zero(x + y)
+    for index in eachindex(coefficients)
+        radial, xpower, ypower = terms[index]
+        value = radial ? radius^xpower : x^xpower * y^ypower
+        result = muladd(typeof(result)(coefficients[index]), value, result)
+    end
+    return result
+end
+
+@inline function (transform::TPVTransform)(coords::StaticVector{2})
+    x, y = coords
+    return SVector(_tpd_evaluate(transform.xcoeff, transform.xterms, x, y), _tpd_evaluate(transform.ycoeff, transform.yterms, y, x))
+end
+
+@inline function (transform::SIPTransform)(coords::StaticVector{2})
+    return coords + SVector(only(transform.a(coords)), only(transform.b(coords)))
+end

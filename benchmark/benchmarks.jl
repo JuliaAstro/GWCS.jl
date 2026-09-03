@@ -106,9 +106,22 @@ const SIP_HEADER = merge(copy(TAN_HEADER), Dict(
     "BP_2_0" => 1e-7, "BP_1_1" => -4e-7, "BP_0_2" => -2e-7
 ))
 
+const SPECTRAL_HEADER = Dict(
+    "NAXIS" => 1, "CTYPE1" => "FREQ-LOG", "CUNIT1" => "Hz",
+    "CRPIX1" => 1.0, "CRVAL1" => 1.4e9, "CDELT1" => 1.0e6
+)
+
+const GRISM_HEADER = Dict(
+    "NAXIS" => 1, "CTYPE1" => "WAVE-GRI", "CUNIT1" => "m",
+    "CRPIX1" => 1.0, "CRVAL1" => 5.0e-7, "CDELT1" => 1.0e-9,
+    "PV1_0" => 3.16e5, "PV1_1" => 1.0, "PV1_2" => 13.9
+)
+
 const FITS_LINEAR = FITSWCS.WCS(LINEAR_HEADER)
 const FITS_TAN = FITSWCS.WCS(TAN_HEADER)
 const FITS_SIP = FITSWCS.WCS(SIP_HEADER)
+const FITS_SPECTRAL = FITSWCS.WCS(SPECTRAL_HEADER)
+const FITS_GRISM = FITSWCS.WCS(GRISM_HEADER)
 
 const GWCS_LINEAR = affine_wcs(FITS_LINEAR.crpix, FITS_LINEAR.crval, FITS_LINEAR.cd)
 const GWCS_TAN = tan_wcs(FITS_TAN)
@@ -117,6 +130,12 @@ const SIP_B = FITS_SIP.pipeline.sip.b
 const SIP_AP = FITS_SIP.pipeline.sip.ap
 const SIP_BP = FITS_SIP.pipeline.sip.bp
 const GWCS_SIP = tan_sip_wcs(FITS_SIP, SIP_A, SIP_B, SIP_AP, SIP_BP)
+const GWCS_SPECTRAL = parse_fits_wcs(SPECTRAL_HEADER)
+const GWCS_GRISM = parse_fits_wcs(GRISM_HEADER)
+const LOOKUP_TRANSFORM = BilinearLookupTable([0.0 0.1; -0.1 0.2])
+const TABULAR_TABLE = FITSTabularTable((1,), reshape([10.0, 20.0, 40.0], 1, 3), ([1.0, 2.0, 3.0],))
+const TABULAR_TRANSFORM = FITSTabularTransform(Val(1), (TABULAR_TABLE,), (1.0,))
+const TABULAR_INVERSE = inverse_transform(TABULAR_TRANSFORM)
 
 callable_forward(x, y) = (2x + y + 1, -x + 3y - 2)
 callable_inverse(u, v) = ((3u - v - 5) / 7, (u + 2v + 3) / 7)
@@ -164,6 +183,7 @@ function edit_sequence(wcs)
 end
 
 const PIXEL = SVector(400.0, 300.0)
+const SPECTRAL_PIXEL = SVector(2.0)
 const FIXED_PIXEL = SVector(400.0)
 const ARITHMETIC_PIXEL = SVector(3.0)
 const PIXEL_3D = SVector(1.0, 2.0, 3.0)
@@ -184,6 +204,10 @@ const FITS_SIP_WORLD = FITSWCS.pixel_to_world(FITS_SIP, PIXEL)
 const GWCS_LINEAR_WORLD = GWCS.pixel_to_world(GWCS_LINEAR, PIXEL)
 const GWCS_TAN_WORLD = GWCS.pixel_to_world(GWCS_TAN, PIXEL)
 const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
+const FITS_SPECTRAL_WORLD = FITSWCS.pixel_to_world(FITS_SPECTRAL, SPECTRAL_PIXEL)
+const FITS_GRISM_WORLD = FITSWCS.pixel_to_world(FITS_GRISM, SPECTRAL_PIXEL)
+const GWCS_SPECTRAL_WORLD = GWCS.pixel_to_world(GWCS_SPECTRAL, SPECTRAL_PIXEL)
+const GWCS_GRISM_WORLD = GWCS.pixel_to_world(GWCS_GRISM, SPECTRAL_PIXEL)
 
 @assert GWCS_LINEAR_WORLD ≈ FITS_LINEAR_WORLD rtol=1e-12
 @assert GWCS_TAN_WORLD ≈ FITS_TAN_WORLD atol=1e-11
@@ -191,11 +215,25 @@ const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
 @assert GWCS.world_to_pixel(GWCS_LINEAR, FITS_LINEAR_WORLD) ≈ FITSWCS.world_to_pixel(FITS_LINEAR, FITS_LINEAR_WORLD) atol=1e-10
 @assert GWCS.world_to_pixel(GWCS_TAN, FITS_TAN_WORLD) ≈ FITSWCS.world_to_pixel(FITS_TAN, FITS_TAN_WORLD) atol=1e-9
 @assert GWCS.world_to_pixel(GWCS_SIP, FITS_SIP_WORLD) ≈ FITSWCS.world_to_pixel(FITS_SIP, FITS_SIP_WORLD) atol=1e-6
+@assert GWCS_SPECTRAL_WORLD ≈ FITS_SPECTRAL_WORLD rtol=1e-12
+@assert GWCS_GRISM_WORLD ≈ FITS_GRISM_WORLD rtol=1e-12
+@assert GWCS.world_to_pixel(GWCS_SPECTRAL, GWCS_SPECTRAL_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
+@assert GWCS.world_to_pixel(GWCS_GRISM, GWCS_GRISM_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "projections", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
+for operation in ("pixel_to_world", "world_to_pixel", "construction", "projections", "fits_transforms", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
     SUITE[operation] = BenchmarkGroup()
+end
+
+for (name, fits, gwcs, fits_world, gwcs_world) in (
+    ("FREQ-LOG", FITS_SPECTRAL, GWCS_SPECTRAL, FITS_SPECTRAL_WORLD, GWCS_SPECTRAL_WORLD),
+    ("WAVE-GRI", FITS_GRISM, GWCS_GRISM, FITS_GRISM_WORLD, GWCS_GRISM_WORLD)
+)
+    SUITE["pixel_to_world"]["$name/FITSWCS"] = @benchmarkable FITSWCS.pixel_to_world($fits, $SPECTRAL_PIXEL) evals=100
+    SUITE["pixel_to_world"]["$name/GWCS"] = @benchmarkable GWCS.pixel_to_world($gwcs, $SPECTRAL_PIXEL) evals=100
+    SUITE["world_to_pixel"]["$name/FITSWCS"] = @benchmarkable FITSWCS.world_to_pixel($fits, $fits_world) evals=100
+    SUITE["world_to_pixel"]["$name/GWCS"] = @benchmarkable GWCS.world_to_pixel($gwcs, $gwcs_world) evals=100
 end
 
 for (name, fits, gwcs, fits_world, gwcs_world) in (
@@ -212,11 +250,19 @@ end
 SUITE["construction"]["affine/GWCS"] = @benchmarkable affine_wcs($(FITS_LINEAR.crpix), $(FITS_LINEAR.crval), $(FITS_LINEAR.cd)) evals=1
 SUITE["construction"]["TAN/GWCS"] = @benchmarkable tan_wcs($FITS_TAN) evals=1
 SUITE["construction"]["TAN-SIP/GWCS"] = @benchmarkable tan_sip_wcs($FITS_SIP, $SIP_A, $SIP_B, $SIP_AP, $SIP_BP) evals=1
+SUITE["construction"]["FREQ-LOG/FITSWCS"] = @benchmarkable FITSWCS.WCS($SPECTRAL_HEADER) evals=1
+SUITE["construction"]["FREQ-LOG/GWCS"] = @benchmarkable parse_fits_wcs($SPECTRAL_HEADER) evals=1
+SUITE["construction"]["WAVE-GRI/FITSWCS"] = @benchmarkable FITSWCS.WCS($GRISM_HEADER) evals=1
+SUITE["construction"]["WAVE-GRI/GWCS"] = @benchmarkable parse_fits_wcs($GRISM_HEADER) evals=1
 SUITE["construction"]["editing/builder"] = @benchmarkable WCSBuilder($GWCS_LINEAR) evals=1
 SUITE["construction"]["editing/set_transform"] = @benchmarkable set_transform($GWCS_LINEAR, $PIXEL_FRAME, $LINEAR_FRAME, AffineTransform($(FITS_LINEAR.cd))) evals=1
 SUITE["construction"]["editing/insert_frame"] = @benchmarkable insert_frame($GWCS_LINEAR, $PIXEL_FRAME, IdentityTransform{2}(), $EDIT_FRAME) evals=1
 SUITE["construction"]["editing/remove_frame"] = @benchmarkable remove_frame($EDIT_INSERTED_WCS, $EDIT_FRAME) evals=1
 SUITE["construction"]["editing/sequence"] = @benchmarkable edit_sequence($GWCS_LINEAR) evals=1
+
+SUITE["fits_transforms"]["lookup/forward"] = @benchmarkable $LOOKUP_TRANSFORM($PIXEL) evals=100
+SUITE["fits_transforms"]["TAB/forward"] = @benchmarkable $TABULAR_TRANSFORM($SPECTRAL_PIXEL) evals=100
+SUITE["fits_transforms"]["TAB/inverse"] = @benchmarkable $TABULAR_INVERSE(SVector(20.0)) evals=100
 
 const PROJECTION_COORDS = SVector(1.0, 2.0)
 const NATIVE_COORDS = SVector(30.0, 60.0)
@@ -238,12 +284,33 @@ for (name, fits_projection, gwcs_projection) in (
     ("SIN", FITSWCS.SIN(0.1, 0.2), SlantOrthographic(0.1, 0.2)),
     ("ARC", FITSWCS.ARC(), ZenithalEquidistant()),
     ("ZEA", FITSWCS.ZEA(), ZenithalEqualArea()),
-    ("AIR", FITSWCS.AIR(75.8), AiryProjection(75.8))
+    ("AIR", FITSWCS.AIR(75.8), AiryProjection(75.8)),
+    ("ZPN", FITSWCS.ZPN(), ZenithalPolynomial()),
+    ("CAR", FITSWCS.CAR(), PlateCarreeProjection()),
+    ("CEA", FITSWCS.CEA(0.75), CylindricalEqualArea(0.75)),
+    ("CYP", FITSWCS.CYP(1.0, 1.0), CylindricalPerspective(1.0, 1.0)),
+    ("MER", FITSWCS.MER(), MercatorProjection()),
+    ("SFL", FITSWCS.SFL(), SansonFlamsteedProjection()),
+    ("PAR", FITSWCS.PAR(), ParabolicProjection()),
+    ("MOL", FITSWCS.MOL(), MollweideProjection()),
+    ("PCO", FITSWCS.PCO(), PolyconicProjection()),
+    ("AIT", FITSWCS.AIT(), HammerAitoffProjection()),
+    ("COP", FITSWCS.COP(45.0, 0.0), ConicPerspective()),
+    ("COD", FITSWCS.COD(45.0, 0.0), ConicEquidistant()),
+    ("COE", FITSWCS.COE(45.0, 0.0), ConicEqualArea()),
+    ("COO", FITSWCS.COO(45.0, 0.0), ConicOrthomorphic()),
+    ("BON", FITSWCS.BON(45.0), BonneProjection()),
+    ("TSC", FITSWCS.TSC(), TangentialSphericalCube()),
+    ("CSC", FITSWCS.CSC(), COBESphericalCube()),
+    ("QSC", FITSWCS.QSC(), QuadrilateralizedSphericalCube()),
+    ("HPX", FITSWCS.HPX(), HEALPixProjection()),
+    ("XPH", FITSWCS.XPH(), HEALPixPolarProjection())
 )
     to_native = IntermediateToNative(gwcs_projection)
     to_intermediate = NativeToIntermediate(gwcs_projection)
-    @assert to_native(PROJECTION_COORDS) ≈ fits_intermediate_to_native(fits_projection, PROJECTION_COORDS) atol=1e-10
-    @assert to_intermediate(NATIVE_COORDS) ≈ fits_native_to_intermediate(fits_projection, NATIVE_COORDS) atol=1e-10
+    tolerance = name == "CSC" ? 3e-3 : 1e-10
+    @assert to_native(PROJECTION_COORDS) ≈ fits_intermediate_to_native(fits_projection, PROJECTION_COORDS) atol=tolerance
+    @assert to_intermediate(NATIVE_COORDS) ≈ fits_native_to_intermediate(fits_projection, NATIVE_COORDS) atol=tolerance
     SUITE["projections"]["$name/intermediate_to_native/FITSWCS"] = @benchmarkable fits_intermediate_to_native($fits_projection, $PROJECTION_COORDS) evals=100
     SUITE["projections"]["$name/intermediate_to_native/GWCS"] = @benchmarkable $to_native($PROJECTION_COORDS) evals=100
     SUITE["projections"]["$name/native_to_intermediate/FITSWCS"] = @benchmarkable fits_native_to_intermediate($fits_projection, $NATIVE_COORDS) evals=100

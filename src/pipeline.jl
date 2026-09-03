@@ -47,7 +47,9 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
         input_dimension(bounding_box) == Nin || throw(DimensionMismatch("bounding box has input dimension $(input_dimension(bounding_box)), expected $Nin"))
     end
     pixel_shape === nothing || length(pixel_shape) == Nin || throw(DimensionMismatch("pixel shape has length $(length(pixel_shape)), expected $Nin"))
-    shape = pixel_shape === nothing ? nothing : Tuple(Int.(pixel_shape))
+    shape = pixel_shape === nothing ? nothing : map(pixel_shape) do value
+        value === nothing ? nothing : Int(value)
+    end
     return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape)}(compiled, forward, backward, String(name), shape, bounding_box)
 end
 

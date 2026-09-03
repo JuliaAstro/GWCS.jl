@@ -13,7 +13,7 @@ end
 function _box_axis_guess(wcs::WCS, box::BoundingBox, axis, ::Type{T}) where {T}
     interval = bounds(box, axis)
     interval !== nothing && return T(sum(interval) / 2)
-    wcs.pixel_shape !== nothing && return T((wcs.pixel_shape[axis] - 1) / 2)
+    wcs.pixel_shape !== nothing && wcs.pixel_shape[axis] !== nothing && return T((wcs.pixel_shape[axis] - 1) / 2)
     return one(T)
 end
 

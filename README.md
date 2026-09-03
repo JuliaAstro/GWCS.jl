@@ -112,7 +112,7 @@ Constituent `axes_order` values are global transform positions and must form a c
 
 ## Transforms and inverses
 
-The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and FITS Paper II zenithal projections. Supported zenithal algorithms are TAN, AZP, SZP, STG, SIN, ARC, ZEA, and AIR. `compose` and `parallel` are the function forms of `|` and `&`.
+The initial transform set includes identity, shift, scale, affine, constant-output, fixed-input, and axis-remapping transforms, one- and two-dimensional polynomials, spherical/cartesian conversions, precomputed 3D rotations, and all 28 FITS/WCSLIB spherical projections. `compose` and `parallel` are the function forms of `|` and `&`.
 
 Projection algorithms are separate from transform direction. `IntermediateToNative(projection)` converts projection-plane coordinates to native spherical longitude and latitude, while `NativeToIntermediate(projection)` provides the inverse direction. Both sides use degrees:
 
@@ -122,7 +122,7 @@ pix2sky = IntermediateToNative(projection)
 sky2pix = inverse_transform(pix2sky)
 ```
 
-Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes: `ZenithalPerspective(mu, gamma)`, `SlantZenithalPerspective(mu, phi0, theta0)`, `SlantOrthographic(xi, eta)`, and `AiryProjection(theta_b)`. The parameter-free types are `GnomonicProjection`, `StereographicProjection`, `ZenithalEquidistant`, and `ZenithalEqualArea`. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches raise `DomainError`.
+Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches raise `DomainError`. The projection types are also shared by native FITS parsing, so an algorithm has one numeric implementation regardless of its metadata source.
 
 `celestial_transform` combines a projection with the Paper II native-to-celestial rotation derived from a reference longitude and latitude. It computes the default `LONPOLE` when omitted and uses `LATPOLE` to disambiguate general pole solutions:
 
@@ -133,7 +133,7 @@ sky = celestial_transform(GnomonicProjection(), (83.8221, -5.3911))
 sky(SVector(0.0, 0.0)) # reference longitude and latitude
 ```
 
-This constructor returns a transform rather than a complete WCS or frame. It is the low-level construction surface used by future fiducial and FITS interoperability helpers.
+This constructor returns a transform rather than a complete WCS or frame. It is the low-level construction surface used by the FITS parser and programmatic pipelines.
 
 Compatible transforms can also be combined elementwise with `+`, `-`, `*`, `/`, and `^`. Both operands receive the same coordinates and must have matching input and output dimensions:
 
@@ -240,6 +240,25 @@ transform_dependencies(transform)
 
 Composition uses boolean dependency propagation, parallel transforms produce block-diagonal correlations, and fixed inputs remove the corresponding columns. Unknown external transforms use a conservative dense matrix. External transform packages may specialize `transform_dependencies`; a false entry must guarantee independence for every valid coordinate and parameter value rather than describe a Jacobian that happens to be zero at one point.
 
+## FITS WCS
+
+`parse_fits_wcs(header; key=' ', preserve_units=false, minerr=0.0)` parses one primary or alternate FITS image-header representation into an ordinary compiled `WCS` pipeline. `find_all_fits_wcs(header; ...)` returns every representation as a `Dict{Char,WCS}` and reports malformed alternates with their key. Parsing is separate from tagged GWCS/ASDF metadata, which continues to use `parse_wcs`.
+
+```julia
+header = Dict(
+    "NAXIS" => 2, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN",
+    "CRPIX1" => 512.0, "CRPIX2" => 512.0,
+    "CRVAL1" => 83.8221, "CRVAL2" => -5.3911,
+    "CDELT1" => -2.7778e-4, "CDELT2" => 2.7778e-4,
+)
+wcs = parse_fits_wcs(header)
+pixel_to_world(wcs, 512.0, 512.0)
+```
+
+FITS 1-based pixel coordinates are represented explicitly by the `CRPIX` affine stage; no origin offset is applied elsewhere. Public outputs retain FITS axis order, including interleaved celestial, spectral, time, Stokes, and linear axes. Canonical outputs use degrees for celestial axes, SI units for supported linear spectral axes, and seconds for time axes. Set `preserve_units=true` to retain supported `CUNIT` values at the output boundary. Incomplete image shapes use `nothing` for WCS axes without a corresponding `NAXISn`.
+
+The parser supports PC, CD, and legacy CROTA linear forms, all 28 FITS spherical projections and their PV parameters, pole parameters, SIP, TPV/TPD, pre-2012 SCAMP TAN-plus-PV headers, Paper IV D2IM/CPDIS lookup arrays, multilinear `-TAB` coordinate arrays, Paper III spectral algorithms, and GRI/GRA grism models. FITSIO and FITSFiles are weak dependencies that add detached-header and HDU adapters; linked HDU inputs copy referenced images and table columns into backend-neutral transforms during construction. Separable monotonic 1D tables have direct inverses, while coupled tables use the checked WCS numerical inverse. RESTFRQ/RESTWAV and spectral reference-system metadata are retained on spectral frames, and time reference metadata is retained on temporal frames.
+
 ## Metadata
 
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports:
@@ -337,7 +356,7 @@ Run the package tests with:
 julia --project -e 'using Pkg; Pkg.test()'
 ```
 
-The benchmark suite compares equivalent affine, TAN, and TAN-SIP scalar transforms against FITSWCS.jl:
+The benchmark suite compares equivalent affine, TAN, TAN-SIP, nonlinear spectral, grism, and spherical-projection scalar transforms against FITSWCS.jl. It also covers direct lookup-table and `-TAB` evaluation:
 
 ```sh
 julia --project=benchmark benchmark/benchmarks.jl
