@@ -17,6 +17,10 @@ GWCS.compile_transform(::PipelineCompileFailure) = error("pipeline compilation f
     @test output_frame(wcs) === world
     @test wcs.name == "test"
     @test wcs.pixel_shape == (100, 200)
+    mutable_shape = Union{Int,Nothing}[100, nothing]
+    normalized_shape = with_pixel_shape(wcs, mutable_shape)
+    mutable_shape[1] = 50
+    @test normalized_shape.pixel_shape === (100, nothing)
     @test SVector(10.0, 20.0) in wcs.bounding_box
     @test !(SVector(101.0, 20.0) in wcs.bounding_box)
     c_order_box = BoundingBox(((10.0, 20.0), (1.0, 2.0)); order=:C)
