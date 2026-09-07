@@ -178,9 +178,10 @@ import FITSIO
     @test pixel_to_world(mixed, 2.0, 1.0, 3.0, 1.0) ≈ SVector(1.4010003572279062e9, -20.0, 216000.0, 30.0) atol=2e-7
     @test world_to_pixel(mixed, pixel_to_world(mixed, 2.0, 1.0, 3.0, 1.0)) ≈ SVector(2.0, 1.0, 3.0, 1.0) atol=2e-10
 
-    fitsio_header = FITSIO.FITSHeader(["NAXIS", "CTYPE1", "CRVAL1"], Any[1, "X", 2.0], ["", "", ""])
+    @test pixel_to_world(parse_fits_wcs(Dict("" => nothing, "NAXIS" => 1, "CTYPE1" => "X", "CRVAL1" => 1.0)), 0.0) == SVector(1.0)
+    fitsio_header = FITSIO.FITSHeader(["NAXIS", "", "CTYPE1", "CRVAL1"], Any[1, nothing, "X", 2.0], ["", "", "", ""])
     @test pixel_to_world(parse_fits_wcs(fitsio_header), 0.0) == SVector(2.0)
-    fitsfiles_cards = FITSFiles.Card[FITSFiles.Card("NAXIS", 1), FITSFiles.Card("CTYPE1", "X"), FITSFiles.Card("CRVAL1", 3.0)]
+    fitsfiles_cards = FITSFiles.Card[FITSFiles.Card("NAXIS", 1), FITSFiles.Card(), FITSFiles.Card("CTYPE1", "X"), FITSFiles.Card("CRVAL1", 3.0)]
     @test pixel_to_world(parse_fits_wcs(fitsfiles_cards), 0.0) == SVector(3.0)
 
     lookup_cards = FITSFiles.Card[
@@ -347,6 +348,16 @@ import FITSIO
     tpv_world = pixel_to_world(tpv, 513.0, 514.0)
     @test tpv_world ≈ SVector(83.82181819578481, -5.390827775535175) atol=2e-11
     @test world_to_pixel(tpv, tpv_world; initial_guess=(513.0, 514.0)) ≈ SVector(513.0, 514.0) atol=1e-8
+
+    # WCSLIB applies sequent TPV distortion after PC but before CDELT.
+    tpv_pc_header = Dict(
+        "NAXIS" => 2, "CTYPE1" => "RA---TPV", "CTYPE2" => "DEC--TPV",
+        "CRPIX1" => 128.0, "CRPIX2" => 96.0, "CRVAL1" => 120.0, "CRVAL2" => 35.0,
+        "CDELT1" => -0.05, "CDELT2" => 0.05,
+        "PC1_1" => 1.0, "PC1_2" => 0.1, "PC2_1" => -0.2, "PC2_2" => 1.0,
+        "PV1_1" => 1.0, "PV1_4" => 0.01, "PV2_2" => 1.0, "PV2_6" => -0.02,
+    )
+    @test pixel_to_world(parse_fits_wcs(tpv_pc_header), 130.0, 99.0) ≈ SVector(119.85618945998247, 35.109624950491622) atol=3e-14
 
     scamp_header = merge(sip_header, Dict("CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "PV1_1" => 1.0, "PV1_5" => 1e-6, "PV2_2" => 1.0))
     original_scamp_header = copy(scamp_header)

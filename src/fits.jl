@@ -7,7 +7,7 @@ function _fits_header(source::AbstractDict)
     header = Dict{String,Any}()
     for (raw_key, value) in source
         key = uppercase(strip(String(raw_key)))
-        isempty(key) && throw(ArgumentError("FITS header contains an empty keyword"))
+        isempty(key) && continue
         haskey(header, key) && header[key] != value && throw(ArgumentError("FITS header contains conflicting values for keyword $key"))
         header[key] = value
     end
