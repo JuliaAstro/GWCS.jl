@@ -2,6 +2,10 @@ function _projection_allocated(transform::T, coords::C) where {T,C}
     return @allocated transform(coords)
 end
 
+function _projection_jacobian_allocated(transform::T, coords::C) where {T,C}
+    return @allocated transform_jacobian(transform, coords)
+end
+
 function _test_projection_performance(transform::T, coords::C) where {T,C}
     expected = transform(coords)
     @test @inferred(transform(coords)) == expected
@@ -75,9 +79,30 @@ end
     @test_throws DomainError NativeToIntermediate(SlantZenithalPerspective(1.5, 15.0, 80.0))(SVector(-180.0, -90.0))
     @test_throws DomainError NativeToIntermediate(AiryProjection())(SVector(0.0, -90.0))
 
+    cyp = CylindricalPerspective(2.0, 3.0)
+    @test cyp.mu == 2.0
+    @test cyp.lambda == 3.0
+    @test IntermediateToNative(cyp)(SVector(1.0, 2.0)) ≈ SVector(0.33333333333333331, 1.2000000012828205) atol=2e-15
+    @test NativeToIntermediate(cyp)(SVector(30.0, 60.0)) ≈ SVector(90.0, 99.23920117592256) atol=2e-14
+    @test_throws "lambda must be nonzero" CylindricalPerspective(1, 0)
+
     airy = IntermediateToNative(AiryProjection(75.8))
     finite_difference = (airy(SVector(1.0, 2.0 + 1e-6)) - airy(SVector(1.0, 2.0 - 1e-6))) / 2e-6
     @test transform_jacobian(airy, SVector(1.0, 2.0))[:, 2] ≈ finite_difference rtol=1e-6
+
+    zpn = IntermediateToNative(ZenithalPolynomial((0.0, 1.0, 0.05, 0.01)))
+    finite_difference = (zpn(SVector(1.0, 2.0 + 1e-6)) - zpn(SVector(1.0, 2.0 - 1e-6))) / 2e-6
+    @test transform_jacobian(zpn, SVector(1.0, 2.0))[:, 2] ≈ finite_difference rtol=1e-6
+
+    pco_to_native = IntermediateToNative(PolyconicProjection())
+    pco_to_intermediate = NativeToIntermediate(PolyconicProjection())
+    @test transform_jacobian(pco_to_native, SVector(30.0, 0.0)) ≈ (@SMatrix [1.0 0.0; 0.0 inv(1 + deg2rad(30.0)^2 / 2)]) atol=2e-15
+    @test transform_jacobian(pco_to_native, SVector(0.0, -89.0)) ≈ (@SMatrix [inv(cosd(89.0)) 0.0; 0.0 1.0]) atol=2e-13
+    @test transform_jacobian(pco_to_intermediate, SVector(-90.0, -0.01)) ≈ (@SMatrix [0.9999999471884624 -0.0004996396702968213; 0.00027415566880621375 2.233700451793191]) atol=2e-15
+    pco_jacobian = @inferred transform_jacobian(pco_to_native, SVector(1.0f0, 2.0f0))
+    @test eltype(pco_jacobian) === Float32
+    transform_jacobian(pco_to_native, SVector(1.0, 2.0))
+    @test _projection_jacobian_allocated(pco_to_native, SVector(1.0, 2.0)) == 0
 end
 
 @testset "Celestial projection construction" begin

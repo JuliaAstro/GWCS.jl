@@ -147,16 +147,16 @@ end
 
 """The CYP/cylindrical perspective projection."""
 struct CylindricalPerspective{T<:AbstractFloat} <: AbstractSphericalProjection
-    lambda::T
     mu::T
+    lambda::T
 end
 
-function CylindricalPerspective(lambda::Real=1, mu::Real=1)
-    lambda_value, mu_value = promote(float(lambda), float(mu))
-    all(isfinite, (lambda_value, mu_value)) || throw(ArgumentError("cylindrical perspective parameters must be finite"))
-    iszero(mu_value) && throw(ArgumentError("cylindrical perspective mu must be nonzero"))
-    iszero(lambda_value + mu_value) && throw(ArgumentError("cylindrical perspective lambda + mu must be nonzero"))
-    return CylindricalPerspective{typeof(lambda_value)}(lambda_value, mu_value)
+function CylindricalPerspective(mu::Real=1, lambda::Real=1)
+    mu_value, lambda_value = promote(float(mu), float(lambda))
+    all(isfinite, (mu_value, lambda_value)) || throw(ArgumentError("cylindrical perspective parameters must be finite"))
+    iszero(lambda_value) && throw(ArgumentError("cylindrical perspective lambda must be nonzero"))
+    iszero(mu_value + lambda_value) && throw(ArgumentError("cylindrical perspective mu + lambda must be nonzero"))
+    return CylindricalPerspective{typeof(mu_value)}(mu_value, lambda_value)
 end
 
 """The MER/Mercator projection."""
@@ -327,20 +327,20 @@ end
 
 function _intermediate_to_native(projection::CylindricalPerspective, x, y)
     T = promote_type(typeof(x), typeof(y))
-    lambda, mu = T(projection.lambda), T(projection.mu)
-    eta = deg2rad(y) / (lambda + mu)
-    argument = eta * lambda / hypot(eta, one(T))
+    mu, lambda = T(projection.mu), T(projection.lambda)
+    eta = deg2rad(y) / (mu + lambda)
+    argument = eta * mu / hypot(eta, one(T))
     abs(argument) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "CYP intermediate coordinate is outside the projection domain"))
-    return deg2rad(x) / mu, atan(eta) + asin(clamp(argument, -one(T), one(T)))
+    return deg2rad(x) / lambda, atan(eta) + asin(clamp(argument, -one(T), one(T)))
 end
 
 function _native_to_intermediate(projection::CylindricalPerspective, phi, theta)
     theta = _native_latitude(theta, projection)
     T = promote_type(typeof(phi), typeof(theta))
-    lambda, mu = T(projection.lambda), T(projection.mu)
-    denominator = lambda + cos(theta)
-    iszero(denominator) && throw(DomainError(rad2deg(theta), "CYP is singular where lambda + cos(theta) = 0"))
-    return rad2deg(mu * _wrap_native_longitude(phi)), rad2deg((lambda + mu) * sin(theta) / denominator)
+    mu, lambda = T(projection.mu), T(projection.lambda)
+    denominator = mu + cos(theta)
+    iszero(denominator) && throw(DomainError(rad2deg(theta), "CYP is singular where mu + cos(theta) = 0"))
+    return rad2deg(lambda * _wrap_native_longitude(phi)), rad2deg((mu + lambda) * sin(theta) / denominator)
 end
 
 @inline function _intermediate_to_native(::MercatorProjection, x, y)
@@ -471,6 +471,40 @@ function _native_to_intermediate(projection::PolyconicProjection, phi, theta)
     return rad2deg(cotangent * sin(angle)), rad2deg(theta + cotangent * (1 - cos(angle)))
 end
 
+@inline function _cos_minus_unnormalized_sinc(value)
+    if abs(value) < oftype(value, 0.1)
+        # The direct expression loses the leading quadratic term near zero.
+        squared = value^2
+        series = one(value) / 45360 - squared / 3991680
+        series = -one(value) / 840 + squared * series
+        series = one(value) / 30 + squared * series
+        return squared * (-one(value) / 3 + squared * series)
+    end
+    return cos(value) - sin(value) / value
+end
+
+function transform_jacobian(transform::NativeToIntermediate{<:PolyconicProjection}, coords::StaticVector{2})
+    T = _evaluation_type(eltype(coords))
+    phi = _wrap_native_longitude(deg2rad(T(coords[1])))
+    theta = _native_latitude(deg2rad(T(coords[2])), transform.projection)
+    if iszero(theta)
+        return SMatrix{2,2}(one(T), zero(T), zero(T), one(T) + phi^2 / 2)
+    end
+
+    sine_theta, cosine_theta = sincosd(rad2deg(theta))
+    angle = phi * sine_theta
+    sine_angle, cosine_angle = sincos(angle)
+    inverse_sine = inv(sine_theta)
+    longitude_latitude = phi * inverse_sine * (_cos_minus_unnormalized_sinc(angle) - sine_theta^2 * cosine_angle)
+    latitude_latitude = one(T) - 2sin(angle / 2)^2 * inverse_sine^2 + phi * cosine_theta^2 * sine_angle * inverse_sine
+    return SMatrix{2,2}(cosine_theta * cosine_angle, cosine_theta * sine_angle, longitude_latitude, latitude_latitude)
+end
+
+function transform_jacobian(transform::IntermediateToNative{<:PolyconicProjection}, coords::StaticVector{2})
+    native = transform(coords)
+    return inv(transform_jacobian(NativeToIntermediate(transform.projection), native))
+end
+
 function _intermediate_to_native(::HammerAitoffProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
     u, v = deg2rad(T(x)), deg2rad(T(y))
@@ -559,6 +593,12 @@ function _native_to_intermediate(projection::ZenithalPolynomial, phi, theta)
     distance = oftype(theta, pi / 2) - theta
     radius = rad2deg(_projection_polynomial(projection.coefficients, distance))
     return _zenithal_xy(radius, phi)
+end
+
+function transform_jacobian(transform::IntermediateToNative{<:ZenithalPolynomial}, coords::StaticVector{2})
+    native = transform(coords)
+    inverse_jacobian = _forwarddiff_jacobian(NativeToIntermediate(transform.projection), native)
+    return inv(inverse_jacobian)
 end
 
 @inline function _conic_radius_angle(x, y, y0, sigma)
