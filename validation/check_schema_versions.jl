@@ -1,11 +1,11 @@
 using GWCS
 
-const PYTHON = expanduser(get(ENV, "PYTHON", "~/.venvs/311_main/bin/python"))
+include("python.jl")
 
 function resource_path(package)
-    isfile(PYTHON) || error("Python executable not found at $PYTHON; set PYTHON to an environment containing $package")
+    python = validation_python()
     code = "import importlib.resources; root = importlib.resources.files('$package'); print(root if hasattr(root, '__fspath__') else next(iter(root.iterdir())).parent)"
-    return strip(read(`$PYTHON -c $code`, String))
+    return strip(read(`$python -c $code`, String))
 end
 
 function available_versions(root, family)

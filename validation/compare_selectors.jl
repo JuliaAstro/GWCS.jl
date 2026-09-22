@@ -2,8 +2,10 @@ using GWCS
 using StaticArrays
 using YAML
 
+include("python.jl")
+
 function main()
-    python = get(ENV, "GWCS_PYTHON", joinpath(homedir(), ".venvs", "311_main", "bin", "python"))
+    python = validation_python()
     reference_script = joinpath(@__DIR__, "python_selector_reference.py")
     reference = YAML.load(read(`$python $reference_script`, String))
 

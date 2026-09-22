@@ -1,0 +1,14 @@
+[project]
+name = "gwcs-jl-validation"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "asdf>=5,<6",
+    "asdf-coordinates-schemas>=0.5,<0.6",
+    "asdf-standard>=1.5,<2",
+    "asdf-transform-schemas>=0.6,<0.7",
+    "asdf-wcs-schemas>=0.5,<0.6",
+    "astropy>=8,<9",
+    "gwcs>=1,<2",
+    "numpy>=2,<3",
+]
