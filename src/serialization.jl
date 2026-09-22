@@ -521,7 +521,7 @@ function _to_metadata(wcs::WCS, path, registry)
         push!(steps, _serialize_step(step, "$path/steps/$index", registry; bounding_box=box, input_order=order))
     end
     properties = Dict{String,Any}("name" => wcs.name, "steps" => steps)
-    wcs.pixel_shape === nothing || (properties["pixel_shape"] = _metadata_pixel_shape(wcs))
+    wcs.pixel_shape === nothing || any(isnothing, wcs.pixel_shape) || (properties["pixel_shape"] = _metadata_pixel_shape(wcs))
     return _tagged_metadata("$_GWCS_TAG/wcs", v"1.4.0", properties)
 end
 

@@ -124,6 +124,7 @@ FITSWCS.jl at `~/Development/julia/FITSWCS.jl` is the authoritative formatting r
 - Run `Pkg.test()` only when the change is coherent and targeted tests pass.
 - Before completion, run the full suite on current stable Julia and Julia 1.10.
 - Run `git diff --check`.
+- Use a long timeout when running full package tests (e.g., 10 min).
 
 Prefer the persistent Julia MCP session with the repository environment so Revise can amortize compilation. Do not repeatedly launch fresh Julia processes for normal edit-test loops.
 

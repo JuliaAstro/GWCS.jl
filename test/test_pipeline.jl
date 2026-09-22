@@ -34,6 +34,22 @@ GWCS.compile_transform(::PipelineCompileFailure) = error("pipeline compilation f
     @test transform(wcs, "world", "detector", world_position) ≈ SVector(11.0, 22.0) atol=1e-10
     @test get_transform(wcs, "focal", "focal") isa IdentityTransform{2}
 
+    compact = sprint(show, wcs)
+    @test compact == "WCS(\"test\", 2 → 2, 3 steps)"
+    @test !occursin("Tuple{", sprint(show, wcs.steps))
+    detailed = sprint(show, MIME("text/plain"), wcs)
+    @test occursin("WCS \"test\" (2 → 2), 3 steps", detailed)
+    @test occursin("pixel_shape: (100, 200)", detailed)
+    @test occursin("bounding_box:", detailed)
+    @test occursin("1. frame: CoordinateFrame", detailed)
+    @test occursin("AffineTransform", detailed)
+    @test occursin("offset=[-10.0, -20.0]", detailed)
+    annotated = Step(detector, AnnotatedTransform(AffineTransform([1.0 2.0; 3.0 4.0], [5.0, 6.0]); name="velocity_aberration", inputs=("x", "y"), outputs=("u", "v")))
+    annotated_text = sprint(show, MIME("text/plain"), annotated)
+    @test occursin("name=\"velocity_aberration\"", annotated_text)
+    @test occursin("matrix=[1.0 2.0; 3.0 4.0]", annotated_text)
+    @test occursin("offset=[5.0, 6.0]", annotated_text)
+
     @test_throws "frame names must be unique" WCS(Step(detector, detector_to_focal), Step(detector))
     @test_throws DimensionMismatch WCS(Step(detector, Shift(1.0)), Step(world))
 

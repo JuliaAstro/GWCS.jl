@@ -1,22 +1,29 @@
-"""A construction-time-copied two-dimensional bilinear lookup table."""
-struct BilinearLookupTable{T<:AbstractFloat,A<:AbstractMatrix{T}} <: AbstractTransform{2,1}
+"""A construction-time-copied multilinear lookup table over selected input axes."""
+struct FITSLookupTable{N,Nin,T<:AbstractFloat,A<:AbstractArray{T,N},X<:NTuple{N,Int}} <: AbstractTransform{Nin,1}
     data::A
-    crpix::SVector{2,T}
-    crval::SVector{2,T}
-    cdelt::SVector{2,T}
+    axes::X
+    crpix::SVector{N,T}
+    crval::SVector{N,T}
+    cdelt::SVector{N,T}
 end
 
-function BilinearLookupTable(data::AbstractMatrix; crpix=(1, 1), crval=(0, 0), cdelt=(1, 1))
+function FITSLookupTable(data::AbstractArray{<:Any,N}, axes::NTuple{N,Int}, ::Val{Nin}=Val(maximum(axes)); crpix=ntuple(_ -> 1, N), crval=ntuple(_ -> 0, N), cdelt=ntuple(_ -> 1, N)) where {N,Nin}
+    N >= 1 || throw(ArgumentError("lookup table must have at least one dimension"))
     isempty(data) && throw(ArgumentError("lookup table data must not be empty"))
+    allunique(axes) || throw(ArgumentError("lookup table axes must be distinct"))
+    all(>(0), axes) || throw(ArgumentError("lookup table axes must be positive"))
     values = float.(data)
     T = eltype(values)
-    reference_pixel = SVector{2,T}(crpix)
-    reference_value = SVector{2,T}(crval)
-    increment = SVector{2,T}(cdelt)
+    reference_pixel = SVector{N,T}(crpix)
+    reference_value = SVector{N,T}(crval)
+    increment = SVector{N,T}(cdelt)
     all(isfinite, reference_pixel) && all(isfinite, reference_value) && all(isfinite, increment) || throw(ArgumentError("lookup table coordinates must be finite"))
     all(value -> !iszero(value), increment) || throw(ArgumentError("lookup table CDELT values must be nonzero"))
-    return BilinearLookupTable{T,typeof(values)}(values, reference_pixel, reference_value, increment)
+    all(<=(Nin), axes) || throw(ArgumentError("lookup table axis exceeds input dimension $Nin"))
+    return FITSLookupTable{N,Nin,T,typeof(values),typeof(axes)}(values, axes, reference_pixel, reference_value, increment)
 end
+
+BilinearLookupTable(data::AbstractMatrix; kwargs...) = FITSLookupTable(data, (1, 2); kwargs...)
 
 @inline function _lookup_cell(index, length)
     length == 1 && return 1, 1, zero(index)
@@ -25,10 +32,17 @@ end
     return lower, lower + 1, coordinate - lower
 end
 
-@inline function (table::BilinearLookupTable)(coords::StaticVector{2})
+@inline function (table::FITSLookupTable{1,Nin})(coords::StaticVector{Nin}) where {Nin}
     T = promote_type(eltype(coords), eltype(table.data))
-    x = (T(coords[1]) - T(table.crval[1])) / T(table.cdelt[1]) + T(table.crpix[1])
-    y = (T(coords[2]) - T(table.crval[2])) / T(table.cdelt[2]) + T(table.crpix[2])
+    coordinate = (T(coords[table.axes[1]]) - T(table.crval[1])) / T(table.cdelt[1]) + T(table.crpix[1])
+    lower, upper, fraction = _lookup_cell(coordinate, length(table.data))
+    return SVector(muladd(fraction, T(table.data[upper]) - T(table.data[lower]), T(table.data[lower])))
+end
+
+@inline function (table::FITSLookupTable{2,Nin})(coords::StaticVector{Nin}) where {Nin}
+    T = promote_type(eltype(coords), eltype(table.data))
+    x = (T(coords[table.axes[1]]) - T(table.crval[1])) / T(table.cdelt[1]) + T(table.crpix[1])
+    y = (T(coords[table.axes[2]]) - T(table.crval[2])) / T(table.cdelt[2]) + T(table.crpix[2])
     x0, x1, tx = _lookup_cell(x, size(table.data, 1))
     y0, y1, ty = _lookup_cell(y, size(table.data, 2))
     v00, v10 = T(table.data[x0, y0]), T(table.data[x1, y0])
@@ -51,8 +65,8 @@ function FITSLookupDistortion(::Val{N}, detector_to_image, sip, cpdis) where {N}
 end
 
 @inline function _lookup_offsets(tables, coords::StaticVector{N,T}) where {N,T}
-    x = tables[1] === nothing ? zero(T) : T(only(tables[1](SVector(coords[1], coords[2]))))
-    y = tables[2] === nothing ? zero(T) : T(only(tables[2](SVector(coords[1], coords[2]))))
+    x = tables[1] === nothing ? zero(T) : T(only(tables[1](coords)))
+    y = tables[2] === nothing ? zero(T) : T(only(tables[2](coords)))
     return SVector{N,T}(ntuple(i -> i == 1 ? x : i == 2 ? y : zero(T), Val(N)))
 end
 
@@ -60,6 +74,47 @@ end
     detector = coords + _lookup_offsets(transform.detector_to_image, coords)
     corrected = transform.sip(detector)
     return corrected + _lookup_offsets(transform.cpdis, detector)
+end
+
+struct _FITSPriorDistortion{N,D,S,C,P} <: AbstractTransform{N,N}
+    detector_to_image::D
+    sip::S
+    cpdis::C
+    tpd::P
+end
+
+function _FITSPriorDistortion(::Val{N}, detector_to_image, sip, cpdis, tpd::_FITSTPDTransform{N}) where {N}
+    length(detector_to_image) == 2 && length(cpdis) == 2 || throw(DimensionMismatch("FITS lookup distortion stages require two axis tables"))
+    has_lookup = any(table -> table !== nothing, (detector_to_image..., cpdis...))
+    has_lookup && N < 2 && throw(ArgumentError("FITS lookup distortions require at least two pixel axes"))
+    input_dimension(sip) == N && output_dimension(sip) == N || throw(DimensionMismatch("SIP transform must map $N axes to $N axes"))
+    return _FITSPriorDistortion{N,typeof(detector_to_image),typeof(sip),typeof(cpdis),typeof(tpd)}(detector_to_image, sip, cpdis, tpd)
+end
+
+@inline _fits_prior_outputs(::Tuple{}, ::Tuple{}, ::Tuple{}) = ()
+
+@inline function _fits_prior_outputs(models::Tuple, lookup::Tuple, tpd::Tuple)
+    output = first(models) === nothing ? first(lookup) : first(tpd)
+    return (output, _fits_prior_outputs(Base.tail(models), Base.tail(lookup), Base.tail(tpd))...)
+end
+
+@inline function (transform::_FITSPriorDistortion{N})(coords::StaticVector{N}) where {N}
+    detector = coords + _lookup_offsets(transform.detector_to_image, coords)
+    corrected = transform.sip(detector)
+    lookup_corrected = corrected + _lookup_offsets(transform.cpdis, detector)
+    tpd_corrected = transform.tpd(corrected)
+    outputs = _fits_prior_outputs(transform.tpd.models, Tuple(lookup_corrected), Tuple(tpd_corrected))
+    return SVector{N}(outputs)
+end
+
+@inline function _inverse_initialize(transform::_FITSPriorDistortion{N}, coords::StaticVector{N}) where {N}
+    tpd_initialized, tpd_used = _inverse_initialize(transform.tpd, coords)
+    sip_initialized, sip_used = _inverse_initialize(transform.sip, tpd_initialized)
+    return (sip_initialized, tpd_used || sip_used)
+end
+
+@inline function _inverse_initialize(transform::FITSLookupDistortion{N}, coords::StaticVector{N}) where {N}
+    return _inverse_initialize(transform.sip, coords)
 end
 
 struct FITSTabularTable{M,A,I}

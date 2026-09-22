@@ -104,7 +104,7 @@ function _tpd_term_descriptor(index)
     end
 end
 
-"""A TPV/TPD plane polynomial using FITS sequent-polynomial term ordering."""
+"""A TPV plane polynomial using FITS sequent-polynomial term ordering."""
 struct TPVTransform{NX,NY,T,TX,TY} <: AbstractTransform{2,2}
     xcoeff::NTuple{NX,T}
     ycoeff::NTuple{NY,T}
@@ -114,7 +114,8 @@ end
 
 function TPVTransform(xcoeff, ycoeff)
     xvalues, yvalues = Tuple(float.(xcoeff)), Tuple(float.(ycoeff))
-    T = promote_type(map(typeof, (xvalues..., yvalues...))...)
+    length(xvalues) <= 40 && length(yvalues) <= 40 || throw(ArgumentError("TPV supports coefficient indices 0 through 39"))
+    T = isempty(xvalues) && isempty(yvalues) ? Float64 : promote_type(map(typeof, (xvalues..., yvalues...))...)
     xterms = ntuple(index -> _tpd_term_descriptor(index - 1), length(xvalues))
     yterms = ntuple(index -> _tpd_term_descriptor(index - 1), length(yvalues))
     return TPVTransform{length(xvalues),length(yvalues),T,typeof(xterms),typeof(yterms)}(T.(xvalues), T.(yvalues), xterms, yterms)
@@ -134,6 +135,93 @@ end
 @inline function (transform::TPVTransform)(coords::StaticVector{2})
     x, y = coords
     return SVector(_tpd_evaluate(transform.xcoeff, transform.xterms, x, y), _tpd_evaluate(transform.ycoeff, transform.yterms, y, x))
+end
+
+struct _FITSTPDAxis{M,O,S,A,T,R}
+    axes::NTuple{M,Int}
+    offset::O
+    scale::S
+    auxiliary::A
+    terms::T
+    reverse_terms::R
+    docorr::Bool
+end
+
+function _FITSTPDAxis(axes::NTuple{M,Int}, offset, scale, auxiliary, terms, reverse_terms, docorr) where {M}
+    return _FITSTPDAxis{M,typeof(offset),typeof(scale),typeof(auxiliary),typeof(terms),typeof(reverse_terms)}(axes, offset, scale, auxiliary, terms, reverse_terms, docorr)
+end
+
+_FITSTPDAxis(axes, offset, scale, auxiliary, terms, docorr) = _FITSTPDAxis(axes, offset, scale, auxiliary, terms, (), docorr)
+
+struct _FITSTPDTransform{N,M<:Tuple} <: AbstractTransform{N,N}
+    models::M
+end
+
+function _FITSTPDTransform(models::NTuple{N,Any}) where {N}
+    return _FITSTPDTransform{N,typeof(models)}(models)
+end
+
+@inline function _fits_tpd_value(model::_FITSTPDAxis{M}, coords::StaticVector) where {M}
+    T = _evaluation_type(eltype(coords))
+    variables = SVector{M,T}(ntuple(Val(M)) do index
+        (T(coords[model.axes[index]]) - T(model.offset[index])) * T(model.scale[index])
+    end)
+    u = variables[1]
+    v = M == 1 ? zero(T) : variables[2]
+    if model.auxiliary !== nothing
+        transformed = SMatrix{2,3,T}(model.auxiliary) * SVector(one(T), u, v)
+        u, v = transformed
+    end
+    radius = hypot(u, v)
+    result = zero(T)
+    for (coefficient, radial, xpower, ypower) in model.terms
+        value = radial ? radius^xpower : u^xpower * v^ypower
+        result = muladd(T(coefficient), value, result)
+    end
+    return result
+end
+
+@inline _fits_tpd_output(::Nothing, coords, axis) = coords[axis]
+
+@inline function _fits_tpd_output(model::_FITSTPDAxis, coords, axis)
+    value = _fits_tpd_value(model, coords)
+    return model.docorr ? coords[axis] + value : value
+end
+
+@inline _fits_tpd_outputs(::Tuple{}, coords, axis, ::Type{T}) where {T} = ()
+
+@inline function _fits_tpd_outputs(models::Tuple, coords, axis, ::Type{T}) where {T}
+    output = T(_fits_tpd_output(first(models), coords, axis))
+    return (output, _fits_tpd_outputs(Base.tail(models), coords, axis + 1, T)...)
+end
+
+@inline function (transform::_FITSTPDTransform{N})(coords::StaticVector{N}) where {N}
+    T = _evaluation_type(eltype(coords))
+    values = SVector{N,T}(coords)
+    return SVector{N,T}(_fits_tpd_outputs(transform.models, values, 1, T))
+end
+
+@inline _fits_tpd_reverse_output(::Nothing, coords, axis) = (coords[axis], false)
+
+@inline function _fits_tpd_reverse_output(model::_FITSTPDAxis, coords, axis)
+    isempty(model.reverse_terms) && return (coords[axis], false)
+    reverse_model = _FITSTPDAxis(model.axes, model.offset, model.scale, model.auxiliary, model.reverse_terms, (), model.docorr)
+    return (_fits_tpd_output(reverse_model, coords, axis), true)
+end
+
+@inline _fits_tpd_reverse_outputs(::Tuple{}, coords, axis, ::Type{T}) where {T} = ((), false)
+
+@inline function _fits_tpd_reverse_outputs(models::Tuple, coords, axis, ::Type{T}) where {T}
+    output, used = _fits_tpd_reverse_output(first(models), coords, axis)
+    tail, tail_used = _fits_tpd_reverse_outputs(Base.tail(models), coords, axis + 1, T)
+    return ((T(output), tail...), used || tail_used)
+end
+
+@inline function _inverse_initialize(transform::_FITSTPDTransform{N}, coords::StaticVector{N}) where {N}
+    T = _evaluation_type(eltype(coords))
+    values = SVector{N,T}(coords)
+    outputs, used = _fits_tpd_reverse_outputs(transform.models, values, 1, T)
+    return (SVector{N,T}(outputs), used)
 end
 
 @inline function (transform::SIPTransform)(coords::StaticVector{2})

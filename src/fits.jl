@@ -1,5 +1,9 @@
 const _FITS_LONGITUDE_TYPES = ("RA", "GLON", "ELON", "HLON", "SLON", "HPLN")
 const _FITS_LATITUDE_TYPES = ("DEC", "GLAT", "ELAT", "HLAT", "SLAT", "HPLT")
+
+_fits_is_longitude_type(coordinate) = coordinate == "RA" || ncodeunits(coordinate) == 4 && (endswith(coordinate, "LON") || endswith(coordinate, "LN"))
+_fits_is_latitude_type(coordinate) = coordinate == "DEC" || ncodeunits(coordinate) == 4 && (endswith(coordinate, "LAT") || endswith(coordinate, "LT"))
+_fits_celestial_partner(coordinate) = coordinate == "RA" ? "DEC" : coordinate == "DEC" ? "RA" : endswith(coordinate, "LON") ? coordinate[1:1] * "LAT" : endswith(coordinate, "LAT") ? coordinate[1:1] * "LON" : endswith(coordinate, "LN") ? coordinate[1:2] * "LT" : coordinate[1:2] * "LN"
 const _FITS_SPECTRAL_TYPES = ("FREQ", "AFRQ", "ENER", "WAVN", "WAVE", "AWAV", "VRAD", "VOPT", "ZOPT", "VELO", "BETA")
 const _FITS_TIME_TYPES = ("TIME", "UTC", "TAI", "TT", "TDB", "TCG", "TCB", "GPS")
 
@@ -81,8 +85,8 @@ function _fits_ctype(value)
     else
         coordinate, algorithm, suffix = text, "", ""
     end
-    kind = coordinate in _FITS_LONGITUDE_TYPES ? :longitude :
-        coordinate in _FITS_LATITUDE_TYPES ? :latitude :
+    kind = _fits_is_longitude_type(coordinate) ? :longitude :
+        _fits_is_latitude_type(coordinate) ? :latitude :
         coordinate in _FITS_SPECTRAL_TYPES ? :spectral :
         coordinate in _FITS_TIME_TYPES ? :time :
         coordinate == "STOKES" ? :stokes : :linear
@@ -92,7 +96,8 @@ end
 function _fits_reject_external_data(header, suffix; allow_lookup=false, allow_tab=false)
     axis_suffix = isempty(suffix) ? raw"$" : "$(suffix)\$"
     for (keyword, value) in header
-        if occursin(Regex("^(?:CPDIS|D2IMDIS)[1-9][0-9]*$axis_suffix"), keyword)
+        if occursin(Regex("^D2IMDIS[1-9][0-9]*$axis_suffix"), keyword) ||
+                occursin(Regex("^CPDIS[1-9][0-9]*$axis_suffix"), keyword) && uppercase(strip(String(value))) == "LOOKUP"
             allow_lookup || throw(ArgumentError("FITS WCS references external distortion or table data; parse it from a linked FITS HDU"))
         end
         match_result = match(Regex("^CTYPE[1-9][0-9]*$axis_suffix"), keyword)
@@ -167,27 +172,36 @@ function _fits_tabular_data(loader, header, key, parsed)
     return tuple(tables...)
 end
 
-struct _FITSLookupSpec
+struct _FITSLookupSpec{N}
     extname::String
     extver::Int
-    transpose::Bool
+    axes::NTuple{N,Int}
+    naxis::Int
 end
 
-function _fits_lookup_spec(header, axis, distortion_prefix, parameter_prefix, error_prefix, extname, suffix, minerr)
+function _fits_lookup_spec(header, axis, count, distortion_prefix, parameter_prefix, error_prefix, extname, suffix, minerr)
     distortion_keyword = "$distortion_prefix$axis$suffix"
     haskey(header, distortion_keyword) || return nothing
-    uppercase(strip(String(header[distortion_keyword]))) == "LOOKUP" || throw(ArgumentError("unsupported Paper IV distortion type $(repr(header[distortion_keyword])) in $distortion_keyword"))
+    distortion_type = uppercase(strip(String(header[distortion_keyword])))
+    distortion_type == "TPD" && return nothing
+    distortion_type == "LOOKUP" || throw(ArgumentError("unsupported Paper IV distortion type $(repr(header[distortion_keyword])) in $distortion_keyword"))
     error_keyword = "$error_prefix$axis$suffix"
     error_estimate = _fits_number(get(header, error_keyword, 0.0), error_keyword)
     error_estimate < minerr && return nothing
     parameter = "$parameter_prefix$axis$suffix"
-    axis_keyword = "$parameter.AXIS.$axis"
-    haskey(header, axis_keyword) || throw(ArgumentError("Paper IV lookup distortion $distortion_keyword requires $axis_keyword"))
-    table_axis = _fits_integer(header[axis_keyword], axis_keyword; minimum=1)
-    table_axis in (1, 2) || throw(ArgumentError("$axis_keyword must be 1 or 2, got $table_axis"))
+    naxes_keyword = "$parameter.NAXES"
+    haskey(header, naxes_keyword) || throw(ArgumentError("Paper IV lookup distortion $distortion_keyword requires $naxes_keyword"))
+    dimensions = _fits_integer(header[naxes_keyword], naxes_keyword; minimum=1)
+    dimensions <= min(count, 2) || throw(ArgumentError("$naxes_keyword must be 1 or 2 and not exceed the $count WCS axes, got $dimensions"))
+    axes = ntuple(dimensions) do table_axis
+        axis_keyword = "$parameter.AXIS.$table_axis"
+        _fits_integer(get(header, axis_keyword, table_axis), axis_keyword; minimum=1)
+    end
+    all(value -> value <= count, axes) || throw(ArgumentError("$parameter axis map contains an axis outside 1:$count"))
+    allunique(axes) || throw(ArgumentError("$parameter axis map contains duplicate axes"))
     extver_keyword = "$parameter.EXTVER"
     extver = _fits_integer(get(header, extver_keyword, 1), extver_keyword; minimum=1)
-    return _FITSLookupSpec(extname, extver, table_axis != axis)
+    return _FITSLookupSpec(extname, extver, axes, count)
 end
 
 function _fits_lookup_data(loader, header, key, minerr)
@@ -195,17 +209,227 @@ function _fits_lookup_data(loader, header, key, minerr)
     suffix = _fits_key(key)
     referenced = any(axis -> haskey(header, "D2IMDIS$axis$suffix") || haskey(header, "CPDIS$axis$suffix"), 1:2)
     referenced || return nothing
-    detector_specs = ntuple(axis -> _fits_lookup_spec(header, axis, "D2IMDIS", "D2IM", "D2IMERR", "D2IMARR", suffix, minerr), 2)
-    cpdis_specs = ntuple(axis -> _fits_lookup_spec(header, axis, "CPDIS", "DP", "CPERR", "WCSDVARR", suffix, minerr), 2)
+    count = _fits_axis_count(header, key)
+    count >= 2 || throw(ArgumentError("FITS lookup distortions require at least two pixel axes"))
+    detector_specs = ntuple(axis -> _fits_lookup_spec(header, axis, count, "D2IMDIS", "D2IM", "D2IMERR", "D2IMARR", suffix, minerr), 2)
+    cpdis_specs = ntuple(axis -> _fits_lookup_spec(header, axis, count, "CPDIS", "DP", "CPERR", "WCSDVARR", suffix, minerr), 2)
     load(spec) = spec === nothing ? nothing : loader(spec)
     return (detector_to_image=map(load, detector_specs), cpdis=map(load, cpdis_specs))
 end
 
-function _fits_lookup_table(data::AbstractMatrix, header, transpose)
-    values = transpose ? permutedims(data) : copy(data)
-    return BilinearLookupTable(values; crpix=(get(header, "CRPIX1", 0.0), get(header, "CRPIX2", 0.0)),
-        crval=(get(header, "CRVAL1", 0.0), get(header, "CRVAL2", 0.0)), cdelt=(get(header, "CDELT1", 1.0), get(header, "CDELT2", 1.0)))
+function _fits_lookup_table(data::AbstractArray, header, axes::NTuple{N,Int}, naxis) where {N}
+    ndims(data) == N || throw(ArgumentError("FITS WCS lookup extension declares $N independent axes but contains a $(ndims(data))-dimensional image"))
+    return FITSLookupTable(copy(data), axes, Val(naxis);
+        crpix=ntuple(i -> get(header, "CRPIX$i", 0.0), N), crval=ntuple(i -> get(header, "CRVAL$i", 0.0), N), cdelt=ntuple(i -> get(header, "CDELT$i", 1.0), N))
 end
+
+function _fits_tpd_index(xpower, ypower)
+    for index in 0:59
+        radial, xp, yp = _tpd_term_descriptor(index)
+        !radial && xp == xpower && yp == ypower && return index
+    end
+    throw(ArgumentError("legacy FITS polynomial term x^$xpower*y^$ypower exceeds TPD degree 9"))
+end
+
+function _fits_set_tpd_axis!(header, axis, coefficients, auxiliary; docorr)
+    prefix = "DQ$axis"
+    header["CQDIS$axis"] = "TPD"
+    header["$prefix.NAXES"] = 2
+    header["$prefix.DOCORR"] = docorr ? 1 : 0
+    for (position, coefficient) in pairs(coefficients)
+        iszero(coefficient) || (header["$prefix.TPD.FWD.$(position - 1)"] = coefficient)
+    end
+    if auxiliary !== nothing
+        for variable in 1:2, coefficient in 0:2
+            header["$prefix.AUX.$variable.COEFF.$coefficient"] = auxiliary[variable, coefficient + 1]
+        end
+    end
+    return header
+end
+
+function _fits_dss_coefficients(header, axis, scale)
+    coefficients = zeros(Float64, 24)
+    prefix = axis == 1 ? "AMDX" : "AMDY"
+    for (keyword, value) in header
+        matched = match(Regex("^$(prefix)([0-9]+)\$"), keyword)
+        matched === nothing && continue
+        parameter = parse(Int, only(matched.captures))
+        coefficient = _fits_number(value, keyword)
+        iszero(coefficient) && continue
+        1 <= parameter <= 13 || throw(ArgumentError("DSS polynomial $keyword must use parameter numbers 1 through 13"))
+        coefficient /= scale
+        if parameter == 1
+            coefficients[2] = coefficient
+        elseif parameter == 2
+            coefficients[3] = coefficient
+        elseif parameter == 3
+            coefficients[1] = coefficient
+        elseif parameter == 4
+            coefficients[5] += coefficient
+        elseif parameter == 5
+            coefficients[6] = coefficient
+        elseif parameter == 6
+            coefficients[7] += coefficient
+        elseif parameter == 7
+            coefficients[5] += coefficient
+            coefficients[7] += coefficient
+        elseif parameter == 8
+            coefficients[8] += coefficient
+        elseif parameter == 9
+            coefficients[9] = coefficient
+        elseif parameter == 10
+            coefficients[10] += coefficient
+        elseif parameter == 11
+            coefficients[11] = coefficient
+        elseif parameter == 12
+            coefficients[8] += coefficient
+            coefficients[10] += coefficient
+        else
+            coefficients[18] = coefficient
+            coefficients[20] = 2coefficient
+            coefficients[22] = coefficient
+        end
+    end
+    return coefficients
+end
+
+function _fits_normalize_dss(header)
+    any(keyword -> occursin(r"^AMDX[0-9]+$", keyword), keys(header)) || return header
+    required = ("CNPIX1", "CNPIX2", "PPO3", "PPO6", "XPIXELSZ", "YPIXELSZ", "PLTRAH", "PLTRAM", "PLTRAS", "PLTDECSN", "PLTDECD", "PLTDECM", "PLTDECS", "AMDX1", "AMDX2", "AMDX3", "AMDY1", "AMDY2", "AMDY3")
+    missing = filter(keyword -> !haskey(header, keyword), required)
+    isempty(missing) || throw(ArgumentError("DSS WCS is missing required keyword $(first(missing))"))
+    number(keyword) = _fits_number(header[keyword], keyword)
+    A1, A2, A3 = number("AMDX1"), number("AMDX2"), number("AMDX3")
+    B1, B2, B3 = number("AMDY1"), number("AMDY2"), number("AMDY3")
+    determinant = A1 * B1 - A2 * B2
+    scale = sqrt(abs(determinant))
+    iszero(scale) && throw(ArgumentError("DSS coefficient scale is zero"))
+    X0 = (A2 * B3 - A3 * B1) / determinant
+    Y0 = (A3 * B2 - A1 * B3) / determinant
+    Xc, Yc = number("PPO3") / 1000, number("PPO6") / 1000
+    Rx, Ry = number("XPIXELSZ") / 1000, number("YPIXELSZ") / 1000
+    !iszero(Rx) && !iszero(Ry) || throw(ArgumentError("DSS pixel sizes must be nonzero"))
+    normalized = copy(header)
+    normalized["CRPIX1"] = (Xc - X0) / Rx - (number("CNPIX1") - 0.5)
+    normalized["CRPIX2"] = (Yc + Y0) / Ry - (number("CNPIX2") - 0.5)
+    normalized["PC1_1"], normalized["PC1_2"] = A1 * Rx / scale, -A2 * Ry / scale
+    normalized["PC2_1"], normalized["PC2_2"] = -B2 * Rx / scale, B1 * Ry / scale
+    normalized["CDELT1"], normalized["CDELT2"] = -scale / 3600, scale / 3600
+    normalized["CRVAL1"] = (number("PLTRAH") + (number("PLTRAM") + number("PLTRAS") / 60) / 60) * 15
+    declination = number("PLTDECD") + (number("PLTDECM") + number("PLTDECS") / 60) / 60
+    normalized["CRVAL2"] = startswith(strip(String(header["PLTDECSN"])), "-") ? -declination : declination
+    normalized["CTYPE1"], normalized["CTYPE2"] = "RA---TAN", "DEC--TAN"
+    normalized["WCSNAME"] = "DSS PLATEID $(first(String(get(header, "PLATEID", "    ")), min(4, length(String(get(header, "PLATEID", "    "))))))"
+    for keyword in collect(keys(normalized))
+        occursin(r"^CD[12]_[12]$", keyword) && delete!(normalized, keyword)
+    end
+    auxiliary1 = [X0 -B1 / scale -A2 / scale; Y0 B2 / scale A1 / scale]
+    auxiliary2 = [Y0 B2 / scale A1 / scale; X0 -B1 / scale -A2 / scale]
+    _fits_set_tpd_axis!(normalized, 1, _fits_dss_coefficients(header, 1, -scale), auxiliary1; docorr=false)
+    _fits_set_tpd_axis!(normalized, 2, _fits_dss_coefficients(header, 2, scale), auxiliary2; docorr=false)
+    return normalized
+end
+
+function _fits_wat_string(header, axis)
+    cards = Pair{Int,String}[]
+    pattern = Regex("^WAT$(axis)_([0-9]+)\$")
+    for (keyword, value) in header
+        matched = match(pattern, keyword)
+        matched === nothing || push!(cards, parse(Int, only(matched.captures)) => String(value))
+    end
+    isempty(cards) && return nothing
+    sort!(cards; by=first)
+    return join(last.(cards))
+end
+
+function _fits_basis_coefficients(kind, degree)
+    degree == 0 && return [1.0]
+    degree == 1 && return [0.0, 1.0]
+    previous, current = [1.0], [0.0, 1.0]
+    for order in 2:degree
+        next = zeros(Float64, order + 1)
+        if kind == 1
+            next[2:end] .+= 2 .* current
+            next[1:length(previous)] .-= previous
+        else
+            next[2:end] .+= ((2order - 1) / order) .* current
+            next[1:length(previous)] .-= ((order - 1) / order) .* previous
+        end
+        previous, current = current, next
+    end
+    return current
+end
+
+function _fits_wat_axis(text, axis)
+    type_match = match(r"wtype=([^ ]+)", lowercase(text))
+    type_match === nothing && throw(ArgumentError("WAT$axis distortion has no wtype"))
+    wtype = only(type_match.captures)
+    wtype in ("tnx", "zpx") || throw(ArgumentError("unsupported WAT$axis wtype $(repr(wtype))"))
+    correction_match = match(axis == 1 ? r"lngcor\s*=\s*\"([^\"]*)\"" : r"latcor\s*=\s*\"([^\"]*)\"", lowercase(text))
+    correction_match === nothing && throw(ArgumentError("WAT$axis $wtype distortion has no correction polynomial"))
+    values = tryparse.(Float64, split(only(correction_match.captures)))
+    any(isnothing, values) && throw(ArgumentError("WAT$axis correction polynomial contains a nonnumeric value"))
+    numbers = something.(values)
+    length(numbers) >= 8 || throw(ArgumentError("WAT$axis correction polynomial is incomplete"))
+    kind, xorder, yorder, cross = Int.(numbers[1:4])
+    kind in 1:3 || throw(ArgumentError("WAT$axis polynomial type must be 1, 2, or 3"))
+    1 <= xorder <= 10 && 1 <= yorder <= 10 || throw(ArgumentError("WAT$axis polynomial orders must be between 1 and 10"))
+    cross in 0:2 || throw(ArgumentError("WAT$axis cross-term type must be 0, 1, or 2"))
+    xmin, xmax, ymin, ymax = numbers[5:8]
+    coefficients = zeros(Float64, 60)
+    cursor = 9
+    maxorder = max(xorder, yorder)
+    for n in 0:(yorder - 1), m in 0:(xorder - 1)
+        cross == 0 && m != 0 && n != 0 && continue
+        cross == 2 && m + n > maxorder - 1 && continue
+        cursor <= length(numbers) || throw(ArgumentError("WAT$axis correction polynomial has too few coefficients"))
+        coefficient = numbers[cursor]
+        cursor += 1
+        if kind == 3
+            coefficients[_fits_tpd_index(m, n) + 1] = coefficient
+        else
+            mx, ny = _fits_basis_coefficients(kind, m), _fits_basis_coefficients(kind, n)
+            for im in 0:m, jn in 0:n
+                coefficients[_fits_tpd_index(im, jn) + 1] += coefficient * mx[im + 1] * ny[jn + 1]
+            end
+        end
+    end
+    cursor == length(numbers) + 1 || throw(ArgumentError("WAT$axis correction polynomial has too many coefficients"))
+    auxiliary = if kind in (1, 2)
+        dx, dy = (xmax - xmin) / 2, (ymax - ymin) / 2
+        !iszero(dx) && !iszero(dy) || throw(ArgumentError("WAT$axis polynomial domain has zero span"))
+        [-((xmax + xmin) / 2) / dx 1 / dx 0; -((ymax + ymin) / 2) / dy 0 1 / dy]
+    else
+        nothing
+    end
+    return wtype, coefficients, auxiliary
+end
+
+function _fits_normalize_wat(header)
+    texts = (_fits_wat_string(header, 1), _fits_wat_string(header, 2))
+    all(isnothing, texts) && return header
+    all(!isnothing, texts) || throw(ArgumentError("WAT distortion requires both WAT1_n and WAT2_n strings"))
+    first_axis = _fits_wat_axis(texts[1], 1)
+    second_axis = _fits_wat_axis(texts[2], 2)
+    first_axis[1] == second_axis[1] || throw(ArgumentError("WAT axes declare different projection types"))
+    normalized = copy(header)
+    code = first_axis[1] == "tnx" ? "TAN" : "ZPN"
+    normalized["CTYPE1"], normalized["CTYPE2"] = "RA---$code", "DEC--$code"
+    if code == "ZPN"
+        for matched in eachmatch(r"projp([0-9]+)=([^ ]+)", lowercase(texts[2]))
+            parameter = parse(Int, matched.captures[1])
+            parameter < 30 || throw(ArgumentError("ZPX projection parameters must use indices 0 through 29"))
+            value = tryparse(Float64, matched.captures[2])
+            value === nothing && throw(ArgumentError("invalid ZPX projp$parameter value"))
+            normalized["PV2_$parameter"] = value
+        end
+    end
+    _fits_set_tpd_axis!(normalized, 1, first_axis[2], first_axis[3]; docorr=true)
+    _fits_set_tpd_axis!(normalized, 2, second_axis[2], second_axis[3]; docorr=true)
+    return normalized
+end
+
+_fits_normalize_legacy(header, suffix) = isempty(suffix) ? _fits_normalize_wat(_fits_normalize_dss(header)) : header
 
 function _fits_projection(code, header, latitude_axis, suffix)
     parameter(index, default) = _fits_number(get(header, "PV$(latitude_axis)_$(index)$suffix", default), "PV$(latitude_axis)_$(index)$suffix")
@@ -245,13 +469,22 @@ function _fits_projection(code, header, latitude_axis, suffix)
         return HEALPixProjection(Int(H), Int(K))
     end
     code == "XPH" && return HEALPixPolarProjection()
-    code in ("TPV", "TPD") && return GnomonicProjection()
+    code == "TPV" && return GnomonicProjection()
+    code == "TPD" && throw(ArgumentError("TPD is a Paper IV distortion function, not a celestial projection code"))
     throw(ArgumentError("unsupported FITS spherical projection code $(repr(code))"))
 end
 
-function _fits_tpv_coefficients(header, axis, suffix, defaults)
-    indices = Tuple(index for index in 0:59 if haskey(header, "PV$(axis)_$(index)$suffix"))
-    isempty(indices) && return defaults
+function _fits_tpv_coefficients(header, axis, suffix)
+    pattern = Regex("^PV$(axis)_([0-9]+)$(suffix)\$")
+    indices = Int[]
+    for keyword in keys(header)
+        matched = match(pattern, keyword)
+        matched === nothing && continue
+        index = parse(Int, only(matched.captures))
+        index <= 39 || throw(ArgumentError("TPV coefficients must use parameter numbers 0 through 39"))
+        push!(indices, index)
+    end
+    isempty(indices) && return ()
     final_index = maximum(indices)
     return ntuple(final_index + 1) do position
         keyword = "PV$(axis)_$(position - 1)$suffix"
@@ -259,11 +492,158 @@ function _fits_tpv_coefficients(header, axis, suffix, defaults)
     end
 end
 
-function _fits_tpv_transform(header, suffix, count, longitude_axis, latitude_axis, code)
-    code in ("TPV", "TPD") || return IdentityTransform{count}()
-    xcoeff = _fits_tpv_coefficients(header, longitude_axis, suffix, (0.0, 1.0))
-    ycoeff = _fits_tpv_coefficients(header, latitude_axis, suffix, (0.0, 1.0))
-    return _fits_selected_transform(count, longitude_axis, latitude_axis, TPVTransform(xcoeff, ycoeff))
+function _fits_tpd_compiled_terms(coefficients, ::Val{M}; radial=true) where {M}
+    terms = Tuple{Float64,Bool,Int,Int}[]
+    for (position, coefficient) in enumerate(coefficients)
+        isradial, xpower, ypower = _tpd_term_descriptor(position - 1)
+        M == 1 && (isradial || !iszero(ypower)) && continue
+        (!radial && isradial) || iszero(coefficient) || push!(terms, (Float64(coefficient), isradial, xpower, ypower))
+    end
+    return Tuple(terms)
+end
+
+function _fits_tpd_coefficients(header, prefix, direction)
+    pattern = Regex("^$(prefix)\\.TPD\\.$(direction)\\.([0-9]+)\$")
+    found = Pair{Int,Float64}[]
+    for keyword in keys(header)
+        matched = match(pattern, keyword)
+        matched === nothing && continue
+        index = parse(Int, only(matched.captures))
+        index <= 59 || throw(ArgumentError("TPD coefficients must use parameter numbers 0 through 59"))
+        push!(found, index => _fits_number(header[keyword], keyword))
+    end
+    isempty(found) && return ()
+    final_index = maximum(first, found)
+    values = zeros(Float64, final_index + 1)
+    for (index, value) in found
+        values[index + 1] = value
+    end
+    return Tuple(values)
+end
+
+function _fits_tpd_auxiliary(header, prefix)
+    has_auxiliary = any(haskey(header, "$prefix.AUX.$variable.COEFF.$coefficient") for variable in 1:2 for coefficient in 0:2)
+    has_auxiliary || return nothing
+    values = zeros(Float64, 2, 3)
+    values[1, 2] = 1.0
+    values[2, 3] = 1.0
+    for variable in 1:2, coefficient in 0:2
+        keyword = "$prefix.AUX.$variable.COEFF.$coefficient"
+        haskey(header, keyword) && (values[variable, coefficient + 1] = _fits_number(header[keyword], keyword))
+    end
+    return SMatrix{2,3}(values)
+end
+
+function _fits_valid_tpd_field(field)
+    field in ("DOCORR", "NAXES") && return true
+    occursin(r"^(AXIS|OFFSET|SCALE)\.[1-9][0-9]*$", field) && return true
+    occursin(r"^TPD\.(FWD|REV)\.([0-9]|[1-5][0-9])$", field) && return true
+    return occursin(r"^AUX\.[12]\.COEFF\.[0-2]$", field)
+end
+
+function _fits_sip_record_terms(header, prefix, direction)
+    pattern = Regex("^$(prefix)\\.SIP\\.$(direction)\\.([0-9]+)_([0-9]+)\$")
+    terms = Tuple{Float64,Bool,Int,Int}[]
+    for (keyword, value) in header
+        matched = match(pattern, keyword)
+        matched === nothing && continue
+        xpower, ypower = parse.(Int, matched.captures)
+        xpower <= 9 && ypower <= 9 && xpower + ypower <= 9 || throw(ArgumentError("invalid SIP powers ($xpower, $ypower) in $keyword"))
+        coefficient = _fits_number(value, keyword)
+        iszero(coefficient) || push!(terms, (Float64(coefficient), false, xpower, ypower))
+    end
+    return Tuple(terms)
+end
+
+function _fits_sip_record_axis(header, axis, count, suffix, minerr)
+    distortion_keyword = "CPDIS$axis$suffix"
+    haskey(header, distortion_keyword) || return nothing
+    uppercase(strip(String(header[distortion_keyword]))) == "SIP" || return nothing
+    error_keyword = "CPERR$axis$suffix"
+    _fits_number(get(header, error_keyword, 0.0), error_keyword) < minerr && return nothing
+    prefix = "DP$axis$suffix"
+    naxes_keyword = "$prefix.NAXES"
+    haskey(header, naxes_keyword) || throw(ArgumentError("SIP distortion $distortion_keyword requires $naxes_keyword"))
+    _fits_integer(header[naxes_keyword], naxes_keyword) == 2 || throw(ArgumentError("$naxes_keyword must be 2 for SIP"))
+    axes = ntuple(2) do variable
+        keyword = "$prefix.AXIS.$variable"
+        _fits_integer(get(header, keyword, variable), keyword; minimum=1)
+    end
+    all(value -> value <= count, axes) || throw(ArgumentError("$prefix axis map contains an axis outside 1:$count"))
+    allunique(axes) || throw(ArgumentError("$prefix axis map contains duplicate axes"))
+    offset = SVector{2}(ntuple(variable -> _fits_number(get(header, "$prefix.OFFSET.$variable", 0.0), "$prefix.OFFSET.$variable"), 2))
+    scale = SVector{2}(ntuple(variable -> _fits_number(get(header, "$prefix.SCALE.$variable", 1.0), "$prefix.SCALE.$variable"), 2))
+    dotted_prefix = "$prefix."
+    for keyword in keys(header)
+        startswith(keyword, dotted_prefix) || continue
+        field = keyword[(length(dotted_prefix) + 1):end]
+        field == "NAXES" || occursin(r"^(AXIS|OFFSET|SCALE)\.[12]$", field) || occursin(r"^SIP\.(FWD|REV)\.[0-9]+_[0-9]+$", field) || throw(ArgumentError("unrecognized SIP parameter $keyword"))
+    end
+    forward = _fits_sip_record_terms(header, prefix, "FWD")
+    reverse = _fits_sip_record_terms(header, prefix, "REV")
+    return _FITSTPDAxis(axes, offset, scale, nothing, forward, reverse, true)
+end
+
+_fits_sip_record_models(header, count, suffix, minerr) = ntuple(axis -> _fits_sip_record_axis(header, axis, count, suffix, minerr), count)
+
+function _fits_tpd_axis(header, axis, count, suffix, distortion_prefix, parameter_prefix, error_prefix, minerr)
+    distortion_keyword = "$distortion_prefix$axis$suffix"
+    haskey(header, distortion_keyword) || return nothing
+    distortion_type = uppercase(strip(String(header[distortion_keyword])))
+    distortion_type in ("LOOKUP", "SIP") && distortion_prefix == "CPDIS" && return nothing
+    distortion_type == "LOOKUP" && throw(ArgumentError("sequent LOOKUP distortion $distortion_keyword is not supported"))
+    distortion_type == "TPD" || throw(ArgumentError("unsupported Paper IV distortion type $(repr(header[distortion_keyword])) in $distortion_keyword"))
+
+    error_keyword = "$error_prefix$axis$suffix"
+    _fits_number(get(header, error_keyword, 0.0), error_keyword) < minerr && return nothing
+    prefix = "$parameter_prefix$axis$suffix"
+    naxes_keyword = "$prefix.NAXES"
+    haskey(header, naxes_keyword) || throw(ArgumentError("TPD distortion $distortion_keyword requires $naxes_keyword"))
+    dimensions = _fits_integer(header[naxes_keyword], naxes_keyword; minimum=1)
+    dimensions in (1, 2) || throw(ArgumentError("$naxes_keyword must be 1 or 2, got $dimensions"))
+
+    dotted_prefix = "$prefix."
+    for keyword in keys(header)
+        startswith(keyword, dotted_prefix) || continue
+        field = keyword[(length(dotted_prefix) + 1):end]
+        _fits_valid_tpd_field(field) || throw(ArgumentError("unrecognized TPD parameter $keyword"))
+        mapped = match(r"^(AXIS|OFFSET|SCALE)\.([1-9][0-9]*)$", field)
+        mapped !== nothing && parse(Int, mapped.captures[2]) > dimensions && throw(ArgumentError("$keyword exceeds the $dimensions independent axes declared by $naxes_keyword"))
+    end
+
+    axes = ntuple(dimensions) do variable
+        keyword = "$prefix.AXIS.$variable"
+        _fits_integer(get(header, keyword, variable), keyword; minimum=1)
+    end
+    all(value -> value <= count, axes) || throw(ArgumentError("$prefix axis map contains an axis outside 1:$count"))
+    allunique(axes) || throw(ArgumentError("$prefix axis map contains duplicate axes"))
+    offset = SVector{dimensions}(ntuple(variable -> _fits_number(get(header, "$prefix.OFFSET.$variable", 0.0), "$prefix.OFFSET.$variable"), dimensions))
+    scale = SVector{dimensions}(ntuple(variable -> _fits_number(get(header, "$prefix.SCALE.$variable", 1.0), "$prefix.SCALE.$variable"), dimensions))
+    forward = _fits_tpd_coefficients(header, prefix, "FWD")
+    reverse = _fits_tpd_coefficients(header, prefix, "REV")
+    auxiliary = _fits_tpd_auxiliary(header, prefix)
+    docorr_keyword = "$prefix.DOCORR"
+    docorr_value = get(header, docorr_keyword, 1)
+    docorr_value isa Integer && !(docorr_value isa Bool) || throw(ArgumentError("FITS keyword $docorr_keyword must be an integer"))
+    terms = _fits_tpd_compiled_terms(forward, Val(dimensions))
+    reverse_terms = _fits_tpd_compiled_terms(reverse, Val(dimensions))
+    return _FITSTPDAxis(axes, offset, scale, auxiliary, terms, reverse_terms, !iszero(docorr_value))
+end
+
+function _fits_tpd_models(header, count, suffix, distortion_prefix, parameter_prefix, error_prefix, minerr)
+    return ntuple(axis -> _fits_tpd_axis(header, axis, count, suffix, distortion_prefix, parameter_prefix, error_prefix, minerr), count)
+end
+
+function _fits_tpv_models(header, count, suffix, longitude_axis, latitude_axis)
+    xcoeff = _fits_tpv_coefficients(header, longitude_axis, suffix)
+    ycoeff = _fits_tpv_coefficients(header, latitude_axis, suffix)
+    offset = SVector(0.0, 0.0)
+    scale = SVector(1.0, 1.0)
+    # Unlike WCSLIB's legacy translation, bind TPV variables to the celestial
+    # intermediate axes so unrelated axes cannot enter a mixed-dimensional WCS.
+    xmodel = _FITSTPDAxis((longitude_axis, latitude_axis), offset, scale, nothing, _fits_tpd_compiled_terms(xcoeff, Val(2)), false)
+    ymodel = _FITSTPDAxis((latitude_axis, longitude_axis), offset, scale, nothing, _fits_tpd_compiled_terms(ycoeff, Val(2)), false)
+    return ntuple(axis -> axis == longitude_axis ? xmodel : axis == latitude_axis ? ymodel : nothing, count)
 end
 
 function _fits_projection_code(header, parsed, longitude_axis, latitude_axis, suffix)
@@ -302,13 +682,18 @@ function _fits_sip_transform(header, suffix, crpix, count, ctype_suffixes; enabl
     ap = _fits_sip_polynomial(header, "AP", suffix)
     bp = _fits_sip_polynomial(header, "BP", suffix)
     (ap === nothing) == (bp === nothing) || throw(ArgumentError("FITS SIP inverse requires both AP_ORDER and BP_ORDER"))
-    correction = ap === nothing ? forward : WithInverse(forward, SIPTransform(ap, bp))
     identity = Matrix{Float64}(I, 2, 2)
-    correction = AffineTransform(identity, -crpix[1:2]) | correction | AffineTransform(identity, crpix[1:2])
+    center = AffineTransform(identity, -crpix[1:2])
+    restore = AffineTransform(identity, crpix[1:2])
+    correction = center | forward | restore
+    if ap !== nothing
+        reverse = center | SIPTransform(ap, bp) | restore
+        correction = _ApproximateInverseTransform(correction, reverse)
+    end
     return count == 2 ? correction : parallel(correction, IdentityTransform{count - 2}())
 end
 
-function _fits_cd_matrix(header, count, cdelt, suffix)
+function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis)
     has_cd = any(haskey(header, "CD$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
     has_pc = any(haskey(header, "PC$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
     has_cd && has_pc && throw(ArgumentError("FITS CDi_j and PCi_j keywords must not be mixed"))
@@ -326,13 +711,16 @@ function _fits_cd_matrix(header, count, cdelt, suffix)
             keyword = "PC$(i)_$(j)$suffix"
             haskey(header, keyword) && (pc[i, j] = _fits_number(header[keyword], keyword))
         end
-    elseif count >= 2 && haskey(header, "CROTA2$suffix")
-        angle = deg2rad(_fits_number(header["CROTA2$suffix"], "CROTA2$suffix"))
-        cosine, sine = cos(angle), sin(angle)
-        pc[1, 1] = cosine
-        pc[1, 2] = -cdelt[2] * sine / cdelt[1]
-        pc[2, 1] = cdelt[1] * sine / cdelt[2]
-        pc[2, 2] = cosine
+    else
+        i, j = longitude_axis == 0 ? (1, 2) : (longitude_axis, latitude_axis)
+        crota = "CROTA$j$suffix"
+        if count >= 2 && haskey(header, crota)
+            angle = deg2rad(_fits_number(header[crota], crota))
+            cosine, sine = cos(angle), sin(angle)
+            pc[i, i] = pc[j, j] = cosine
+            pc[i, j] = -cdelt[j] * sine / cdelt[i]
+            pc[j, i] = cdelt[i] * sine / cdelt[j]
+        end
     end
     for i in 1:count, j in 1:count
         matrix[i, j] = cdelt[i] * pc[i, j]
@@ -403,14 +791,20 @@ function _fits_time_reference(header, suffix)
 end
 
 function _fits_reference_system(header, suffix, parsed)
-    has_equatorial = any(item -> item[1] in ("RA", "DEC"), parsed)
+    applies = any(item -> item[1] in ("RA", "ELON", "HLON"), parsed)
+    applies || return "", nothing
     equinox_value = get(header, "EQUINOX$suffix", nothing)
     equinox = equinox_value === nothing ? nothing : _fits_number(equinox_value, "EQUINOX$suffix")
-    radesys = String(get(header, "RADESYS$suffix", ""))
-    if isempty(strip(radesys)) && has_equatorial
+    radesys = uppercase(strip(String(get(header, "RADESYS$suffix", ""))))
+    if isempty(radesys)
         radesys = equinox === nothing ? "ICRS" : equinox < 1984 ? "FK4" : "FK5"
+    elseif radesys in ("ICRS", "GAPPT")
+        equinox = nothing
+    elseif equinox === nothing
+        radesys == "FK5" && (equinox = 2000.0)
+        radesys in ("FK4", "FK4-NO-E") && (equinox = 1950.0)
     end
-    return uppercase(strip(radesys)), equinox
+    return radesys, equinox
 end
 
 function _fits_axis_scale(parsed_ctype, unit, keyword)
@@ -475,19 +869,15 @@ const _FITS_SPECTRAL_ALGORITHMS = Dict(
 function _fits_spectral_transform(parsed_ctype, reference, rest_frequency, rest_wavelength, output_scale)
     coordinate, _, algorithm, _ = parsed_ctype
     parent = _FITS_SPECTRAL_PARENTS[coordinate]
-    if algorithm == "LOG"
-        x_type = parent
-    else
-        haskey(_FITS_SPECTRAL_ALGORITHMS, algorithm) || throw(ArgumentError("unsupported FITS nonlinear spectral algorithm $(repr(algorithm))"))
-        x_type, algorithm_parent = _FITS_SPECTRAL_ALGORITHMS[algorithm]
-        algorithm_parent == parent || throw(ArgumentError("FITS spectral coordinate $coordinate is incompatible with algorithm $algorithm"))
-    end
+    haskey(_FITS_SPECTRAL_ALGORITHMS, algorithm) || throw(ArgumentError("unsupported FITS nonlinear spectral algorithm $(repr(algorithm))"))
+    x_type, algorithm_parent = _FITS_SPECTRAL_ALGORITHMS[algorithm]
+    algorithm_parent == parent || throw(ArgumentError("FITS spectral coordinate $coordinate is incompatible with algorithm $algorithm"))
     !isfinite(rest_frequency) && isfinite(rest_wavelength) && (rest_frequency = _FITS_SPEED_OF_LIGHT / rest_wavelength)
     !isfinite(rest_wavelength) && isfinite(rest_frequency) && (rest_wavelength = _FITS_SPEED_OF_LIGHT / rest_frequency)
     requires_rest = coordinate in ("VRAD", "VOPT", "ZOPT", "VELO", "BETA") || x_type == :V || parent == :V
     requires_rest && !isfinite(rest_frequency) && throw(ArgumentError("FITS spectral algorithm $algorithm requires RESTFRQ or RESTWAV"))
     transform = FITSSpectralTransform(Val(x_type), Val(parent), Val(Symbol(coordinate)), Val(Symbol(algorithm)), reference, rest_frequency, rest_wavelength; output_scale)
-    derivative = algorithm == "LOG" ? 1.0 : ForwardDiff.derivative(reference) do value
+    derivative = ForwardDiff.derivative(reference) do value
         parent_value = _fits_spectral_to_parent(value, Val(Symbol(coordinate)), rest_frequency, rest_wavelength)
         _fits_parent_to_x(parent_value, Val(x_type), Val(parent), rest_frequency, rest_wavelength)
     end
@@ -511,7 +901,7 @@ function _fits_grism_transform(header, suffix, axis, parsed_ctype, reference, re
     return transform, transform.linear_scale
 end
 
-function _fits_world_transform(count, crval, longitude_axis, latitude_axis, projection, lonpole, latpole, output_scaling)
+function _fits_world_transform(count, crval, longitude_axis, latitude_axis, projection, lonpole, latpole, native_reference, celestial_offset, output_scaling)
     offset = copy(crval)
     if projection !== nothing
         offset[longitude_axis] = 0.0
@@ -519,7 +909,7 @@ function _fits_world_transform(count, crval, longitude_axis, latitude_axis, proj
     end
     result = AffineTransform(Matrix{Float64}(I, count, count), offset)
     if projection !== nothing
-        celestial = celestial_transform(projection, (crval[longitude_axis], crval[latitude_axis]); lonpole, latpole)
+        celestial = celestial_transform(projection, (crval[longitude_axis], crval[latitude_axis]); lonpole, latpole, native_reference, offset=celestial_offset)
         result = result | _fits_selected_transform(count, longitude_axis, latitude_axis, celestial)
     end
     all(isone, output_scaling) || (result = result | AffineTransform(Diagonal(output_scaling)))
@@ -538,8 +928,14 @@ end
 function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, lookup_data=nothing, tabular_data=())
     isfinite(minerr) && minerr >= 0 || throw(ArgumentError("minerr must be finite and nonnegative"))
     suffix = _fits_key(key)
+    legacy_header = _fits_normalize_legacy(header, suffix)
+    legacy_header === header || (header = _fits_header(legacy_header))
     _fits_reject_external_data(header, suffix; allow_lookup=lookup_data !== nothing, allow_tab=!isempty(tabular_data))
     count = _fits_axis_count(header, key)
+    prior_tpd_models = _fits_tpd_models(header, count, suffix, "CPDIS", "DP", "CPERR", minerr)
+    prior_sip_models = _fits_sip_record_models(header, count, suffix, minerr)
+    prior_polynomial_models = ntuple(axis -> prior_sip_models[axis] === nothing ? prior_tpd_models[axis] : prior_sip_models[axis], count)
+    sequent_tpd_models = _fits_tpd_models(header, count, suffix, "CQDIS", "DQ", "CQERR", minerr)
     keywords(prefix, default) = [get(header, "$prefix$i$suffix", default) for i in 1:count]
     ctype = String.(keywords("CTYPE", ""))
     parsed = _fits_ctype.(ctype)
@@ -547,7 +943,7 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
         isempty(extra) || extra == "-SIP" || throw(ArgumentError("FITS CTYPE$axis=$(repr(ctype[axis])) uses unsupported distortion suffix $(repr(extra))"))
         if kind == :spectral && !isempty(algorithm) && algorithm != "TAB" && algorithm != "LOG" && algorithm ∉ ("GRI", "GRA") && !haskey(_FITS_SPECTRAL_ALGORITHMS, algorithm)
             throw(ArgumentError("FITS CTYPE$axis=$(repr(ctype[axis])) uses unsupported nonlinear algorithm $(repr(algorithm))"))
-        elseif kind in (:time, :linear) && !isempty(algorithm) && algorithm != "TAB"
+        elseif kind in (:time, :linear) && !isempty(algorithm) && algorithm ∉ ("TAB", "LOG")
             throw(ArgumentError("FITS CTYPE$axis=$(repr(ctype[axis])) uses unsupported nonlinear algorithm $(repr(algorithm))"))
         end
     end
@@ -558,6 +954,11 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     isempty(longitude_axes) == isempty(latitude_axes) || throw(ArgumentError("FITS celestial longitude and latitude axes must be paired"))
     longitude_axis = isempty(longitude_axes) ? 0 : only(longitude_axes)
     latitude_axis = isempty(latitude_axes) ? 0 : only(latitude_axes)
+    if longitude_axis != 0
+        longitude_type = parsed[longitude_axis][1]
+        latitude_type = parsed[latitude_axis][1]
+        latitude_type == _fits_celestial_partner(longitude_type) || throw(ArgumentError("FITS celestial axis types $(repr(longitude_type)) and $(repr(latitude_type)) are not a matching longitude/latitude pair"))
+    end
 
     crpix = [_fits_number(value, "CRPIX$i$suffix") for (i, value) in enumerate(keywords("CRPIX", 0.0))]
     raw_crval = [_fits_number(value, "CRVAL$i$suffix") for (i, value) in enumerate(keywords("CRVAL", 0.0))]
@@ -575,8 +976,13 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     spectral_transforms = Any[nothing for _ in 1:count]
     spectral_derivatives = ones(Float64, count)
     for axis in 1:count
-        parsed[axis][2] == :spectral || continue
         algorithm = parsed[axis][3]
+        algorithm == "LOG" && begin
+            output_scale = preserve_units ? scaling[axis] : 1.0
+            spectral_transforms[axis] = FITSLogTransform(raw_crval[axis] * scaling[axis]; output_scale)
+            continue
+        end
+        parsed[axis][2] == :spectral || continue
         isempty(algorithm) || algorithm == "TAB" || begin
             output_scale = preserve_units ? scaling[axis] : 1.0
             if algorithm in ("GRI", "GRA")
@@ -593,7 +999,7 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     for axis in eachindex(spectral_transforms)
         spectral_transforms[axis] === nothing || (crval[axis] = 0.0)
     end
-    raw_cd = _fits_cd_matrix(header, count, cdelt, suffix)
+    raw_cd = _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis)
     cd = copy(raw_cd)
     for i in 1:count
         cd[i, :] .*= linear_scaling[i]
@@ -602,18 +1008,30 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     projection = nothing
     projection_code = ""
     lonpole = nothing
+    native_reference = nothing
+    celestial_offset = false
     latpole = _fits_number(get(header, "LATPOLE$suffix", 90.0), "LATPOLE$suffix")
     if longitude_axis != 0
         lon_code = _fits_projection_code(header, parsed, longitude_axis, latitude_axis, suffix)
         lat_code = parsed[latitude_axis][3]
-        lon_code in ("TPV", "TPD") && lat_code == "TAN" && (lat_code = lon_code)
+        lon_code == "TPV" && lat_code == "TAN" && (lat_code = lon_code)
         isempty(lon_code) && throw(ArgumentError("FITS celestial CTYPE$(longitude_axis) has no projection code"))
         lon_code == lat_code || throw(ArgumentError("FITS celestial axes use different projection codes $(repr(lon_code)) and $(repr(lat_code))"))
         projection_code = lon_code
         if projection_code != "TAB"
             projection = _fits_projection(projection_code, header, latitude_axis, suffix)
-            default_pole = default_lonpole(crval[latitude_axis], native_fiducial(projection)[2])
-            lonpole = _fits_number(get(header, "LONPOLE$suffix", default_pole), "LONPOLE$suffix")
+            default_native = native_fiducial(projection)
+            use_reference_pv = projection_code != "TPV"
+            celestial_offset = use_reference_pv && !iszero(_fits_number(get(header, "PV$(longitude_axis)_0$suffix", 0.0), "PV$(longitude_axis)_0$suffix"))
+            native_reference = use_reference_pv ? (
+                _fits_number(get(header, "PV$(longitude_axis)_1$suffix", default_native[1]), "PV$(longitude_axis)_1$suffix"),
+                _fits_number(get(header, "PV$(longitude_axis)_2$suffix", default_native[2]), "PV$(longitude_axis)_2$suffix")
+            ) : default_native
+            default_pole = default_lonpole(crval[latitude_axis], native_reference[2], native_reference[1])
+            lonpole_keyword = use_reference_pv && haskey(header, "PV$(longitude_axis)_3$suffix") ? "PV$(longitude_axis)_3$suffix" : "LONPOLE$suffix"
+            latpole_keyword = use_reference_pv && haskey(header, "PV$(longitude_axis)_4$suffix") ? "PV$(longitude_axis)_4$suffix" : "LATPOLE$suffix"
+            lonpole = _fits_number(get(header, lonpole_keyword, default_pole), lonpole_keyword)
+            latpole = _fits_number(get(header, latpole_keyword, latpole), latpole_keyword)
         end
     end
 
@@ -629,31 +1047,41 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     names = ntuple(i -> String(get(header, "CNAME$i$suffix", isempty(parsed[i][1]) ? "world$i" : parsed[i][1])), count)
     units = ntuple(i -> preserve_units && !isempty(strip(cunit[i])) ? cunit[i] : descriptions[i][3], count)
     world = CoordinateFrame{count}(; name="world", axes_names=names, axis_types=Tuple(first.(descriptions)), axis_physical_types=Tuple(getindex.(descriptions, 2)), unit=units, reference_frame=metadata)
-    if projection_code in ("TPV", "TPD")
+    tpv_models = projection_code == "TPV" ? _fits_tpv_models(header, count, suffix, longitude_axis, latitude_axis) : ntuple(_ -> nothing, count)
+    projection_code == "TPV" && any(model -> model !== nothing, sequent_tpd_models) && throw(ArgumentError("TPV cannot be combined with a CQDIS sequent distortion"))
+    sequent_models = projection_code == "TPV" ? tpv_models : sequent_tpd_models
+    has_sequent = any(model -> model !== nothing, sequent_models)
+    if has_sequent
         has_cd = any(haskey(header, "CD$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
         if has_cd
             pre_matrix = raw_cd
-            post_scaling = scaling
+            post_scaling = linear_scaling
         else
-            all(!iszero, cdelt) || throw(ArgumentError("FITS CDELT values must be nonzero for TPV/TPD"))
+            all(!iszero, cdelt) || throw(ArgumentError("FITS CDELT values must be nonzero with a sequent distortion"))
             pre_matrix = Diagonal(inv.(cdelt)) * raw_cd
-            post_scaling = cdelt .* scaling
+            post_scaling = cdelt .* linear_scaling
         end
-        tpv = _fits_tpv_transform(header, suffix, count, longitude_axis, latitude_axis, projection_code)
-        pixel_to_intermediate = AffineTransform(pre_matrix, -(pre_matrix * crpix)) | tpv | AffineTransform(Diagonal(post_scaling))
+        sequent = _FITSTPDTransform(sequent_models)
+        pixel_to_intermediate = AffineTransform(pre_matrix, -(pre_matrix * crpix)) | sequent | AffineTransform(Diagonal(post_scaling))
     else
         pixel_to_intermediate = AffineTransform(cd, -(cd * crpix))
     end
-    sip = _fits_sip_transform(header, suffix, crpix, count, getindex.(parsed, 4); enabled=!(projection_code in ("TPV", "TPD")))
+    sip = _fits_sip_transform(header, suffix, crpix, count, getindex.(parsed, 4); enabled=projection_code != "TPV")
     has_lookup = lookup_data !== nothing && any(table -> table !== nothing, (lookup_data.detector_to_image..., lookup_data.cpdis...))
-    if !has_lookup
+    has_prior_polynomial = any(model -> model !== nothing, prior_polynomial_models)
+    if has_prior_polynomial
+        detector_to_image = lookup_data === nothing ? (nothing, nothing) : lookup_data.detector_to_image
+        cpdis = lookup_data === nothing ? (nothing, nothing) : lookup_data.cpdis
+        distortion = _FITSPriorDistortion(Val(count), detector_to_image, sip, cpdis, _FITSTPDTransform(prior_polynomial_models))
+        pixel_to_intermediate = distortion | pixel_to_intermediate
+    elseif !has_lookup
         pixel_to_intermediate = sip | pixel_to_intermediate
     else
         distortion = FITSLookupDistortion(Val(count), lookup_data.detector_to_image, sip, lookup_data.cpdis)
         pixel_to_intermediate = distortion | pixel_to_intermediate
     end
     output_scaling = [parsed[i][3] == "TAB" || spectral_transforms[i] !== nothing ? 1.0 : preserve_units ? inv(scaling[i]) : 1.0 for i in 1:count]
-    intermediate_to_world = _fits_world_transform(count, crval, longitude_axis, latitude_axis, projection, lonpole, latpole, output_scaling)
+    intermediate_to_world = _fits_world_transform(count, crval, longitude_axis, latitude_axis, projection, lonpole, latpole, native_reference, celestial_offset, output_scaling)
     for axis in eachindex(spectral_transforms)
         transform = spectral_transforms[axis]
         transform === nothing || (intermediate_to_world = intermediate_to_world | _fits_selected_axis_transform(count, axis, transform))
@@ -676,9 +1104,9 @@ parse_fits_wcs(source::AbstractDict; key::Char=' ', preserve_units::Bool=false, 
 
 function _fits_alternate_keys(header)
     keys_found = Set{Char}()
-    any(keyword -> !isempty(_fits_axis_indices(keyword, "")), keys(header)) && push!(keys_found, ' ')
+    (haskey(header, "WCSAXES") || any(keyword -> !isempty(_fits_axis_indices(keyword, "")), keys(header))) && push!(keys_found, ' ')
     for keyword in keys(header), key in 'A':'Z'
-        isempty(_fits_axis_indices(keyword, string(key))) || push!(keys_found, key)
+        (keyword == "WCSAXES$key" || !isempty(_fits_axis_indices(keyword, string(key)))) && push!(keys_found, key)
     end
     isempty(keys_found) && haskey(header, "NAXIS") && push!(keys_found, ' ')
     return sort!(collect(keys_found))

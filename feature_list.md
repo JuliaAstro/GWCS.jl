@@ -53,7 +53,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P2** Add one-dimensional spline transforms and their ASDF representation.
 - [ ] **P1** Add serializable elementary mathematical transforms used in metadata-defined pipelines: trigonometric, inverse trigonometric, logarithmic, exponential, square root, absolute value, reciprocal, and degree/radian conversion.
 - [x] **P1** Add a named SIP distortion constructor and inverse representation, even if it compiles internally to shifts and polynomials.
-- [x] **P2** Add a native TPV/TPD distortion transform.
+- [x] **P2** Add native TPV and Paper IV TPD distortion transforms.
 
 ## Geometry, spectroscopy, and optical transforms
 
@@ -108,7 +108,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Add explicit output-footprint masks after footprint and celestial-boundary semantics are available.
 - [ ] **P1** Add `footprint(wcs)` for spatial, spectral, temporal, custom, or all output axes.
 - [ ] **P1** Handle longitude wrapping and pole crossings when computing and testing celestial footprints.
-- [ ] **P2** Add concise text and MIME displays showing frames, transforms, dimensions, inverses, and bounding boxes.
+- [x] **P2** Add concise text and MIME displays showing frames, transforms, dimensions, inverses, and bounding boxes.
 - [ ] **P2** Add transform and pipeline visualization suitable for documentation and debugging.
 
 ## Numerical inversion
@@ -186,10 +186,10 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 ## FITS interoperability
 
 - [x] **P0** Add native `parse_fits_wcs` and `find_all_fits_wcs` interfaces that construct ordinary compiled GWCS pipelines without a second execution hierarchy.
-- [x] **P0** Parse FITS image-header axis counts, CRPIX/CRVAL/CDELT, PC/CD/CROTA, primary and alternate keys, units, names, and partial image shapes.
+- [x] **P0** Parse FITS image-header axis counts, CRPIX/CRVAL/CDELT, PC/CD/CROTA on the celestial longitude/latitude block, WCSAXES-only primary and alternate keys, units, names, and partial image shapes.
 - [x] **P0** Cover linear, celestial, linear spectral, linear time, Stokes, and mixed/interleaved axis WCSes.
-- [x] **P1** Add native SIP and TPV/TPD transforms, including SCAMP TAN-plus-PV recognition and numerical inversion when explicit inverse coefficients are absent.
-- [x] **P1** Add Paper IV D2IM/CPDIS lookup distortions and construction-time external image-array resolution.
+- [x] **P1** Add native SIP, TPV, and Paper IV TPD transforms, including SCAMP TAN-plus-PV recognition and numerical inversion when explicit inverse coefficients are absent.
+- [x] **P1** Add Paper IV D2IM/CPDIS lookup distortions, including NAXES/AXIS maps and one-dimensional lookup images, with construction-time external image-array resolution.
 - [x] **P1** Add statically dimensioned multilinear `-TAB` transforms with direct separable monotonic 1D inverses and checked numerical inversion for coupled tables.
 - [x] **P1** Add Paper III nonlinear spectral algorithms and grism models.
 - [ ] **P1** Add `to_fits_sip` to fit a two-dimensional celestial GWCS with configurable forward and inverse degree/error limits.
@@ -198,6 +198,23 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Return approximation diagnostics and verify the generated FITS representation over the requested bounding box.
 - [x] **P1** Preserve FITS 1-based pixel-origin conventions explicitly in the parsed affine stage.
 - [x] **P2** Add optional FITSIO.jl and FITSFiles.jl adapters for detached headers, linked HDUs, and construction-time lookup-image resolution without making either package a core dependency.
+- [x] **P2** Parse direct Paper IV SIP distortion records (`CPDISja='SIP'` with repeated `DPja` fields such as `SIP.FWD.p_q` and `SIP.REV.p_q`), normalizing them to the existing SIP forward and approximate-reverse representation.
+- [x] **P2** Use `SIP.REV` and `TPD.REV` as inverse initializers, then refine against the forward distortion.
+- [x] **P2** Import the remaining legacy polynomial distortions: DSS and WAT-encoded TNX/ZPX.
+- [x] **P2** Support generic FITS logarithmic axes, including `TIME-LOG`, with a dedicated analytical `FITSLogTransform`.
+- [x] **P2** Recognize WCSLIB-compatible generic celestial axis identifiers such as `XLON`/`XLAT`, including reordered axes and strict matching of `xLON`/`xLAT` or `xxLN`/`xxLT` pairs, while retaining richer metadata for known coordinate systems.
+- [ ] **P3** Parse binary-table image-array and pixel-list WCS keyword families with explicit table-column selection; keep this separate from image-header parsing. Requires a dedicated table-column selection API and keyword grammar rather than extending image-header inference.
+- [ ] **P3** Preserve complete FITS time-coordinate metadata, including `DATEREF`, `TIMEOFFS`, observation intervals, uncertainty/resolution fields, additional time scales, and geodetic observer locations. Requires designed time/location frame interfaces before this metadata can be exposed usefully.
+- [x] **P2** Apply standard `RADESYS` and `EQUINOX` defaults for equatorial and ecliptic frames, including FK4/FK5 defaults and clearing inapplicable metadata for ICRS, GAPPT, Galactic, and non-celestial axes.
+- [ ] **P1** Parse the FITS unit grammar rather than relying on enumerated spellings. Requires the planned optional unit integration or a deliberately scoped FITS-unit parser.
+- [ ] **P3** Support the standard `CUBEFACE` axis representation for TSC, CSC, and QSC cube projections. Requires a multidimensional cube-face transform and explicit face-validity semantics.
+- [ ] **P3** Preserve coordinate-error and phase metadata including `CRDERi`, `CSYERi`, `CZPHSi`, and `CPERIi`. Requires frame metadata interfaces for coordinate uncertainty and phase conventions.
+- [ ] **P3** Support Paper IV's arbitrary-power general `Polynomial` distortion when TPD normalization is not exact.
+- [ ] **P3** Support sequent `CQDIS=LOOKUP` distortions and construction-time resolution of their lookup arrays.
+- [ ] **P1** Add an explicit FITS compatibility/repair policy for legacy aliases and conventions, including `NCP`, `GLS`, AIPS spectral forms, `VELREF`, `EPOCH`, `RADECSYS`, and reordered celestial `CROTA`; do not silently repair malformed headers.
+- [ ] **P3** Add per-axis invalid-coordinate status or masks together with batch evaluation, so independent valid axes survive failures in another coordinate group. Requires the batch result and error/mask API to be designed first.
+- [x] **P2** Expand differential coverage at projection domains, longitude wrapping, cube/facet boundaries, strong projection parameters (including ZPN's first monotonic radial interval), and strong SIP/TPD inverse cases.
+- [x] **P3** Expand real-container tests for paired/transposed lookup arrays, alternate-key and `EXTVER` isolation, duplicate matching extensions, and coupled multidimensional `-TAB` tables.
 
 ## Other declarative and text formats
 
@@ -236,7 +253,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P1** Add mixed celestial/spectral/time frame fixtures and axis-order permutations.
 - [ ] **P1** Add randomized forward/inverse property tests for transforms with analytical inverses.
 - [ ] **P1** Add numerical-inverse stress tests near projection boundaries, longitude wraps, poles, and highly distorted regions.
-- [ ] **P1** Add compatibility tests for the oldest supported Julia release and current stable Julia.
+- [x] **P1** Add compatibility tests for the oldest supported Julia release and current stable Julia.
 
 ## Python GWCS features or design choices we should not duplicate
 
