@@ -2,8 +2,10 @@ using GWCS
 using JSON
 using StaticArrays
 
+include("python.jl")
+
 function main()
-    python = get(ENV, "GWCS_PYTHON", joinpath(homedir(), ".venvs", "311_main", "bin", "python"))
+    python = validation_python()
     reference_script = joinpath(@__DIR__, "python_bounding_box_reference.py")
     reference = JSON.parse(read(`$python $reference_script`, String))
 

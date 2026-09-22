@@ -2,6 +2,8 @@ using GWCS
 using JSON
 using StaticArrays
 
+include("python.jl")
+
 function parser_transforms()
     metadata = (
         identity="!<tag:stsci.edu:asdf/transform/identity-1.4.0> {n_dims: 2}",
@@ -25,7 +27,7 @@ function parser_transforms()
 end
 
 function main()
-    python = get(ENV, "GWCS_PYTHON", joinpath(homedir(), ".venvs", "311_main", "bin", "python"))
+    python = validation_python()
     reference_script = joinpath(@__DIR__, "python_parser_reference.py")
     records = JSON.parse(read(`$python $reference_script`, String))
     transforms = parser_transforms()

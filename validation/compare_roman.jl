@@ -4,10 +4,12 @@ using JSON
 using Logging
 using StaticArrays
 
+include("python.jl")
+
 function main(args)
     isempty(args) && error("usage: julia --project=validation validation/compare_roman.jl FILE...")
 
-    python = get(ENV, "GWCS_PYTHON", joinpath(homedir(), ".venvs", "311_main", "bin", "python"))
+    python = validation_python()
     reference_script = joinpath(@__DIR__, "python_reference.py")
     records = JSON.parse(read(Cmd(vcat([python, reference_script], args)), String))
     wcs_cache = Dict{String,Any}()

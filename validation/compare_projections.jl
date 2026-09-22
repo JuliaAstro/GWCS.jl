@@ -2,6 +2,8 @@ using GWCS
 using JSON
 using StaticArrays
 
+include("python.jl")
+
 const PROJECTIONS = Dict(
     "TAN" => GnomonicProjection(),
     "STG" => StereographicProjection(),
@@ -14,7 +16,7 @@ const PROJECTIONS = Dict(
 )
 
 function main()
-    python = get(ENV, "GWCS_PYTHON", joinpath(homedir(), ".venvs", "311_main", "bin", "python"))
+    python = validation_python()
     script = joinpath(@__DIR__, "python_projection_reference.py")
     records = JSON.parse(read(`$python $script`, String))
     max_forward_error = 0.0
