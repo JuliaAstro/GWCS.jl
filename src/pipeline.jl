@@ -37,7 +37,7 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     end
 
     compiled = ntuple(i -> i == length(steps) ? steps[i] : Step(steps[i].frame, _compile_transform_checked(steps[i].transform)), length(steps))
-    kernel = compose(map(step -> step.transform, compiled[1:(end - 1)])...)
+    kernel = compose(map(step -> _numeric_transform(step.transform), compiled[1:(end - 1)])...)
     forward = compose(_frame_to_transform(first(compiled).frame), kernel, _transform_to_frame(last(compiled).frame))
     backward = _inverse_transform_checked(forward)
     Nin = frame_dimension(first(compiled).frame)

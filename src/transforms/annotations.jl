@@ -52,4 +52,6 @@ function compile_transform(transform::AnnotatedTransform)
     return AnnotatedTransform(compiled; name=transform.name, inputs=transform.inputs, outputs=transform.outputs)
 end
 
+_numeric_transform(transform::AnnotatedTransform) = _numeric_transform(transform.transform)
+
 transform_jacobian(transform::AnnotatedTransform, coords::StaticVector) = _transform_jacobian_checked(transform.transform, coords)

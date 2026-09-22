@@ -88,6 +88,7 @@ dimensions. External transform packages may extend this method to replace a
 construction-oriented transform with an optimized `AbstractTransform`.
 """
 compile_transform(transform::AbstractTransform) = transform
+_numeric_transform(transform::AbstractTransform) = transform
 
 function _compile_transform_checked(transform::AbstractTransform)
     compiled = compile_transform(transform)
@@ -134,6 +135,7 @@ end
 
 inverse_transform(transform::WithInverse) = WithInverse(transform.backward, transform.forward)
 compile_transform(transform::WithInverse) = WithInverse(_compile_transform_checked(transform.forward), _compile_transform_checked(transform.backward))
+_numeric_transform(transform::WithInverse) = WithInverse(_numeric_transform(transform.forward), _numeric_transform(transform.backward))
 transform_jacobian(transform::WithInverse, coords::StaticVector) = _transform_jacobian_checked(transform.forward, coords)
 transform_name(transform::WithInverse) = transform_name(transform.forward)
 input_names(transform::WithInverse) = input_names(transform.forward)

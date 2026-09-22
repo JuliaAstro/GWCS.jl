@@ -96,6 +96,8 @@ function compile_transform(transform::ComposedTransform)
     return compose(map(_compile_transform_checked, transform.transforms)...)
 end
 
+_numeric_transform(transform::ComposedTransform) = compose(map(_numeric_transform, transform.transforms)...)
+
 input_names(transform::ComposedTransform) = input_names(first(transform.transforms))
 output_names(transform::ComposedTransform) = output_names(last(transform.transforms))
 
@@ -217,6 +219,8 @@ function compile_transform(transform::ParallelTransform)
     return parallel(map(_compile_transform_checked, transform.transforms)...)
 end
 
+_numeric_transform(transform::ParallelTransform) = parallel(map(_numeric_transform, transform.transforms)...)
+
 function _parallel_names(transforms, accessor)
     names = map(accessor, transforms)
     all(name -> name !== nothing, names) || return nothing
@@ -325,6 +329,8 @@ function compile_transform(transform::ArithmeticTransform)
     right = _compile_transform_checked(transform.right)
     return _arithmetic_transform(transform.operator, left, right)
 end
+
+_numeric_transform(transform::ArithmeticTransform) = _arithmetic_transform(transform.operator, _numeric_transform(transform.left), _numeric_transform(transform.right))
 
 function _arithmetic_names(left, right, accessor)
     left_names = accessor(left)

@@ -50,8 +50,11 @@ end
     input = CoordinateFrame{1}(; name="input", axes_names=("x",))
     output = CoordinateFrame{1}(; name="output", axes_names=("u",))
     wcs = WCS(Step(input, annotated), Step(output))
-    @test input_names(wcs.forward) == ("x",)
-    @test output_names(wcs.forward) == ("u",)
+    @test input_names(first(wcs.steps).transform) == ("x",)
+    @test output_names(first(wcs.steps).transform) == ("u",)
+    @test !(wcs.forward isa AnnotatedTransform)
+    @test pixel_to_world(wcs, 1.0) == SVector(3.0)
+    @test world_to_pixel(wcs, 3.0) == SVector(1.0)
 
     callable_labels = AnnotatedTransform(Shift(1.0); inputs=("model_input",), outputs=("model_output",))
     labeled_wcs = WCS(Step(input, callable_labels), Step(output))
