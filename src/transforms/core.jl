@@ -54,6 +54,22 @@ External transform packages may extend this method for native
 """
 inverse_transform(::AbstractTransform) = NoInverse()
 
+struct _ApproximateInverseTransform{N,F,R} <: AbstractTransform{N,N}
+    forward::F
+    reverse::R
+end
+
+_ApproximateInverseTransform(forward::AbstractTransform{N,N}, reverse::AbstractTransform{N,N}) where {N} = _ApproximateInverseTransform{N,typeof(forward),typeof(reverse)}(forward, reverse)
+@inline (transform::_ApproximateInverseTransform)(coords::StaticVector) = transform.forward(coords)
+@inline _inverse_initialize(transform::_ApproximateInverseTransform{N}, coords::StaticVector{N}) where {N} = (transform.reverse(coords), true)
+transform_jacobian(transform::_ApproximateInverseTransform, coords::StaticVector) = _transform_jacobian_checked(transform.forward, coords)
+
+function _inverse_initialize(transform::AbstractTransform{Nin,Nout}, coords::StaticVector{Nout}) where {Nin,Nout}
+    inverse = _inverse_transform_checked(transform)
+    inverse isa NoInverse || return (inverse(coords), false)
+    return Nin == Nout ? (coords, false) : (nothing, false)
+end
+
 function _inverse_transform_checked(transform::AbstractTransform)
     inverse = inverse_transform(transform)
     inverse isa NoInverse && return inverse

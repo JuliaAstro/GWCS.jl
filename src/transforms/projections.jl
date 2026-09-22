@@ -180,14 +180,38 @@ struct HammerAitoffProjection <: AbstractSphericalProjection end
 """The ZPN/zenithal polynomial projection with coefficients `PV0, PV1, ...`."""
 struct ZenithalPolynomial{N,T<:AbstractFloat} <: AbstractZenithalProjection
     coefficients::NTuple{N,T}
+    monotonic_limit::T
+    radial_limit::T
+end
+
+function _zpn_monotonic_limit(coefficients::NTuple{N,T}) where {N,T}
+    N <= 2 && return T(pi)
+    derivative(value) = evalpoly(value, ntuple(i -> T(i) * coefficients[i + 1], N - 1))
+    derivative(zero(T)) > zero(T) || throw(ArgumentError("higher-order zenithal polynomial must have a positive linear coefficient"))
+    lower = zero(T)
+    for degree in 1:179
+        upper = deg2rad(T(degree))
+        derivative(upper) <= zero(T) || (lower = upper; continue)
+        for _ in 1:64
+            middle = (lower + upper) / 2
+            derivative(middle) > zero(T) ? (lower = middle) : (upper = middle)
+        end
+        return (lower + upper) / 2
+    end
+    return T(pi)
 end
 
 function ZenithalPolynomial(coefficients=(0.0, 1.0))
     values = Tuple(float.(coefficients))
     isempty(values) && throw(ArgumentError("zenithal polynomial requires at least one coefficient"))
     all(isfinite, values) || throw(ArgumentError("zenithal polynomial coefficients must be finite"))
+    last_nonzero = findlast(!iszero, values)
+    last_nonzero === nothing && throw(ArgumentError("zenithal polynomial must have a nonzero coefficient"))
+    values = values[1:last_nonzero]
     T = promote_type(map(typeof, values)...)
-    return ZenithalPolynomial{length(values),T}(T.(values))
+    typed = T.(values)
+    limit = _zpn_monotonic_limit(typed)
+    return ZenithalPolynomial{length(typed),T}(typed, limit, _projection_polynomial(typed, limit))
 end
 
 abstract type AbstractConicProjection <: AbstractSphericalProjection end
@@ -553,23 +577,10 @@ function _intermediate_to_native(projection::ZenithalPolynomial{N}, x, y) where 
         lower = zero(T)
         lower_value = polynomial(lower)
         abs(lower_value) <= _projection_tolerance(T) && return _zenithal_phi(x, y), T(pi / 2)
-        upper = T(pi)
+        upper = T(projection.monotonic_limit)
         upper_value = polynomial(upper)
-        if signbit(lower_value) == signbit(upper_value)
-            previous, previous_value = lower, lower_value
-            found = false
-            for index in 1:256
-                candidate = T(pi) * index / 256
-                candidate_value = polynomial(candidate)
-                if signbit(candidate_value) != signbit(previous_value) || iszero(candidate_value)
-                    lower, lower_value, upper, upper_value = previous, previous_value, candidate, candidate_value
-                    found = true
-                    break
-                end
-                previous, previous_value = candidate, candidate_value
-            end
-            found || throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
-        end
+        target < T(coefficients[1]) - _projection_tolerance(T) && throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
+        target > T(projection.radial_limit) + _projection_tolerance(T) && throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
         for _ in 1:64
             middle = (lower + upper) / 2
             middle_value = polynomial(middle)
@@ -591,6 +602,7 @@ end
 function _native_to_intermediate(projection::ZenithalPolynomial, phi, theta)
     theta = _native_latitude(theta, projection)
     distance = oftype(theta, pi / 2) - theta
+    distance <= projection.monotonic_limit + _projection_tolerance(typeof(distance)) || throw(DomainError(SVector(rad2deg(phi), rad2deg(theta)), "ZPN native coordinate is outside the first monotonic interval"))
     radius = rad2deg(_projection_polynomial(projection.coefficients, distance))
     return _zenithal_xy(radius, phi)
 end
@@ -807,7 +819,7 @@ function _cube_vector(face, x, y)
     elseif face == 4
         longitude, transverse, vertical = x, -one(x), y
     elseif face == 5
-        longitude, transverse, vertical = y, -x, -one(x)
+        longitude, transverse, vertical = y, x, -one(x)
     else
         longitude, transverse, vertical = -y, x, one(x)
     end
@@ -930,7 +942,7 @@ function _intermediate_to_native(::QuadrilateralizedSphericalCube, x, y)
     end
     vector = face == 1 ? (dominant, first, second) : face == 2 ? (-first, dominant, second) :
         face == 3 ? (-dominant, -first, second) : face == 4 ? (first, -dominant, second) :
-        face == 5 ? (second, -first, -dominant) : (-second, first, dominant)
+        face == 5 ? (second, first, -dominant) : (-second, first, dominant)
     norm = hypot(vector...)
     return _cube_native(map(value -> value / norm, vector))
 end
@@ -945,12 +957,13 @@ function _native_to_intermediate(projection::HEALPixProjection, phi, theta)
     longitude = rad2deg(_wrap_native_longitude(phi))
     step = 180 / H
     center = -180 + (2floor((longitude + 180) * H / 360) + 1) * step
-    x = longitude + (longitude - center) * (sigma - 1)
-    y = copysign(step * ((K + 1) / 2 - sigma), sine)
+    difference = longitude - center
     if iseven(projection.K) && sine < 0
         facet = floor(Int, longitude / step) + (projection.H % 2)
-        y += isodd(facet) ? -step : step
+        difference += isodd(facet) ? -step : step
     end
+    x = longitude + difference * (sigma - 1)
+    y = copysign(step * ((K + 1) / 2 - sigma), sine)
     x > 180 && (x = 360 - x)
     return x, y
 end
@@ -969,7 +982,7 @@ function _intermediate_to_native(projection::HEALPixProjection, x, y)
     difference = x - center
     if iseven(projection.K) && y < 0
         facet = floor(Int, x / step) + (projection.H % 2)
-        difference += isodd(facet) ? step : -step
+        difference += isodd(facet) ? -step : step
     end
     phi = iszero(sigma) ? zero(T) : deg2rad(x + difference * (inv(sigma) - 1))
     return phi, theta
@@ -1432,21 +1445,34 @@ function _native_pole(reference_longitude, reference_latitude, native_longitude,
 end
 
 """
-    celestial_transform(projection, reference; lonpole=nothing, latpole=90)
+    celestial_transform(projection, reference; lonpole=nothing, latpole=90, native_reference=native_fiducial(projection), offset=false)
 
 Construct an intermediate-plane-to-celestial transform using a two-coordinate
 celestial reference point and FITS Paper II native-pole conventions. All
-coordinates and pole parameters are in degrees.
+coordinates and pole parameters are in degrees. `native_reference` specifies
+the native longitude and latitude of the fiducial point. When `offset` is true,
+the projection is translated so that this native fiducial point has zero
+intermediate coordinates, as specified by FITS longitude-axis `PVi_0`.
 """
-function celestial_transform(projection::AbstractSphericalProjection, reference; lonpole=nothing, latpole=90)
+function celestial_transform(projection::AbstractSphericalProjection, reference; lonpole=nothing, latpole=90, native_reference=native_fiducial(projection), offset=false)
     reference isa Tuple || reference isa AbstractVector || throw(ArgumentError("celestial reference coordinate must be a tuple or vector"))
     length(reference) == 2 || throw(DimensionMismatch("celestial reference coordinate has length $(length(reference)), expected 2"))
     all(value -> value isa Real, reference) || throw(ArgumentError("celestial reference coordinates must be real numbers"))
+    native_reference isa Tuple || native_reference isa AbstractVector || throw(ArgumentError("native reference coordinate must be a tuple or vector"))
+    length(native_reference) == 2 || throw(DimensionMismatch("native reference coordinate has length $(length(native_reference)), expected 2"))
+    all(value -> value isa Real, native_reference) || throw(ArgumentError("native reference coordinates must be real numbers"))
     lonpole === nothing || lonpole isa Real || throw(ArgumentError("lonpole must be a real number or nothing"))
     latpole isa Real || throw(ArgumentError("latpole must be a real number"))
-    phi0, theta0 = native_fiducial(projection)
+    offset isa Bool || throw(ArgumentError("offset must be a boolean"))
+    phi0, theta0 = native_reference
     reference_longitude, reference_latitude = reference
     phi_p = lonpole === nothing ? default_lonpole(reference_latitude, theta0, phi0) : lonpole
     alpha_p, delta_p = _native_pole(reference_longitude, reference_latitude, phi0, theta0, phi_p, latpole)
-    return IntermediateToNative(projection) | NativeToCelestial(alpha_p, delta_p, phi_p)
+    projection_transform = if offset
+        plane_reference = NativeToIntermediate(projection)(SVector(phi0, theta0))
+        AffineTransform(SMatrix{2,2}(I), plane_reference) | IntermediateToNative(projection)
+    else
+        IntermediateToNative(projection)
+    end
+    return projection_transform | NativeToCelestial(alpha_p, delta_p, phi_p)
 end

@@ -20,7 +20,9 @@ function _set_header_card!(result, key, value)
     parsed = _parameter_card(value)
     parsed === nothing && return result
     name, parsed_value = parsed
-    (name == "EXTVER" || name == "NAXES" || startswith(name, "AXIS.")) && (result["$key.$name"] = parsed_value)
+    if name in ("EXTVER", "NAXES", "DOCORR") || any(prefix -> startswith(name, prefix), ("AXIS.", "OFFSET.", "SCALE.", "TPD.", "SIP.", "AUX."))
+        result["$key.$name"] = parsed_value
+    end
     return result
 end
 
@@ -43,14 +45,17 @@ end
 
 function _named_hdu(hdu::FITSIO.HDU, extname, extver, extlev=1)
     fitsfile = getfield(hdu, :fitsfile)
+    matches = FITSIO.HDU[]
     for index in 1:Int(FITSIO.fits_get_num_hdus(fitsfile))
         candidate = _hdu_at(fitsfile, index)
         header = _header_dictionary(FITSIO.read_header(candidate))
         uppercase(strip(String(get(header, "EXTNAME", "")))) == uppercase(strip(extname)) || continue
         Int(get(header, "EXTVER", 1)) == extver || continue
-        Int(get(header, "EXTLEVEL", 1)) == extlev && return candidate
+        Int(get(header, "EXTLEVEL", 1)) == extlev && push!(matches, candidate)
     end
-    throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev was not found"))
+    isempty(matches) && throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev was not found"))
+    length(matches) == 1 || throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev is ambiguous ($(length(matches)) matching HDUs)"))
+    return only(matches)
 end
 
 function _parse_hdu(hdu::FITSIO.HDU; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
@@ -58,15 +63,16 @@ function _parse_hdu(hdu::FITSIO.HDU; key::Char=' ', preserve_units::Bool=false, 
     lookup = _fits_lookup_data(header, key, minerr) do spec
         table_hdu = _named_hdu(hdu, spec.extname, spec.extver)
         data = FITSIO.read(table_hdu)
-        data isa AbstractMatrix || throw(ArgumentError("FITS WCS lookup extension $(repr(spec.extname)) must contain a two-dimensional image"))
+        data isa AbstractArray || throw(ArgumentError("FITS WCS lookup extension $(repr(spec.extname)) must contain an image"))
         table_header = _fits_header(_header_dictionary(FITSIO.read_header(table_hdu)))
-        _fits_lookup_table(data, table_header, spec.transpose)
+        _fits_lookup_table(data, table_header, spec.axes, spec.naxis)
     end
     parsed = GWCS._fits_ctype.(String.([get(header, "CTYPE$i$(GWCS._fits_key(key))", "") for i in 1:GWCS._fits_axis_count(header, key)]))
     tabular = _fits_tabular_data(header, key, parsed) do extname, extver, extlev, column
         table_hdu = _named_hdu(hdu, extname, extver, extlev)
         table_hdu isa Union{FITSIO.TableHDU,FITSIO.ASCIITableHDU} || throw(ArgumentError("FITS TAB extension $(repr(extname)) must be a table HDU"))
-        FITSIO.read(table_hdu, column)
+        data = FITSIO.read(table_hdu, column)
+        size(data, ndims(data)) == 1 ? dropdims(data; dims=ndims(data)) : data
     end
     return _parse_fits_wcs(header; key, preserve_units, minerr, lookup_data=lookup, tabular_data=tabular)
 end

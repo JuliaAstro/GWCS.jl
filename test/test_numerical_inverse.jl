@@ -15,11 +15,11 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     @test numerical_inverse(wcs, transformed; tolerance=1e-10, quiet=false) ≈ pixel atol=1e-9
     @test in_image(wcs, transformed; tolerance=1e-10)
 
-    best = world_to_pixel(wcs, transformed; tolerance=1e-15, maxiter=1)
+    best = world_to_pixel(wcs, transformed; tolerance=1e-15, maxiter=1, quiet=true)
     @test all(isfinite, best)
     @test !in_image(wcs, transformed; tolerance=1e-15, maxiter=1)
     error = try
-        world_to_pixel(wcs, transformed; tolerance=1e-15, maxiter=1, quiet=false)
+        world_to_pixel(wcs, transformed; tolerance=1e-15, maxiter=1)
         nothing
     catch exception
         exception
@@ -62,4 +62,13 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     arithmetic_world = pixel_to_world(arithmetic_wcs, arithmetic_pixel)
     @test arithmetic_wcs.backward isa NoInverse
     @test world_to_pixel(arithmetic_wcs, arithmetic_world; tolerance=1e-12, quiet=false) ≈ arithmetic_pixel atol=1e-12
+
+    rectangular_children = RemapAxes{2}((1, 2, 1)) | RemapAxes{3}((1, 2)) | distortion
+    rectangular_wcs = WCS(Step(pixels, rectangular_children), Step(world); bounding_box=BoundingBox(((-10.0, 10.0), (-10.0, 10.0))))
+    rectangular_world = pixel_to_world(rectangular_wcs, pixel)
+    @test world_to_pixel(rectangular_wcs, rectangular_world; tolerance=1e-10, quiet=false) ≈ pixel atol=1e-9
+
+    domain_initializer = GWCS._ApproximateInverseTransform(arithmetic_distortion, CallableTransform{1,1}(x -> throw(DomainError(x))))
+    bounded_initializer = WCS(Step(CoordinateFrame{1}(name="bounded_input"), domain_initializer), Step(CoordinateFrame{1}(name="bounded_output")); bounding_box=BoundingBox(((2.0, 4.0),)))
+    @test world_to_pixel(bounded_initializer, pixel_to_world(bounded_initializer, 2.5); tolerance=1e-12, quiet=false) ≈ SVector(2.5) atol=1e-12
 end

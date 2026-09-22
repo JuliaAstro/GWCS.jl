@@ -1,4 +1,5 @@
 transform_dependencies(::IdentityTransform{N}) where {N} = SMatrix{N,N,Bool}(I)
+transform_dependencies(transform::_ApproximateInverseTransform) = _transform_dependencies_checked(transform.forward)
 transform_dependencies(::Shift) = SMatrix{1,1,Bool}(true)
 transform_dependencies(transform::Scale) = SMatrix{1,1,Bool}(!iszero(transform.factor))
 

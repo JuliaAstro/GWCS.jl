@@ -82,6 +82,16 @@ function inverse_transform(transform::ComposedTransform)
     return compose(inverses...)
 end
 
+@inline _inverse_initialize_composed(::Tuple{}, coords, used) = (coords, used)
+
+@inline function _inverse_initialize_composed(transforms::Tuple, coords, used)
+    initialized, local_used = _inverse_initialize(last(transforms), coords)
+    initialized === nothing && return (nothing, false)
+    return _inverse_initialize_composed(Base.front(transforms), initialized, used || local_used)
+end
+
+@inline _inverse_initialize(transform::ComposedTransform{N,N}, coords::StaticVector{N}) where {N} = _inverse_initialize_composed(transform.transforms, coords, false)
+
 function compile_transform(transform::ComposedTransform)
     return compose(map(_compile_transform_checked, transform.transforms)...)
 end
@@ -183,6 +193,24 @@ function inverse_transform(transform::ParallelTransform)
     inverses = map(_inverse_transform_checked, transform.transforms)
     any(inverse -> inverse isa NoInverse, inverses) && return NoInverse()
     return parallel(inverses...)
+end
+
+@inline _inverse_initialize_parallel(::Tuple{}, coords, input_offset, output_offset) = ((), false)
+
+@inline function _inverse_initialize_parallel(transforms::Tuple, coords, input_offset, output_offset)
+    transform = first(transforms)
+    Nout = output_dimension(transform)
+    inputs = SVector{Nout}(ntuple(i -> coords[output_offset + i], Nout))
+    initialized, used = _inverse_initialize(transform, inputs)
+    initialized === nothing && return (nothing, false)
+    tail, tail_used = _inverse_initialize_parallel(Base.tail(transforms), coords, input_offset + input_dimension(transform), output_offset + Nout)
+    tail === nothing && return (nothing, false)
+    return ((Tuple(initialized)..., tail...), used || tail_used)
+end
+
+@inline function _inverse_initialize(transform::ParallelTransform{Nin,Nout}, coords::StaticVector{Nout}) where {Nin,Nout}
+    outputs, used = _inverse_initialize_parallel(transform.transforms, coords, 0, 0)
+    return (outputs === nothing ? nothing : SVector{Nin}(outputs), used)
 end
 
 function compile_transform(transform::ParallelTransform)

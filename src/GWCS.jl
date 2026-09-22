@@ -29,6 +29,7 @@ include("metadata_schemas.jl")
 include("frames.jl")
 include("domains.jl")
 include("pipeline.jl")
+include("display.jl")
 include("fits.jl")
 include("api.jl")
 include("numerical_inverse.jl")
@@ -40,7 +41,7 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransfo
        AbstractBoundingBox, AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompoundBoundingBox, CompositeFrame,
        CelestialToNative,
        ComposedTransform, ConstantTransform, CoordinateFrame, DictionaryLabelMapper, FixedInputsTransform,
-       BilinearLookupTable, FITSGrismTransform, FITSLookupDistortion, FITSSpectralTransform, FITSTabularTable, FITSTabularTransform, Frame2D, GnomonicProjection, HammerAitoffProjection, IdentityTransform, IntermediateToNative,
+       BilinearLookupTable, FITSGrismTransform, FITSLogTransform, FITSLookupDistortion, FITSSpectralTransform, FITSTabularTable, FITSTabularTransform, Frame2D, GnomonicProjection, HammerAitoffProjection, IdentityTransform, IntermediateToNative,
        NativeToCelestial, NativeToIntermediate, NoInverse,
        HEALPixPolarProjection, HEALPixProjection, MercatorProjection, MollweideProjection, ParabolicProjection, ParallelTransform, PlateCarreeProjection, PolyconicProjection, Polynomial1D, Polynomial2D, QuadrilateralizedSphericalCube, RangeLabelMapper, RegionSelector, RemapAxes, Rotation3D,
        PIXEL, SPATIAL, SPECTRAL, STOKES, TIME, UNDEFINED,

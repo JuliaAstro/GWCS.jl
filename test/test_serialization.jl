@@ -170,6 +170,8 @@ end
     @test roman_node.tag == "tag:stsci.edu:gwcs/wcs-1.4.0"
     @test reparsed_roman.name == roman.name
     @test reparsed_roman.pixel_shape == roman.pixel_shape
+    partial_shape = with_pixel_shape(roman, (20, nothing))
+    @test !haskey(to_metadata(partial_shape), "pixel_shape")
     @test reparsed_roman.bounding_box.intervals == roman.bounding_box.intervals
     @test pixel_to_world(reparsed_roman, 11.0, 22.0) ≈ world atol=1e-12
     @test world_to_pixel(reparsed_roman, world) ≈ SVector(11.0, 22.0) atol=1e-10
@@ -189,7 +191,7 @@ end
 
 @testset "ASDF writing" begin
     original = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
-    mktempdir() do directory
+    mktempdir(@__DIR__) do directory
         filename = joinpath(directory, "wcs.asdf")
         write_asdf(filename, original)
         loaded = with_logger(NullLogger()) do

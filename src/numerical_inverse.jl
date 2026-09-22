@@ -30,10 +30,19 @@ function _box_initial_guess(wcs::WCS{N}, box::CompoundBoundingBox{N,K}, ::Type{T
     end)
 end
 
-function _initial_guess(wcs::WCS{N}, ::Type{T}, initial_guess) where {N,T}
+function _initial_guess(wcs::WCS{N}, target::StaticVector{N,T}, initial_guess) where {N,T}
     if initial_guess !== nothing
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess)
+    end
+    initialized, used = try
+        _inverse_initialize(wcs.forward, target)
+    catch error
+        error isa DomainError || rethrow()
+        (nothing, false)
+    end
+    if used && initialized !== nothing
+        return initialized
     elseif wcs.bounding_box !== nothing
         return _box_initial_guess(wcs, wcs.bounding_box, T)
     end
@@ -59,7 +68,7 @@ function _finish_numerical_inverse(wcs::WCS{N}, solution::StaticVector{N}; with_
     return solution
 end
 
-function _numerical_inverse(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=true, with_bounding_box=true, fill_value=NaN, max_backtracks=12)
+function _numerical_inverse(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, with_bounding_box=true, fill_value=NaN, max_backtracks=12)
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
@@ -68,14 +77,14 @@ function _numerical_inverse(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-
     return _finish_numerical_inverse(wcs, SVector{0,T}(); with_bounding_box, fill_value)
 end
 
-function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=true, with_bounding_box=true, fill_value=NaN, max_backtracks=12) where {N}
+function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, with_bounding_box=true, fill_value=NaN, max_backtracks=12) where {N}
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
 
     T = _coordinate_float_type(eltype(world))
     target = SVector{N,T}(world)
-    estimate = _initial_guess(wcs, T, initial_guess)
+    estimate = _initial_guess(wcs, target, initial_guess)
     longitude_axes = _longitude_axes(output_frame(wcs))
     residual_function = pixels -> _inverse_residual(wcs, pixels, target, longitude_axes)
 

@@ -89,6 +89,39 @@ end
 
 @inline _fits_parent_to_x(value, x, parent, rest_frequency, rest_wavelength) = _fits_x_to_parent(value, parent, x, rest_frequency, rest_wavelength)
 
+struct FITSLogTransform{T<:AbstractFloat} <: AbstractTransform{1,1}
+    reference_value::T
+    output_scale::T
+end
+
+function FITSLogTransform(reference_value; output_scale=1)
+    reference, scale = promote(float(reference_value), float(output_scale))
+    isfinite(reference) && reference > 0 || throw(ArgumentError("FITS logarithmic reference value must be finite and positive"))
+    isfinite(scale) && scale > 0 || throw(ArgumentError("FITS logarithmic output scale must be finite and positive"))
+    return FITSLogTransform{typeof(reference)}(reference, scale)
+end
+
+@inline function (transform::FITSLogTransform)(coords::StaticVector{1})
+    offset = only(coords)
+    reference = oftype(offset, transform.reference_value)
+    return SVector(reference * exp(offset / reference) / oftype(offset, transform.output_scale))
+end
+
+struct FITSLogInverse{F<:FITSLogTransform} <: AbstractTransform{1,1}
+    forward::F
+end
+
+@inline function (transform::FITSLogInverse)(coords::StaticVector{1})
+    forward = transform.forward
+    world = only(coords) * oftype(only(coords), forward.output_scale)
+    world > 0 || throw(DomainError(only(coords), "FITS logarithmic coordinate must be positive"))
+    reference = oftype(world, forward.reference_value)
+    return SVector(reference * log(world / reference))
+end
+
+inverse_transform(transform::FITSLogTransform) = FITSLogInverse(transform)
+inverse_transform(transform::FITSLogInverse) = transform.forward
+
 struct FITSSpectralTransform{X,P,S,A,T<:AbstractFloat} <: AbstractTransform{1,1}
     reference_value::T
     x_reference::T
@@ -102,26 +135,17 @@ function FITSSpectralTransform(::Val{X}, ::Val{P}, ::Val{S}, ::Val{A}, reference
     reference, frequency, wavelength, scale = values
     !isfinite(frequency) && isfinite(wavelength) && (frequency = oftype(wavelength, _FITS_SPEED_OF_LIGHT) / wavelength)
     !isfinite(wavelength) && isfinite(frequency) && (wavelength = oftype(frequency, _FITS_SPEED_OF_LIGHT) / frequency)
-    x_reference = if A === :LOG
-        reference
-    else
-        parent = _fits_spectral_to_parent(reference, Val(S), frequency, wavelength)
-        _fits_parent_to_x(parent, Val(X), Val(P), frequency, wavelength)
-    end
+    parent = _fits_spectral_to_parent(reference, Val(S), frequency, wavelength)
+    x_reference = _fits_parent_to_x(parent, Val(X), Val(P), frequency, wavelength)
     all(isfinite, (reference, x_reference, scale)) || throw(ArgumentError("FITS spectral reference values do not define a finite transform"))
     return FITSSpectralTransform{X,P,S,A,typeof(reference)}(reference, x_reference, frequency, wavelength, scale)
 end
 
 @inline function (transform::FITSSpectralTransform{X,P,S,A})(coords::StaticVector{1}) where {X,P,S,A}
     offset = only(coords)
-    world = if A === :LOG
-        reference = oftype(offset, transform.reference_value)
-        reference * exp(offset / reference)
-    else
-        absolute = offset + oftype(offset, transform.x_reference)
-        parent = _fits_x_to_parent(absolute, Val(X), Val(P), oftype(offset, transform.rest_frequency), oftype(offset, transform.rest_wavelength))
-        _fits_parent_to_spectral(parent, Val(S), oftype(offset, transform.rest_frequency), oftype(offset, transform.rest_wavelength))
-    end
+    absolute = offset + oftype(offset, transform.x_reference)
+    parent = _fits_x_to_parent(absolute, Val(X), Val(P), oftype(offset, transform.rest_frequency), oftype(offset, transform.rest_wavelength))
+    world = _fits_parent_to_spectral(parent, Val(S), oftype(offset, transform.rest_frequency), oftype(offset, transform.rest_wavelength))
     return SVector(world / oftype(world, transform.output_scale))
 end
 
@@ -132,13 +156,8 @@ end
 @inline function (transform::FITSSpectralInverse{X,P,S,A})(coords::StaticVector{1}) where {X,P,S,A}
     forward = transform.forward
     world = only(coords) * oftype(only(coords), forward.output_scale)
-    offset = if A === :LOG
-        reference = oftype(world, forward.reference_value)
-        reference * log(world / reference)
-    else
-        parent = _fits_spectral_to_parent(world, Val(S), oftype(world, forward.rest_frequency), oftype(world, forward.rest_wavelength))
-        _fits_parent_to_x(parent, Val(X), Val(P), oftype(world, forward.rest_frequency), oftype(world, forward.rest_wavelength)) - oftype(world, forward.x_reference)
-    end
+    parent = _fits_spectral_to_parent(world, Val(S), oftype(world, forward.rest_frequency), oftype(world, forward.rest_wavelength))
+    offset = _fits_parent_to_x(parent, Val(X), Val(P), oftype(world, forward.rest_frequency), oftype(world, forward.rest_wavelength)) - oftype(world, forward.x_reference)
     return SVector(offset)
 end
 
