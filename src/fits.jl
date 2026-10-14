@@ -698,12 +698,16 @@ function _fits_sip_transform(header, suffix, crpix, count, ctype_suffixes; enabl
     return count == 2 ? correction : parallel(correction, IdentityTransform{count - 2}())
 end
 
+_fits_has_matrix(header, prefix, count, suffix) = any(haskey(header, "$prefix$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
+
+# Like WCSLIB, PCi_j (with CDELTi) takes precedence when a nonconforming header also has CDi_j.
+_fits_uses_cd(header, count, suffix) = _fits_has_matrix(header, "CD", count, suffix) && !_fits_has_matrix(header, "PC", count, suffix)
+
 function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis)
-    has_cd = any(haskey(header, "CD$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
-    has_pc = any(haskey(header, "PC$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
-    has_cd && has_pc && throw(ArgumentError("FITS CDi_j and PCi_j keywords must not be mixed"))
+    has_pc = _fits_has_matrix(header, "PC", count, suffix)
+    has_pc && _fits_has_matrix(header, "CD", count, suffix) && @warn "FITS header has both PCi_j$suffix and CDi_j$suffix; using PCi_j$suffix and CDELTi$suffix and ignoring CDi_j$suffix, as WCSLIB does"
     matrix = zeros(Float64, count, count)
-    if has_cd
+    if _fits_uses_cd(header, count, suffix)
         for i in 1:count, j in 1:count
             keyword = "CD$(i)_$(j)$suffix"
             matrix[i, j] = haskey(header, keyword) ? _fits_number(header[keyword], keyword) : 0.0
@@ -771,9 +775,9 @@ end
 
 function _fits_time_scale(unit, keyword)
     normalized = lowercase(strip(unit))
-    # "a" and "cy" are the Julian year and century of the FITS time standard, as in WCSLIB.
+    # "a"/"yr" and "cy" are the Julian year and century of the FITS time standard, as in WCSLIB.
     factors = Dict("" => 1.0, "s" => 1.0, "sec" => 1.0, "min" => 60.0, "h" => 3600.0, "hr" => 3600.0, "d" => 86400.0, "day" => 86400.0,
-        "a" => 31557600.0, "cy" => 3155760000.0, "ms" => 1e-3, "us" => 1e-6, "ns" => 1e-9)
+        "a" => 31557600.0, "yr" => 31557600.0, "cy" => 3155760000.0, "ms" => 1e-3, "us" => 1e-6, "ns" => 1e-9)
     haskey(factors, normalized) || throw(ArgumentError("unsupported time $keyword=$(repr(unit))"))
     return factors[normalized]
 end
@@ -1062,8 +1066,7 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     sequent_models = projection_code == "TPV" ? tpv_models : sequent_tpd_models
     has_sequent = any(model -> model !== nothing, sequent_models)
     if has_sequent
-        has_cd = any(haskey(header, "CD$(i)_$(j)$suffix") for i in 1:count for j in 1:count)
-        if has_cd
+        if _fits_uses_cd(header, count, suffix)
             pre_matrix = raw_cd
             post_scaling = linear_scaling
         else
