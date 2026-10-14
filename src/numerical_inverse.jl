@@ -30,7 +30,7 @@ function _box_initial_guess(wcs::WCS{N}, box::CompoundBoundingBox{N,K}, ::Type{T
     end)
 end
 
-function _initial_guess(wcs::WCS{N}, target::StaticVector{N,T}, initial_guess) where {N,T}
+function _initial_guess(wcs::WCS{N}, target::StaticVector{N,T}, initial_guess, residual_function) where {N,T}
     if initial_guess !== nothing
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess)
@@ -41,10 +41,14 @@ function _initial_guess(wcs::WCS{N}, target::StaticVector{N,T}, initial_guess) w
         error isa DomainError || rethrow()
         (nothing, false)
     end
-    if used && initialized !== nothing
+    usable = initialized !== nothing && all(isfinite, initialized)
+    if used && usable
         return initialized
     elseif wcs.bounding_box !== nothing
         return _box_initial_guess(wcs, wcs.bounding_box, T)
+    elseif usable && all(isfinite, residual_function(SVector{N,T}(initialized)))
+        # Like WCSLIB, start from the solution with distortions treated as identity when the forward map is defined there.
+        return SVector{N,T}(initialized)
     end
     return SVector{N,T}(ntuple(i -> one(T), N))
 end
@@ -59,6 +63,21 @@ end
         difference = predicted[i] - world[i]
         longitude_axes[i] ? mod(difference + oftype(difference, 180), oftype(difference, 360)) - oftype(difference, 180) : difference
     end, N))
+end
+
+# Isolated coordinate singularities, such as the native pole of zenithal projections, have no
+# chain-rule Jacobian even where the composed map is smooth; Newton then uses a nearby point's Jacobian.
+function _inverse_jacobian(wcs::WCS, estimate::StaticVector)
+    jacobian = _transform_jacobian_checked(wcs.forward, estimate)
+    all(isfinite, jacobian) && return jacobian
+    T = eltype(estimate)
+    nudged = estimate .+ sqrt(eps(T)) .* max.(one(T), abs.(estimate))
+    return try
+        _transform_jacobian_checked(wcs.forward, nudged)
+    catch error
+        error isa DomainError || rethrow()
+        jacobian
+    end
 end
 
 function _finish_numerical_inverse(wcs::WCS{N}, solution::StaticVector{N}; with_bounding_box, fill_value) where {N}
@@ -84,9 +103,15 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
 
     T = _coordinate_float_type(eltype(world))
     target = SVector{N,T}(world)
-    estimate = _initial_guess(wcs, target, initial_guess)
     longitude_axes = _longitude_axes(output_frame(wcs))
-    residual_function = pixels -> _inverse_residual(wcs, pixels, target, longitude_axes)
+    # Steps that leave a transform's domain become non-finite residuals so the line search backtracks.
+    residual_function = pixels -> try
+        _inverse_residual(wcs, pixels, target, longitude_axes)
+    catch error
+        error isa DomainError || rethrow()
+        SVector{N,T}(ntuple(_ -> T(NaN), N))
+    end
+    estimate = _initial_guess(wcs, target, initial_guess, residual_function)
 
     best_solution = estimate
     best_residual = residual_function(estimate)
@@ -107,7 +132,7 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
         end
         all(isfinite, residual) || break
 
-        jacobian = _transform_jacobian_checked(wcs.forward, estimate)
+        jacobian = _inverse_jacobian(wcs, estimate)
         all(isfinite, jacobian) || break
         scale = max(one(T), maximum(abs, jacobian))
         abs(det(jacobian)) > eps(T) * scale^N || break
@@ -136,7 +161,7 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
     if last_step_accepted && iterations == maxiter
         residual = residual_function(estimate)
         if all(isfinite, residual)
-            jacobian = _transform_jacobian_checked(wcs.forward, estimate)
+            jacobian = _inverse_jacobian(wcs, estimate)
             scale = max(one(T), maximum(abs, jacobian))
             if all(isfinite, jacobian) && abs(det(jacobian)) > eps(T) * scale^N
                 step = jacobian \ residual

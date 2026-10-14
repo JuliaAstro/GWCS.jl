@@ -1,38 +1,15 @@
 module GWCSFITSFilesExt
 
 import FITSFiles
-import GWCS
-import GWCS: _fits_header, _fits_lookup_data, _fits_lookup_table, _fits_malformed_error, _fits_tabular_data, _parse_fits_wcs, find_all_fits_wcs, parse_fits_wcs
+import GWCS: _find_all_fits_wcs, _fits_card_dictionary, _fits_find_extension, _fits_header, _parse_linked_fits_wcs, find_all_fits_wcs, parse_fits_wcs
 
-function _parameter_card(value)
-    value isa AbstractString || return nothing
-    parts = split(String(value), ':'; limit=2)
-    length(parts) == 2 || return nothing
-    name, raw = uppercase(strip(parts[1])), strip(parts[2])
-    integer = tryparse(Int, raw)
-    integer === nothing || return name, integer
-    parsed = tryparse(Float64, raw)
-    return name, parsed === nothing ? raw : parsed
-end
+# FITSFiles parses short real literals as Float32; Float64(x) would add binary noise (150.1 -> 150.10000610...),
+# so recover the decimal literal from the shortest Float32 representation.
+# shortcut: literals with 8-9 significant digits are already truncated inside FITSFiles; fixing that needs FITSFiles to parse reals as Float64.
+_card_value(value::Float32) = parse(Float64, replace(string(value), 'f' => 'e'))
+_card_value(value) = value
 
-function _set_header_card!(result, key, value)
-    result[key] = value
-    parsed = _parameter_card(value)
-    parsed === nothing && return result
-    name, parsed_value = parsed
-    if name in ("EXTVER", "NAXES", "DOCORR") || any(prefix -> startswith(name, prefix), ("AXIS.", "OFFSET.", "SCALE.", "TPD.", "SIP.", "AUX."))
-        result["$key.$name"] = parsed_value
-    end
-    return result
-end
-
-function _header_dictionary(cards::FITSFiles.Cards)
-    result = Dict{String,Any}()
-    for card in cards
-        _set_header_card!(result, uppercase(strip(String(card.key))), card.value)
-    end
-    return result
-end
+_header_dictionary(cards::FITSFiles.Cards) = _fits_card_dictionary((card.key, _card_value(card.value)) for card in cards)
 
 parse_fits_wcs(cards::FITSFiles.Cards; kwargs...) = parse_fits_wcs(_header_dictionary(cards); kwargs...)
 find_all_fits_wcs(cards::FITSFiles.Cards; kwargs...) = find_all_fits_wcs(_header_dictionary(cards); kwargs...)
@@ -58,50 +35,26 @@ function _tabular_column(hdu, extname, column)
     throw(ArgumentError("FITS TAB extension $(repr(extname)) has no column $(repr(column))"))
 end
 
+_lookup_hdu(hdus, extname, extver, extlev=1) = _fits_find_extension((hdu => _header_dictionary(hdu.cards) for hdu in hdus), extname, extver, extlev)
+
+function _parse_hdus(hdus, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
+    function image(extname, extver)
+        table_hdu = _lookup_hdu(hdus, extname, extver)
+        return table_hdu.data, _header_dictionary(table_hdu.cards)
+    end
+    column(extname, extver, extlev, name) = _tabular_column(_lookup_hdu(hdus, extname, extver, extlev), extname, name)
+    return _parse_linked_fits_wcs(image, column, header; key, preserve_units, minerr)
+end
+
+_hdu_header(hdus, index) = (checkbounds(hdus, index); _fits_header(_header_dictionary(hdus[index].cards)))
+
 function parse_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index::Integer; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
-    checkbounds(hdus, index)
-    header = _fits_header(_header_dictionary(hdus[index].cards))
-    lookup = _fits_lookup_data(header, key, minerr) do spec
-        table_hdu = _lookup_hdu(hdus, spec.extname, spec.extver)
-        table_hdu.data isa AbstractArray || throw(ArgumentError("FITS WCS lookup extension $(repr(spec.extname)) must contain an image"))
-        table_header = _fits_header(_header_dictionary(table_hdu.cards))
-        _fits_lookup_table(table_hdu.data, table_header, spec.axes, spec.naxis)
-    end
-    parsed = GWCS._fits_ctype.(String.([get(header, "CTYPE$i$(GWCS._fits_key(key))", "") for i in 1:GWCS._fits_axis_count(header, key)]))
-    tabular = _fits_tabular_data(header, key, parsed) do extname, extver, extlev, column
-        table_hdu = _lookup_hdu(hdus, extname, extver, extlev)
-        return _tabular_column(table_hdu, extname, column)
-    end
-    return _parse_fits_wcs(header; key, preserve_units, minerr, lookup_data=lookup, tabular_data=tabular)
+    return _parse_hdus(hdus, _hdu_header(hdus, index); key, preserve_units, minerr)
 end
 
 function find_all_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index::Integer; preserve_units::Bool=false, minerr::Real=0.0)
-    checkbounds(hdus, index)
-    header = _fits_header(_header_dictionary(hdus[index].cards))
-    result = Dict{Char,GWCS.WCS}()
-    for key in GWCS._fits_alternate_keys(header)
-        try
-            result[key] = parse_fits_wcs(hdus, index; key, preserve_units, minerr)
-        catch error
-            error isa InterruptException && rethrow()
-            throw(_fits_malformed_error(error, key))
-        end
-    end
-    return result
-end
-
-function _lookup_hdu(hdus, extname, extver, extlev=1)
-    matches = FITSFiles.HDU[]
-    for hdu in hdus
-        cards = hdu.cards
-        haskey(cards, "EXTNAME") || continue
-        uppercase(strip(String(cards["EXTNAME"]))) == uppercase(strip(String(extname))) || continue
-        Int(get(cards, "EXTVER", 1)) == extver || continue
-        Int(get(cards, "EXTLEVEL", 1)) == extlev && push!(matches, hdu)
-    end
-    isempty(matches) && throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev was not found"))
-    length(matches) == 1 || throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev is ambiguous ($(length(matches)) matching HDUs)"))
-    return only(matches)
+    header = _hdu_header(hdus, index)
+    return _find_all_fits_wcs(key -> _parse_hdus(hdus, header; key, preserve_units, minerr), header)
 end
 
 end

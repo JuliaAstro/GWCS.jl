@@ -71,4 +71,8 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     domain_initializer = GWCS._ApproximateInverseTransform(arithmetic_distortion, CallableTransform{1,1}(x -> throw(DomainError(x))))
     bounded_initializer = WCS(Step(CoordinateFrame{1}(name="bounded_input"), domain_initializer), Step(CoordinateFrame{1}(name="bounded_output")); bounding_box=BoundingBox(((2.0, 4.0),)))
     @test world_to_pixel(bounded_initializer, pixel_to_world(bounded_initializer, 2.5); tolerance=1e-12, quiet=false) ≈ SVector(2.5) atol=1e-12
+
+    # The first Newton step from 1 lands at -0.8, outside sqrt's domain; it must backtrack rather than throw.
+    root_wcs = WCS(Step(CoordinateFrame{1}(name="root_input"), CallableTransform{1,1}(x -> sqrt(x))), Step(CoordinateFrame{1}(name="root_output")))
+    @test world_to_pixel(root_wcs, SVector(0.1); initial_guess=(1.0,), tolerance=1e-12) ≈ SVector(0.01) atol=1e-12
 end

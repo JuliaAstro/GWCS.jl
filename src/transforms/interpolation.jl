@@ -148,6 +148,13 @@ function FITSTabularTable(axes::NTuple{M,Int}, coordinates, indices) where {M}
     return FITSTabularTable{M,typeof(values),typeof(index_values)}(axes, values, index_values)
 end
 
+# First interval `index[i:i+1]` containing `value` with distinct endpoints; runs of equal
+# index values are skipped because they define no interpolation interval.
+@inline function _tabular_interval(index, value, rev)
+    upper = searchsortedfirst(index, value; rev)
+    return upper > 1 ? upper - 1 : searchsortedlast(index, value; rev)
+end
+
 function _tabular_fractional_index(index, value)
     T = promote_type(eltype(index), typeof(float(value)))
     if length(index) == 1
@@ -157,28 +164,12 @@ function _tabular_fractional_index(index, value)
     increasing = index[end] > index[1]
     if increasing
         index[1] - (index[2] - index[1]) / 2 <= value <= index[end] + (index[end] - index[end - 1]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
-        position = value < index[1] ? 1 : value > index[end] ? length(index) - 1 : 0
-        if iszero(position)
-            for i in 1:(length(index) - 1)
-                if index[i] == value < index[i + 1] || index[i] < value <= index[i + 1]
-                    position = i
-                    break
-                end
-            end
-        end
+        position = value < index[1] ? 1 : value > index[end] ? length(index) - 1 : _tabular_interval(index, value, false)
     else
         index[end] - (index[end - 1] - index[end]) / 2 <= value <= index[1] + (index[1] - index[2]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
-        position = value > index[1] ? 1 : value < index[end] ? length(index) - 1 : 0
-        if iszero(position)
-            for i in 1:(length(index) - 1)
-                if index[i] == value > index[i + 1] || index[i] > value >= index[i + 1]
-                    position = i
-                    break
-                end
-            end
-        end
+        position = value > index[1] ? 1 : value < index[end] ? length(index) - 1 : _tabular_interval(index, value, true)
     end
-    position > 0 || throw(DomainError(value, "TAB coordinate does not lie in a nondegenerate index-vector interval"))
+    1 <= position < length(index) || throw(DomainError(value, "TAB coordinate does not lie in a nondegenerate index-vector interval"))
     first, second = T(index[position]), T(index[position + 1])
     return T(position) + (value - first) / (second - first)
 end
@@ -239,17 +230,20 @@ function FITSTabularTransform(::Val{N}, tables, scales) where {N}
     return FITSTabularTransform{N,typeof(tables),typeof(Tuple(scales))}(tables, Tuple(scales))
 end
 
-@inline function (transform::FITSTabularTransform{N})(coords::StaticVector{N}) where {N}
-    result = SVector(coords)
-    for table in transform.tables
-        values = _tabular_values(table, coords)
-        for component in eachindex(table.axes)
-            axis = table.axes[component]
-            result = Base.setindex(result, values[component] * transform.scales[axis], axis)
-        end
+# Recurse over the table tuple so tables with different dimensions stay type-stable.
+@inline _tabular_apply(::Tuple{}, coords, result, scales) = result
+
+@inline function _tabular_apply(tables::Tuple, coords, result, scales)
+    table = first(tables)
+    values = _tabular_values(table, coords)
+    for component in eachindex(table.axes)
+        axis = table.axes[component]
+        result = Base.setindex(result, values[component] * scales[axis], axis)
     end
-    return SVector(result)
+    return _tabular_apply(Base.tail(tables), coords, result, scales)
 end
+
+@inline (transform::FITSTabularTransform{N})(coords::StaticVector{N}) where {N} = _tabular_apply(transform.tables, coords, SVector(coords), transform.scales)
 
 struct FITSTabularInverse{N,T,S} <: AbstractTransform{N,N}
     tables::T
@@ -268,7 +262,7 @@ _tabular_monotonic(values) = length(values) <= 1 || values[1] != values[end] &&
     result = SVector(coords)
     for table in transform.tables
         axis = only(table.axes)
-        fractional = _tabular_fractional_index(table.coordinates, coords[axis] / transform.scales[axis])
+        fractional = _tabular_fractional_index(view(table.coordinates, 1, :), coords[axis] / transform.scales[axis])
         result = Base.setindex(result, _tabular_index_value(only(table.indices), fractional), axis)
     end
     return SVector(result)
