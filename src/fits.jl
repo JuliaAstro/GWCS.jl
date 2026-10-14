@@ -146,7 +146,8 @@ function _fits_tabular_coordinates(data, dimensions)
     return Array{Float64}(permutedims(data, (ndims(data), (1:(ndims(data) - 1))...)))
 end
 
-function _fits_tabular_data(loader, header, key, parsed)
+function _fits_tabular_data(loader, header, key)
+    parsed = _fits_ctype.(String.([get(header, "CTYPE$i$(_fits_key(key))", "") for i in 1:_fits_axis_count(header, key)]))
     specs = _fits_tabular_specs(header, key, parsed)
     isempty(specs) && return ()
     groups = Dict{Tuple{String,Int,Int,String},Vector{_FITSTabularSpec}}()
@@ -183,7 +184,8 @@ function _fits_lookup_spec(header, axis, count, distortion_prefix, parameter_pre
     distortion_keyword = "$distortion_prefix$axis$suffix"
     haskey(header, distortion_keyword) || return nothing
     distortion_type = uppercase(strip(String(header[distortion_keyword])))
-    distortion_type == "TPD" && return nothing
+    # Header-only CPDIS TPD and SIP records are parsed by `_parse_fits_wcs`; D2IMDIS supports only LOOKUP.
+    distortion_prefix == "CPDIS" && distortion_type in ("TPD", "SIP") && return nothing
     distortion_type == "LOOKUP" || throw(ArgumentError("unsupported Paper IV distortion type $(repr(header[distortion_keyword])) in $distortion_keyword"))
     error_keyword = "$error_prefix$axis$suffix"
     error_estimate = _fits_number(get(header, error_keyword, 0.0), error_keyword)
@@ -443,7 +445,8 @@ function _fits_projection(code, header, latitude_axis, suffix)
     code == "AIR" && return AiryProjection(parameter(1, 90.0))
     if code == "ZPN"
         final_index = maximum((index for index in 0:30 if haskey(header, "PV$(latitude_axis)_$(index)$suffix")); init=1)
-        coefficients = ntuple(index -> parameter(index - 1, index == 2 ? 1.0 : 0.0), final_index + 1)
+        # WCSLIB defaults every ZPN coefficient to zero and rejects degenerate polynomials.
+        coefficients = ntuple(index -> parameter(index - 1, 0.0), final_index + 1)
         return ZenithalPolynomial(coefficients)
     end
     code == "CAR" && return PlateCarreeProjection()
@@ -577,6 +580,7 @@ function _fits_sip_record_axis(header, axis, count, suffix, minerr)
     for keyword in keys(header)
         startswith(keyword, dotted_prefix) || continue
         field = keyword[(length(dotted_prefix) + 1):end]
+        # Like WCSLIB's sipset, reject DOCORR: SIP is always an additive correction.
         field == "NAXES" || occursin(r"^(AXIS|OFFSET|SCALE)\.[12]$", field) || occursin(r"^SIP\.(FWD|REV)\.[0-9]+_[0-9]+$", field) || throw(ArgumentError("unrecognized SIP parameter $keyword"))
     end
     forward = _fits_sip_record_terms(header, prefix, "FWD")
@@ -646,13 +650,14 @@ function _fits_tpv_models(header, count, suffix, longitude_axis, latitude_axis)
     return ntuple(axis -> axis == longitude_axis ? xmodel : axis == latitude_axis ? ymodel : nothing, count)
 end
 
+# Returns the projection code and whether SCAMP PV distortion terms must be ignored.
 function _fits_projection_code(header, parsed, longitude_axis, latitude_axis, suffix)
     code = parsed[longitude_axis][3]
-    code == "TAN" || return code
-    for axis in (longitude_axis, latitude_axis), parameter in 5:59
-        haskey(header, "PV$(axis)_$(parameter)$suffix") && return "TPV"
-    end
-    return code
+    code == "TAN" || return code, false
+    any(haskey(header, "PV$(axis)_$(parameter)$suffix") for axis in (longitude_axis, latitude_axis) for parameter in 5:59) || return code, false
+    # Like astropy (Shupe et al. 2012, Sec. 7): -TAN-SIP prefers SIP over SCAMP PV terms; plain -TAN means TPV.
+    parsed[longitude_axis][4] == "-SIP" && parsed[latitude_axis][4] == "-SIP" && return code, true
+    return "TPV", false
 end
 
 function _fits_sip_polynomial(header, prefix, suffix)
@@ -711,10 +716,12 @@ function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_
             keyword = "PC$(i)_$(j)$suffix"
             haskey(header, keyword) && (pc[i, j] = _fits_number(header[keyword], keyword))
         end
-    else
-        i, j = longitude_axis == 0 ? (1, 2) : (longitude_axis, latitude_axis)
+    elseif longitude_axis != 0
+        # Like WCSLIB, CROTA applies only to a celestial pair and uses the latitude axis's value.
+        i, j = longitude_axis, latitude_axis
         crota = "CROTA$j$suffix"
-        if count >= 2 && haskey(header, crota)
+        if haskey(header, crota)
+            iszero(cdelt[i]) && throw(ArgumentError("FITS CROTA$j$suffix gives a singular transformation matrix because CDELT$i$suffix is zero"))
             angle = deg2rad(_fits_number(header[crota], crota))
             cosine, sine = cos(angle), sin(angle)
             pc[i, i] = pc[j, j] = cosine
@@ -764,7 +771,9 @@ end
 
 function _fits_time_scale(unit, keyword)
     normalized = lowercase(strip(unit))
-    factors = Dict("" => 1.0, "s" => 1.0, "sec" => 1.0, "min" => 60.0, "h" => 3600.0, "hr" => 3600.0, "d" => 86400.0, "day" => 86400.0, "ms" => 1e-3, "us" => 1e-6, "ns" => 1e-9)
+    # "a" and "cy" are the Julian year and century of the FITS time standard, as in WCSLIB.
+    factors = Dict("" => 1.0, "s" => 1.0, "sec" => 1.0, "min" => 60.0, "h" => 3600.0, "hr" => 3600.0, "d" => 86400.0, "day" => 86400.0,
+        "a" => 31557600.0, "cy" => 3155760000.0, "ms" => 1e-3, "us" => 1e-6, "ns" => 1e-9)
     haskey(factors, normalized) || throw(ArgumentError("unsupported time $keyword=$(repr(unit))"))
     return factors[normalized]
 end
@@ -1012,7 +1021,8 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     celestial_offset = false
     latpole = _fits_number(get(header, "LATPOLE$suffix", 90.0), "LATPOLE$suffix")
     if longitude_axis != 0
-        lon_code = _fits_projection_code(header, parsed, longitude_axis, latitude_axis, suffix)
+        lon_code, ignore_scamp_pv = _fits_projection_code(header, parsed, longitude_axis, latitude_axis, suffix)
+        ignore_scamp_pv && @warn "Ignoring SCAMP PVi_m distortion keywords on the celestial axes because CTYPE declares SIP"
         lat_code = parsed[latitude_axis][3]
         lon_code == "TPV" && lat_code == "TAN" && (lat_code = lon_code)
         isempty(lon_code) && throw(ArgumentError("FITS celestial CTYPE$(longitude_axis) has no projection code"))
@@ -1021,7 +1031,7 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
         if projection_code != "TAB"
             projection = _fits_projection(projection_code, header, latitude_axis, suffix)
             default_native = native_fiducial(projection)
-            use_reference_pv = projection_code != "TPV"
+            use_reference_pv = projection_code != "TPV" && !ignore_scamp_pv
             celestial_offset = use_reference_pv && !iszero(_fits_number(get(header, "PV$(longitude_axis)_0$suffix", 0.0), "PV$(longitude_axis)_0$suffix"))
             native_reference = use_reference_pv ? (
                 _fits_number(get(header, "PV$(longitude_axis)_1$suffix", default_native[1]), "PV$(longitude_axis)_1$suffix"),
@@ -1117,17 +1127,71 @@ function _fits_malformed_error(error, key)
     return ArgumentError("FITS WCS key $(repr(key)) is malformed: $(sprint(showerror, error))")
 end
 
-"""Parse every primary and alternate FITS WCS representation in `source`."""
-function find_all_fits_wcs(source::AbstractDict; preserve_units::Bool=false, minerr::Real=0.0)
-    header = _fits_header(source)
+function _find_all_fits_wcs(parse, header)
     result = Dict{Char,WCS}()
     for key in _fits_alternate_keys(header)
         try
-            result[key] = _parse_fits_wcs(header; key, preserve_units, minerr)
+            result[key] = parse(key)
         catch error
             error isa InterruptException && rethrow()
             throw(_fits_malformed_error(error, key))
         end
     end
     return result
+end
+
+"""Parse every primary and alternate FITS WCS representation in `source`."""
+function find_all_fits_wcs(source::AbstractDict; preserve_units::Bool=false, minerr::Real=0.0)
+    header = _fits_header(source)
+    return _find_all_fits_wcs(key -> _parse_fits_wcs(header; key, preserve_units, minerr), header)
+end
+
+function _fits_record_card(value)
+    value isa AbstractString || return nothing
+    parts = split(String(value), ':'; limit=2)
+    length(parts) == 2 || return nothing
+    name, raw = uppercase(strip(parts[1])), strip(parts[2])
+    integer = tryparse(Int, raw)
+    integer === nothing || return name, integer
+    parsed = tryparse(Float64, raw)
+    return name, parsed === nothing ? raw : parsed
+end
+
+# Container adapters pass `(keyword, value)` cards; Paper IV record-valued cards such as
+# `DP1 = 'AXIS.1: 1'` repeat a keyword, so expand them to `DP1.AXIS.1` before they collide.
+function _fits_card_dictionary(cards)
+    result = Dict{String,Any}()
+    for (raw_key, value) in cards
+        key = uppercase(strip(String(raw_key)))
+        result[key] = value
+        parsed = _fits_record_card(value)
+        parsed === nothing && continue
+        name, parsed_value = parsed
+        if name in ("EXTVER", "NAXES", "DOCORR") || any(prefix -> startswith(name, prefix), ("AXIS.", "OFFSET.", "SCALE.", "TPD.", "SIP.", "AUX."))
+            result["$key.$name"] = parsed_value
+        end
+    end
+    return result
+end
+
+"""Return the unique `item` from `item => header` candidates whose header matches `EXTNAME`, `EXTVER`, and `EXTLEVEL`."""
+function _fits_find_extension(candidates, extname, extver, extlev=1)
+    target = uppercase(strip(String(extname)))
+    matches = [item for (item, header) in candidates if haskey(header, "EXTNAME") && uppercase(strip(String(header["EXTNAME"]))) == target &&
+        Int(get(header, "EXTVER", 1)) == extver && Int(get(header, "EXTLEVEL", 1)) == extlev]
+    isempty(matches) && throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev was not found"))
+    length(matches) == 1 || throw(ArgumentError("FITS WCS extension $(repr(extname)) with EXTVER=$extver and EXTLEVEL=$extlev is ambiguous ($(length(matches)) matching HDUs)"))
+    return only(matches)
+end
+
+# Construction-time loaders supplied by container extensions: `image(extname, extver)` returns
+# `(data, header)` and `column(extname, extver, extlev, name)` returns one table column.
+function _parse_linked_fits_wcs(image, column, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
+    lookup = _fits_lookup_data(header, key, minerr) do spec
+        data, table_header = image(spec.extname, spec.extver)
+        data isa AbstractArray || throw(ArgumentError("FITS WCS lookup extension $(repr(spec.extname)) must contain an image"))
+        _fits_lookup_table(data, _fits_header(table_header), spec.axes, spec.naxis)
+    end
+    tabular = _fits_tabular_data(column, header, key)
+    return _parse_fits_wcs(header; key, preserve_units, minerr, lookup_data=lookup, tabular_data=tabular)
 end

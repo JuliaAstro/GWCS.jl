@@ -23,8 +23,10 @@ import FITSIO
     @test pixel_to_world(parse_fits_wcs(pc_header), 11.0, 22.0) ≈ SVector(104.0, 205.25)
     @test_throws "must not be mixed" parse_fits_wcs(merge(pc_header, Dict("CD1_1" => 1.0)))
 
+    # Like WCSLIB, CROTA applies only to a celestial longitude/latitude pair.
     crota_header = merge(linear_header, Dict("CDELT1" => 1.0, "CDELT2" => 1.0, "CROTA2" => 90.0))
-    @test pixel_to_world(parse_fits_wcs(crota_header), 11.0, 20.0) ≈ SVector(100.0, 201.0) atol=1e-14
+    @test pixel_to_world(parse_fits_wcs(crota_header), 11.0, 20.0) == SVector(101.0, 200.0)
+    @test_throws "singular transformation matrix because CDELT1 is zero" parse_fits_wcs(Dict("NAXIS" => 2, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CDELT1" => 0.0, "CROTA2" => 10.0))
     reordered_crota_header = Dict(
         "NAXIS" => 3, "CTYPE1" => "FREQ", "CTYPE2" => "DEC--CAR", "CTYPE3" => "RA---CAR",
         "CRPIX1" => 1.0, "CRPIX2" => 1.0, "CRPIX3" => 1.0, "CRVAL1" => 10.0, "CRVAL2" => 20.0, "CRVAL3" => 30.0,
@@ -141,6 +143,11 @@ import FITSIO
     @test pixel_to_world(parse_fits_wcs(time_header; preserve_units=true), 2.0) == SVector(1.5)
     @test world_axis_units(time) == ("s",)
     @test world_axis_units(parse_fits_wcs(time_header; preserve_units=true)) == ("d",)
+    # Julian year and century use WCSLIB's factors; CUNITi takes precedence over TIMEUNIT.
+    @test pixel_to_world(parse_fits_wcs(merge(time_header, Dict("TIMEUNIT" => "a"))), 2.0) == SVector(1.5 * 31557600.0)
+    @test pixel_to_world(parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "cy"))), 2.0) == SVector(1.5 * 3155760000.0)
+    @test world_axis_units(parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "cy")); preserve_units=true)) == ("cy",)
+    @test_throws "unsupported time CUNIT1" parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "fortnight")))
     @test time_metadata.reference_epoch == 59000.25
     @test time_metadata.time_scale == "UTC"
     @test time_metadata.reference_position == "TOPOCENTER"
@@ -270,6 +277,10 @@ import FITSIO
     lookup_primary = FITSFiles.HDU(zeros(4, 4), lookup_cards)
     lookup_extension = FITSFiles.HDU(ones(1, 1), FITSFiles.Card[FITSFiles.Card("EXTNAME", "D2IMARR"), FITSFiles.Card("EXTVER", 1), FITSFiles.Card("CRPIX1", 0.0), FITSFiles.Card("CRPIX2", 0.0)])
     fitsfiles_lookup = parse_fits_wcs([lookup_primary, lookup_extension], 1)
+    for distortion in ("TPD", "SIP")
+        unsupported_cards = FITSFiles.Card[card.key == "D2IMDIS1" ? FITSFiles.Card("D2IMDIS1", distortion) : card for card in lookup_cards]
+        @test_throws "unsupported Paper IV distortion type \"$distortion\" in D2IMDIS1" parse_fits_wcs([FITSFiles.HDU(zeros(4, 4), unsupported_cards), lookup_extension], 1)
+    end
     fitsfiles_plain = parse_fits_wcs(merge(tan_header, Dict("CRPIX1" => 2.0, "CRPIX2" => 2.0, "CRVAL1" => 30.0, "CRVAL2" => 10.0, "CDELT1" => -0.1, "CDELT2" => 0.1)))
     @test pixel_to_world(fitsfiles_lookup, 2.0, 2.0) ≈ pixel_to_world(fitsfiles_plain, 3.0, 2.0) atol=1e-12
     lookup_1d_cards = FITSFiles.Card[card for card in lookup_cards if card.key != "D2IM1" || card.value != "NAXES: 2"]
@@ -301,6 +312,20 @@ import FITSIO
     @test pixel_to_world(parse_fits_wcs([padded_tab_primary, tab_extension], 1), 2.5) == SVector(3.0e10)
     @test pixel_to_world(fitsfiles_tab, 2.5) == SVector(3.0e10)
     @test world_to_pixel(fitsfiles_tab, 3.0e10) == SVector(2.5)
+
+    # Repeated index values define no interval, and mixed-dimensional tables must stay allocation-free.
+    repeated_index = FITSTabularTable((1,), reshape([1.0, 4.0, 9.0, 16.0], 1, :), ([1.0, 2.0, 2.0, 3.0],))
+    decreasing_index = FITSTabularTable((1,), reshape([1.0, 4.0, 9.0, 16.0], 1, :), ([3.0, 2.0, 2.0, 1.0],))
+    @test FITSTabularTransform(Val(1), (repeated_index,), (1.0,))(SVector(2.0)) == SVector(4.0)
+    @test FITSTabularTransform(Val(1), (repeated_index,), (1.0,))(SVector(2.5)) == SVector(12.5)
+    @test FITSTabularTransform(Val(1), (decreasing_index,), (1.0,))(SVector(2.0)) == SVector(4.0)
+    coupled_coordinates = [axis == 1 ? i + 0.1j : j + 0.1i for axis in 1:2, i in 1:5, j in 1:6]
+    coupled_table = FITSTabularTable((2, 3), coupled_coordinates, (collect(1.0:5.0), collect(1.0:6.0)))
+    mixed_tables = FITSTabularTransform(Val(3), (repeated_index, coupled_table), (1.0, 1.0, 1.0))
+    @test mixed_tables(SVector(2.5, 2.0, 3.0)) ≈ SVector(12.5, 2.3, 3.2)
+    allocated_tables(transform, value) = @allocated transform(value)
+    allocated_tables(mixed_tables, SVector(2.5, 2.0, 3.0))
+    @test allocated_tables(mixed_tables, SVector(2.5, 2.0, 3.0)) == 0
 
     mktempdir(@__DIR__) do directory
         read_container_wcs(path; key=' ') = (
@@ -380,6 +405,33 @@ import FITSIO
             @test pixel_to_world(wcs, 1.5, 1.5) == SVector(16.5, 16.5)
             @test world_to_pixel(wcs, 16.5, 16.5; initial_guess=(1.5, 1.5)) ≈ SVector(1.5, 1.5) atol=1e-10
         end
+
+        # FITSFiles parses short real literals such as 150.1 as Float32; the adapter must recover the decimal value.
+        short_real_path = joinpath(directory, "short_reals.fits")
+        FITSIO.FITS(short_real_path, "w") do file
+            FITSIO.write(file, zeros(2, 2); header=FITSIO.FITSHeader(["CTYPE1", "CTYPE2", "CRPIX1", "CRPIX2", "CRVAL1", "CRVAL2", "CD1_1", "CD2_2"],
+                Any["RA---TAN", "DEC--TAN", 50.5, 40.5, 150.1, 2.2, -1.1e-4, 1.05e-4], fill("", 8)))
+        end
+        short_real_header = Dict("NAXIS" => 2, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CRPIX1" => 50.5, "CRPIX2" => 40.5, "CRVAL1" => 150.1, "CRVAL2" => 2.2, "CD1_1" => -1.1e-4, "CD2_2" => 1.05e-4)
+        for wcs in read_container_wcs(short_real_path)
+            @test pixel_to_world(wcs, 10.0, 20.0) ≈ pixel_to_world(parse_fits_wcs(short_real_header), 10.0, 20.0) atol=1e-12
+        end
+
+        # Header-only CPDIS SIP records must not be treated as linked lookup tables.
+        sip_path = joinpath(directory, "sip_records.fits")
+        FITSIO.FITS(sip_path, "w") do file
+            FITSIO.write(file, zeros(2, 2); header=FITSIO.FITSHeader(sip_card_keys[2:11], sip_card_values[2:11], fill("", 10)))
+            for (keyword, value) in zip(sip_card_keys[12:end], sip_card_values[12:end])
+                FITSIO.Libcfitsio.fits_write_record(getfield(file[1], :fitsfile), rpad(keyword, 8) * "= '$(value)'")
+            end
+        end
+        for wcs in read_container_wcs(sip_path)
+            @test pixel_to_world(wcs, 2.0, 3.0) ≈ sip_expected atol=5e-14
+        end
+        @test pixel_to_world(find_all_fits_wcs(FITSFiles.fits(sip_path), 1)[' '], 2.0, 3.0) ≈ sip_expected atol=5e-14
+        FITSIO.FITS(sip_path) do file
+            @test pixel_to_world(find_all_fits_wcs(file[1])[' '], 2.0, 3.0) ≈ sip_expected atol=5e-14
+        end
     end
 
     alternate_header = merge(linear_header, Dict(
@@ -410,6 +462,13 @@ import FITSIO
         "B_ORDER" => 2, "B_2_0" => 1e-6, "B_1_1" => 3e-6,
     ))
     sip = parse_fits_wcs(sip_header)
+    # AP/BP map CRVAL exactly to CRPIX, the TAN native pole, where the chain-rule Jacobian is NaN.
+    exact_reference_sip = Dict(
+        "NAXIS" => 2, "CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "CRPIX1" => 512.0, "CRPIX2" => 512.0,
+        "CRVAL1" => 10.0, "CRVAL2" => 20.0, "CDELT1" => 1.0, "CDELT2" => 1.0, "A_ORDER" => 2, "B_ORDER" => 2, "A_2_0" => 0.001, "B_0_2" => 0.002,
+        "AP_ORDER" => 2, "BP_ORDER" => 2, "AP_2_0" => -0.001, "BP_0_2" => -0.002,
+    )
+    @test world_to_pixel(parse_fits_wcs(exact_reference_sip), 10.0, 20.0) ≈ SVector(512.0, 512.0) atol=1e-10
     sip_world = pixel_to_world(sip, 400.0, 300.0)
     @test sip_world ≈ SVector(83.8533100335119, -5.449965264308421) atol=2e-11
     @test world_to_pixel(sip, sip_world; initial_guess=SVector(400.0, 300.0)) ≈ SVector(400.0, 300.0) atol=1e-8
@@ -530,6 +589,9 @@ import FITSIO
     tpv_world = pixel_to_world(tpv, 513.0, 514.0)
     @test tpv_world ≈ SVector(83.82181819590602, -5.390566662335204) atol=2e-11
     @test world_to_pixel(tpv, tpv_world; initial_guess=(513.0, 514.0)) ≈ SVector(513.0, 514.0) atol=1e-8
+    # This TPV folds at pixel x = 462; like WCSLIB, the default start is the undistorted solution, which selects
+    # the branch containing the original pixel rather than the mirror image reached from pixel (1, 1).
+    @test world_to_pixel(tpv, pixel_to_world(tpv, 632.0, 407.5)) ≈ SVector(632.0, 407.5) atol=1e-8
 
     empty_tpv = parse_fits_wcs(filter(pair -> !startswith(pair.first, "PV"), tpv_header))
     @test pixel_to_world(empty_tpv, 513.0, 514.0) ≈ SVector(83.8221, -5.3911) atol=1e-12
@@ -688,6 +750,10 @@ import FITSIO
         @test world_to_pixel(quadratic_zpn, world) ≈ pixel atol=5e-11 rtol=5e-13
     end
     @test_throws DomainError pixel_to_world(quadratic_zpn, 72.0, 0.0)
+    # WCSLIB defaults ZPN coefficients to zero and rejects these degenerate polynomials.
+    bare_zpn_header = filter(pair -> !startswith(pair.first, "PV2_"), quadratic_zpn_header)
+    @test_throws "must have a nonzero coefficient" parse_fits_wcs(bare_zpn_header)
+    @test_throws "must have a positive linear coefficient" parse_fits_wcs(merge(bare_zpn_header, Dict("PV2_3" => 1e-3)))
     skipped_tpd = parse_fits_wcs(merge(sequent_tpd_header, Dict("CQERR1" => 0.01, "CQERR2" => 0.01)); minerr=0.02)
     @test pixel_to_world(skipped_tpd, 12.3, -3.4) ≈ SVector(5.1036, -7.917) atol=2e-15
 
@@ -760,12 +826,17 @@ import FITSIO
     @test pixel_to_world(parse_fits_wcs(dss_with_cd), 200.0, 200.0) ≈ last(first(legacy_references)) atol=2e-12
     @test_throws "requires both WAT1_n and WAT2_n" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "RA---TNX", "CTYPE2" => "DEC--TNX", "WAT1_001" => "wtype=tnx")))
 
-    scamp_header = merge(sip_header, Dict("CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "PV1_1" => 1.0, "PV1_5" => 1e-6, "PV2_1" => 1.0))
+    # Like astropy, -TAN-SIP with SCAMP PV terms uses SIP and ignores the celestial PV keywords,
+    # while plain -TAN with SCAMP PV terms is TPV and ignores SIP.
+    scamp_header = merge(sip_header, Dict("PV1_1" => 1.0, "PV1_5" => 1e-6, "PV2_1" => 1.0))
     original_scamp_header = copy(scamp_header)
-    scamp = parse_fits_wcs(scamp_header)
-    scamp_without_sip = parse_fits_wcs(filter(pair -> !startswith(pair.first, "A_") && !startswith(pair.first, "B_"), scamp_header))
-    @test pixel_to_world(scamp, 500.0, 500.0) ≈ pixel_to_world(scamp_without_sip, 500.0, 500.0) atol=1e-13
+    scamp = @test_logs (:warn, r"Ignoring SCAMP PVi_m") parse_fits_wcs(scamp_header)
+    @test pixel_to_world(scamp, 500.0, 500.0) ≈ pixel_to_world(sip, 500.0, 500.0) atol=1e-13
     @test scamp_header == original_scamp_header
+    pre2012_scamp = merge(scamp_header, Dict("CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN"))
+    pre2012_without_sip = filter(pair -> !startswith(pair.first, "A_") && !startswith(pair.first, "B_"), pre2012_scamp)
+    @test pixel_to_world(parse_fits_wcs(pre2012_scamp), 500.0, 500.0) ≈ pixel_to_world(parse_fits_wcs(pre2012_without_sip), 500.0, 500.0) atol=1e-13
+    @test pixel_to_world(parse_fits_wcs(pre2012_scamp), 500.0, 500.0) != pixel_to_world(sip, 500.0, 500.0)
 
     projection_references = (
         "TAN" => (29.89839490759596, 10.199983486206756), "SIN" => (29.89839413334517, 10.19998500905114),
@@ -790,11 +861,34 @@ import FITSIO
             "CDELT1" => -0.1, "CDELT2" => 0.1,
         )
         code == "CEA" && (header["PV2_1"] = 0.75)
+        code == "ZPN" && (header["PV2_1"] = 1.0)
         code in ("COP", "COD", "COE", "COO", "BON") && (header["PV2_1"] = 45.0)
         world = pixel_to_world(parse_fits_wcs(header), 11.0, 22.0)
         tolerance = code == "CSC" ? 1e-8 : 5e-12
         @test world ≈ SVector(expected) atol=tolerance
     end
+
+    # WCSLIB 8.10 references; with CRPIX = 0 and CDELT = 1 the intermediate coordinates equal the pixel coordinates.
+    unit_projection_header(code, crval, extra=Dict()) = merge(Dict("NAXIS" => 2, "CTYPE1" => "RA---$code", "CTYPE2" => "DEC--$code",
+        "CRPIX1" => 0.0, "CRPIX2" => 0.0, "CRVAL1" => crval[1], "CRVAL2" => crval[2], "CDELT1" => 1.0, "CDELT2" => 1.0), extra)
+    southern_references = (
+        "COP" => (40.17098347253864, -19.978900355365333), "COD" => (40.19477387030446, -19.43260045551106),
+        "COE" => (40.22339435934347, -19.347847108380996), "COO" => (40.16487877374618, -19.544565363066575),
+        "BON" => (40.5841787531637, -18.958216377056456),
+    )
+    for (code, expected) in southern_references
+        parameters = code == "BON" ? Dict("PV2_1" => -45.0) : Dict("PV2_1" => -45.0, "PV2_2" => 10.0)
+        southern = parse_fits_wcs(unit_projection_header(code, (30.0, -40.0), parameters))
+        @test pixel_to_world(southern, 10.0, 20.0) ≈ SVector(expected) atol=1e-12
+        @test world_to_pixel(southern, expected...) ≈ SVector(10.0, 20.0) atol=1e-10
+    end
+    # Points beyond the projection boundary have no sky coordinates (WCSLIB status 1), not wrapped duplicates.
+    for (code, parameters, pixel) in (("CAR", Dict(), (-189.0, 0.0)), ("MOL", Dict(), (170.0, 60.0)), ("SFL", Dict(), (170.0, 60.0)),
+            ("HPX", Dict(), (-170.0, 80.0)), ("XPH", Dict(), (99.0, -138.0)), ("COD", Dict("PV2_1" => 45.0, "PV2_2" => 25.0), (195.0, -156.0)))
+        @test_throws DomainError pixel_to_world(parse_fits_wcs(unit_projection_header(code, (0.0, 0.0), parameters)), pixel...)
+    end
+    # Polyconic intermediate y exceeds 90 degrees away from the central meridian.
+    @test pixel_to_world(parse_fits_wcs(unit_projection_header("PCO", (0.0, 0.0))), 67.0, -132.0) ≈ SVector(172.10045640795752, -39.05258488360962) atol=1e-11
 end
 
 @testset "Additional shared spherical projections" begin

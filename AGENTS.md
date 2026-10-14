@@ -78,7 +78,7 @@ Labels are dispatch metadata, not numeric coordinates. Keep `AbstractLabelMapper
 - Use `register_transform!` for external `AbstractTransform` metadata support.
 - Do not force label mappers into the transform-registration API.
 - Preserve ASDF.jl as a weak dependency and adapt its tagged or lazy values through the package extension.
-- Delegate FITS parsing to FITSWCS.jl and container I/O to FITSIO.jl or ASDF.jl. Do not reimplement those formats here.
+- GWCS.jl owns FITS WCS keyword interpretation (`src/fits.jl`); delegate FITS container I/O to FITSIO.jl or FITSFiles.jl and ASDF container I/O to ASDF.jl. Do not reimplement those container formats here.
 - When behavior is intended to match Python GWCS, Astropy, NumPy, FITSWCS.jl, or WCSLIB, verify the exact convention rather than substituting a similar Julia API.
 - Keep rich units and high-level coordinate objects in optional extensions unless the numeric core requires them.
 

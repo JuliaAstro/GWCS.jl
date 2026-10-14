@@ -293,7 +293,16 @@ inverse_transform(transform::NativeToIntermediate) = IntermediateToNative(transf
 @inline function (transform::IntermediateToNative)(coords::StaticVector{2})
     T = _evaluation_type(eltype(coords))
     phi, theta = _intermediate_to_native(transform.projection, T(coords[1]), T(coords[2]))
-    return SVector(rad2deg(phi), rad2deg(theta))
+    return _native_bounds_check(SVector(rad2deg(phi), rad2deg(theta)), coords)
+end
+
+# Like WCSLIB's prjbchk, reject native coordinates outside phi in [-180, 180] and theta in
+# [-90, 90]; otherwise points beyond a projection's boundary map to wrapped or invalid sky positions.
+@inline function _native_bounds_check(native, coords)
+    phi, theta = native
+    tolerance = max(oftype(phi, 1e-11), 8 * eps(oftype(phi, 180)))
+    abs(phi) <= 180 + tolerance && abs(theta) <= 90 + tolerance || throw(DomainError(coords, "intermediate coordinate is outside the projection domain"))
+    return SVector(clamp(phi, -oftype(phi, 180), oftype(phi, 180)), clamp(theta, -oftype(theta, 90), oftype(theta, 90)))
 end
 
 @inline function (transform::NativeToIntermediate)(coords::StaticVector{2})
@@ -458,7 +467,7 @@ function _intermediate_to_native(::PolyconicProjection, x, y)
     tolerance = _projection_tolerance(T)
     abs(y) <= tolerance && return deg2rad(x), zero(T)
     abs(abs(y) - T(90)) <= tolerance && return zero(T), copysign(T(pi / 2), y)
-    abs(y) < T(90) || throw(DomainError(SVector(x, y), "PCO intermediate coordinate is outside the projection domain"))
+    # |y| > 90 is valid away from the central meridian; the native bounds check rejects invalid points.
     abs(x) <= tolerance && return zero(T), deg2rad(y)
     positive, negative = T(y), zero(T)
     x_squared = T(x)^2
@@ -616,7 +625,8 @@ end
 @inline function _conic_radius_angle(x, y, y0, sigma)
     delta_y = y0 - y
     radius = copysign(hypot(x, delta_y), sigma)
-    return radius, atan(x, delta_y)
+    # WCSLIB evaluates atan2(x/r, dy/r) with the signed radius, flipping the angle for southern cones.
+    return radius, signbit(sigma) ? atan(-x, -delta_y) : atan(x, delta_y)
 end
 
 function _intermediate_to_native(projection::ConicPerspective, x, y)
@@ -735,12 +745,11 @@ function _intermediate_to_native(projection::BonneProjection, x, y)
     iszero(theta1) && return _intermediate_to_native(SansonFlamsteedProjection(), x, y)
     theta1_radians = deg2rad(theta1)
     y0 = rad2deg(cos(theta1_radians) / sin(theta1_radians) + theta1_radians)
-    delta_y = y0 - y
-    radius = copysign(hypot(x, delta_y), theta1)
+    radius, angle = _conic_radius_angle(T(x), T(y), y0, theta1)
     theta = deg2rad(y0 - radius)
     abs(theta) <= T(pi / 2) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "BON intermediate coordinate is outside the projection domain"))
     cosine = cos(theta)
-    phi = abs(cosine) <= _projection_tolerance(T) ? zero(T) : atan(x, delta_y) * deg2rad(radius) / cosine
+    phi = abs(cosine) <= _projection_tolerance(T) ? zero(T) : angle * deg2rad(radius) / cosine
     return phi, clamp(theta, T(-pi / 2), T(pi / 2))
 end
 
@@ -984,6 +993,8 @@ function _intermediate_to_native(projection::HEALPixProjection, x, y)
         facet = floor(Int, x / step) + (projection.H % 2)
         difference += isodd(facet) ? -step : step
     end
+    # As in WCSLIB's hpxx2s, points between the polar facet triangles are not on the sphere.
+    abs(difference) < (step + T(1e-12)) * sigma || iszero(difference) || throw(DomainError(SVector(x, y), "HPX intermediate coordinate is outside the projection domain"))
     phi = iszero(sigma) ? zero(T) : deg2rad(x + difference * (inv(sigma) - 1))
     return phi, theta
 end
@@ -1026,9 +1037,13 @@ function _intermediate_to_native(::HEALPixPolarProjection, x, y)
     else
         first, second, base = -scaled_x + scaled_y, -scaled_x - scaled_y, T(90)
     end
+    facet_offset = first
     first += 45
     second += 90
     abs_second = abs(second)
+    # Facet checks from WCSLIB's xphx2s; points outside the facets are not on the sphere.
+    outside = abs_second <= 45 ? abs(facet_offset) > 45 + T(1e-12) : second < -45 && abs(facet_offset) > second + 90 + T(1e-12)
+    outside && throw(DomainError(SVector(x, y), "XPH intermediate coordinate is outside the projection domain"))
     if abs_second <= 45
         return deg2rad(base + first), asin(clamp(second / T(67.5), -one(T), one(T)))
     elseif abs_second <= 90 + _projection_tolerance(T)
