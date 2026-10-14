@@ -211,7 +211,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P3** Preserve coordinate-error and phase metadata including `CRDERi`, `CSYERi`, `CZPHSi`, and `CPERIi`. Requires frame metadata interfaces for coordinate uncertainty and phase conventions.
 - [ ] **P3** Support Paper IV's arbitrary-power general `Polynomial` distortion when TPD normalization is not exact.
 - [ ] **P3** Support sequent `CQDIS=LOOKUP` distortions and construction-time resolution of their lookup arrays.
-- [ ] **P1** Add an explicit FITS compatibility/repair policy for legacy aliases and conventions, including `NCP`, `GLS`, AIPS spectral forms, `VELREF`, `EPOCH`, `RADECSYS`, and reordered celestial `CROTA`; do not silently repair malformed headers.
+- [x] **P1** Add an explicit FITS compatibility/repair policy for legacy aliases and conventions, including `NCP`, `GLS`, AIPS spectral forms, `VELREF`, `EPOCH`, `RADECSYS`, and reordered celestial `CROTA`; do not silently repair malformed headers.
+- [ ] **P3** Add an opt-in equivalent of WCSLIB's `cylfix` for cylindrical all-sky maps whose pixels extend beyond native longitude ±180°. Astropy does not apply it by default.
 - [ ] **P3** Add per-axis invalid-coordinate status or masks together with batch evaluation, so independent valid axes survive failures in another coordinate group. Requires the batch result and error/mask API to be designed first.
 - [x] **P2** Expand differential coverage at projection domains, longitude wrapping, cube/facet boundaries, strong projection parameters (including ZPN's first monotonic radial interval), and strong SIP/TPD inverse cases.
 - [x] **P3** Expand real-container tests for paired/transposed lookup arrays, alternate-key and `EXTVER` isolation, duplicate matching extensions, and coupled multidimensional `-TAB` tables.

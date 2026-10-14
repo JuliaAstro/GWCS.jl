@@ -433,6 +433,141 @@ end
 
 _fits_normalize_legacy(header, suffix) = isempty(suffix) ? _fits_normalize_wat(_fits_normalize_dss(header)) : header
 
+const _FITS_LEGACY_MODES = (:warn, :quiet, :error)
+
+function _fits_report_repairs(repairs, key, legacy)
+    isempty(repairs) && return nothing
+    message = "FITS WCS key $(repr(key)) uses legacy conventions:\n" * join(("  - " * repair for repair in repairs), "\n")
+    legacy == :error && throw(ArgumentError(message * "\nPass legacy=:warn or legacy=:quiet to repair them as WCSLIB and astropy do."))
+    legacy == :warn && @warn message
+    return nothing
+end
+
+# Copy-on-write header edits; `rename!` moves a legacy keyword to its standard spelling.
+mutable struct _FITSHeaderEdit
+    header::Dict{String,Any}
+    copied::Bool
+end
+
+function _fits_edit!(edit::_FITSHeaderEdit, keyword, value)
+    edit.copied || (edit.header = copy(edit.header); edit.copied = true)
+    edit.header[keyword] = value
+end
+
+function _fits_rename!(edit::_FITSHeaderEdit, repairs, legacy, standard; conflict=:error, value=edit.header[legacy], note="")
+    if haskey(edit.header, standard)
+        edit.header[standard] == value || conflict != :error || throw(ArgumentError("FITS keywords $legacy and $standard give conflicting values"))
+        return nothing
+    end
+    _fits_edit!(edit, standard, value)
+    push!(repairs, "$legacy read as $standard$note")
+end
+
+const _FITS_DATE_SYNONYMS = ("DATE-REF" => "DATEREF", "MJD-REF" => "MJDREF", "MJD-REFI" => "MJDREFI", "MJD-REFF" => "MJDREFF",
+    "JD-REF" => "JDREF", "JD-REFI" => "JDREFI", "JD-REFF" => "JDREFF")
+
+# Keyword-level legacy forms accepted by WCSLIB's wcspih with all relaxations (astropy's default).
+function _fits_normalize_keywords(header, key, repairs)
+    suffix = _fits_key(key)
+    edit = _FITSHeaderEdit(header, false)
+    for keyword in collect(keys(header))
+        matched = match(r"^(PC|CD)00([1-9])00([1-9])$", keyword)
+        if matched !== nothing
+            isempty(suffix) && _fits_rename!(edit, repairs, keyword, "$(matched[1])$(matched[2])_$(matched[3])")
+            continue
+        end
+        matched = match(Regex("^(PC|CD|PV|PS)0*([1-9][0-9]*)_([0-9]+)$suffix\$"), keyword)
+        matched === nothing && continue
+        standard = "$(matched[1])$(matched[2])_$(parse(Int, matched[3]))$suffix"
+        standard == keyword || _fits_rename!(edit, repairs, keyword, standard)
+    end
+    if isempty(suffix)
+        projp = filter(keyword -> occursin(r"^PROJP[0-9]$", keyword), collect(keys(header)))
+        latitude = nothing
+        for (keyword, value) in header
+            matched = match(r"^CTYPE([1-9][0-9]*)$", keyword)
+            matched !== nothing && value isa AbstractString && _fits_ctype(value)[2] == :latitude && (latitude = parse(Int, matched[1]))
+        end
+        latitude === nothing || foreach(keyword -> _fits_rename!(edit, repairs, keyword, "PV$(latitude)_$(keyword[end])"), projp)
+        haskey(header, "RADECSYS") && _fits_rename!(edit, repairs, "RADECSYS", "RADESYS"; conflict=:ignore)
+    end
+    # Like WCSLIB, the standard keyword wins when both spellings are present.
+    haskey(header, "EPOCH$suffix") && _fits_rename!(edit, repairs, "EPOCH$suffix", "EQUINOX$suffix"; conflict=:ignore)
+    if haskey(header, "VSOURCE$suffix")
+        beta = _fits_number(header["VSOURCE$suffix"], "VSOURCE$suffix") / _FITS_SPEED_OF_LIGHT
+        abs(beta) < 1 || throw(ArgumentError("FITS VSOURCE$suffix must be slower than light"))
+        _fits_rename!(edit, repairs, "VSOURCE$suffix", "ZSOURCE$suffix"; conflict=:ignore, value=(1 + beta) / sqrt(1 - beta^2) - 1, note=" (relativistic Doppler redshift)")
+    end
+    for (legacy, standard) in _FITS_DATE_SYNONYMS
+        haskey(header, legacy) && _fits_rename!(edit, repairs, legacy, standard; conflict=:ignore)
+    end
+    return edit.header
+end
+
+const _FITS_AIPS_FRAMES = ("LSRK", "BARYCENT", "TOPOCENT", "LSRD", "GEOCENTR", "SOURCE", "GALACTOC")
+const _FITS_AIPS_SUFFIX_FRAMES = Dict("LSR" => "LSRK", "HEL" => "BARYCENT", "OBS" => "TOPOCENT")
+
+# AIPS celestial (NCP, GLS) and spectral ({FREQ,VELO,FELO}-{LSR,HEL,OBS}, VELREF) types, translated as WCSLIB's wcsset does.
+function _fits_normalize_aips(header, key, count, repairs)
+    suffix = _fits_key(key)
+    edit = _FITSHeaderEdit(header, false)
+    ctype(axis) = uppercase(strip(String(get(header, "CTYPE$axis$suffix", ""))))
+    kinds = [_fits_ctype(ctype(axis))[2] for axis in 1:count]
+    longitude, latitude = findfirst(==(:longitude), kinds), findfirst(==(:latitude), kinds)
+    if longitude !== nothing && latitude !== nothing
+        lon_text, lat_text = ctype(longitude), ctype(latitude)
+        code = ncodeunits(lon_text) >= 8 && ncodeunits(lat_text) >= 8 ? (lon_text[6:8], lat_text[6:8]) : ("", "")
+        if code == ("NCP", "NCP") || code == ("GLS", "GLS")
+            unit = _fits_unit_translation(String(get(header, "CUNIT$latitude$suffix", "")))
+            reference = _fits_number(get(header, "CRVAL$latitude$suffix", 0.0), "CRVAL$latitude$suffix") * _fits_angle_scale(unit, "CUNIT$latitude$suffix")
+            replacement = first(code) == "NCP" ? "SIN" : "SFL"
+            _fits_edit!(edit, "CTYPE$longitude$suffix", lon_text[1:5] * replacement * lon_text[9:end])
+            _fits_edit!(edit, "CTYPE$latitude$suffix", lat_text[1:5] * replacement * lat_text[9:end])
+            if replacement == "SIN"
+                iszero(reference) && throw(ArgumentError("FITS NCP projection is undefined for a zero reference latitude (CRVAL$latitude$suffix), as in WCSLIB"))
+                _fits_edit!(edit, "PV$(latitude)_1$suffix", 0.0)
+                _fits_edit!(edit, "PV$(latitude)_2$suffix", cosd(reference) / sind(reference))
+                push!(repairs, "NCP projection read as SIN with PV$(latitude)_1$suffix=0 and PV$(latitude)_2$suffix=cot(CRVAL$latitude$suffix)")
+            else
+                # AIPS GLS translates the map to the reference latitude rather than tilting the graticule.
+                _fits_edit!(edit, "PV$(longitude)_0$suffix", 1.0)
+                _fits_edit!(edit, "PV$(longitude)_1$suffix", 0.0)
+                _fits_edit!(edit, "PV$(longitude)_2$suffix", reference)
+                push!(repairs, "GLS projection read as SFL with its fiducial point offset to CRVAL$latitude$suffix")
+            end
+        end
+    end
+    velref_keyword = "VELREF$suffix"
+    velref = haskey(header, velref_keyword) ? _fits_integer(header[velref_keyword], velref_keyword) : 0
+    frame_code, velocity_type = mod(velref, 256), div(velref, 256)
+    frame_code <= length(_FITS_AIPS_FRAMES) || throw(ArgumentError("FITS $velref_keyword=$velref has an invalid AIPS reference frame code $frame_code"))
+    for axis in 1:count
+        text = ctype(axis)
+        ncodeunits(text) >= 4 && text[1:4] in ("FREQ", "VELO", "FELO") || continue
+        code = ncodeunits(text) == 4 ? "" : ncodeunits(text) == 8 && text[5] == '-' ? text[6:8] : continue
+        suffix_frame = get(_FITS_AIPS_SUFFIX_FRAMES, code, nothing)
+        suffix_frame === nothing && !(code in ("", "LOG", "TAB")) && continue
+        frame = frame_code > 0 ? _FITS_AIPS_FRAMES[frame_code] : suffix_frame
+        coordinate = text[1:4]
+        if coordinate == "FELO"
+            code in ("LOG", "TAB") && throw(ArgumentError("FITS CTYPE$axis$suffix=$(repr(text)) combines the AIPS FELO type with $code"))
+            translated = "VOPT-F2W"
+        elseif frame === nothing
+            continue
+        elseif coordinate == "VELO"
+            velocity_type in (0, 1) || throw(ArgumentError("FITS $velref_keyword=$velref has an invalid AIPS velocity type $velocity_type"))
+            translated = (velocity_type == 0 ? "VOPT" : "VRAD") * (code in ("LOG", "TAB") ? "-$code" : "")
+        else
+            translated = suffix_frame === nothing ? text : "FREQ"
+        end
+        translated == text || _fits_edit!(edit, "CTYPE$axis$suffix", translated)
+        specsys = frame !== nothing && !haskey(header, "SPECSYS$suffix")
+        specsys && _fits_edit!(edit, "SPECSYS$suffix", frame)
+        (translated != text || specsys) && push!(repairs, "AIPS spectral CTYPE$axis$suffix=$(repr(text))$(velref == 0 ? "" : " with $velref_keyword=$velref") read as $(repr(translated))$(specsys ? " with SPECSYS$suffix=$(repr(frame))" : "")")
+    end
+    return edit.header
+end
+
 function _fits_projection(code, header, latitude_axis, suffix)
     parameter(index, default) = _fits_number(get(header, "PV$(latitude_axis)_$(index)$suffix", default), "PV$(latitude_axis)_$(index)$suffix")
     code == "TAN" && return GnomonicProjection()
@@ -673,12 +808,14 @@ function _fits_sip_polynomial(header, prefix, suffix)
     return Polynomial2D(coefficients)
 end
 
-function _fits_sip_transform(header, suffix, crpix, count, ctype_suffixes; enabled=true)
+function _fits_sip_transform(header, suffix, crpix, count, ctype_suffixes, repairs; enabled=true)
     enabled || return IdentityTransform{count}()
     has_sip = any(==("-SIP"), ctype_suffixes) || haskey(header, "A_ORDER$suffix") || haskey(header, "B_ORDER$suffix")
     has_sip || return IdentityTransform{count}()
     count >= 2 || throw(ArgumentError("FITS SIP distortion requires at least two pixel axes"))
-    all(value -> value == "-SIP", ctype_suffixes[1:2]) || throw(ArgumentError("FITS SIP must be declared on the first two CTYPE axes"))
+    any(==("-SIP"), ctype_suffixes[3:end]) && throw(ArgumentError("FITS SIP must be declared on the first two CTYPE axes"))
+    # Like astropy, apply SIP coefficients even when CTYPE omits the -SIP suffix.
+    all(==("-SIP"), ctype_suffixes[1:2]) || push!(repairs, "SIP coefficients applied although CTYPE lacks the -SIP suffix")
     a = _fits_sip_polynomial(header, "A", suffix)
     b = _fits_sip_polynomial(header, "B", suffix)
     (a === nothing) == (b === nothing) || throw(ArgumentError("FITS SIP requires both A_ORDER and B_ORDER"))
@@ -703,16 +840,23 @@ _fits_has_matrix(header, prefix, count, suffix) = any(haskey(header, "$prefix$(i
 # Like WCSLIB, PCi_j (with CDELTi) takes precedence when a nonconforming header also has CDi_j.
 _fits_uses_cd(header, count, suffix) = _fits_has_matrix(header, "CD", count, suffix) && !_fits_has_matrix(header, "PC", count, suffix)
 
-function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis)
+function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis, repairs)
     has_pc = _fits_has_matrix(header, "PC", count, suffix)
-    has_pc && _fits_has_matrix(header, "CD", count, suffix) && @warn "FITS header has both PCi_j$suffix and CDi_j$suffix; using PCi_j$suffix and CDELTi$suffix and ignoring CDi_j$suffix, as WCSLIB does"
+    has_pc && _fits_has_matrix(header, "CD", count, suffix) && push!(repairs, "both PCi_j and CDi_j are present; using PCi_j$suffix and CDELTi$suffix and ignoring CDi_j$suffix")
     matrix = zeros(Float64, count, count)
     if _fits_uses_cd(header, count, suffix)
         for i in 1:count, j in 1:count
             keyword = "CD$(i)_$(j)$suffix"
             matrix[i, j] = haskey(header, keyword) ? _fits_number(header[keyword], keyword) : 0.0
         end
-        return matrix
+        # WCSLIB's cdfix (applied by astropy): an axis with no CDi_j terms gets a unit diagonal; CDELTi is ignored with CDi_j.
+        for i in 1:count
+            if all(iszero, view(matrix, i, :)) && all(iszero, view(matrix, :, i))
+                matrix[i, i] = 1.0
+                push!(repairs, "CD$(i)_$(i)$suffix set to 1 because axis $i has no CDi_j terms (CDELT$i$suffix is ignored with CDi_j)")
+            end
+        end
+        return _fits_nonsingular(matrix, "CDi_j$suffix")
     end
     pc = Matrix{Float64}(I, count, count)
     if has_pc
@@ -724,6 +868,9 @@ function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_
         # Like WCSLIB, CROTA applies only to a celestial pair and uses the latitude axis's value.
         i, j = longitude_axis, latitude_axis
         crota = "CROTA$j$suffix"
+        longitude_crota = "CROTA$i$suffix"
+        !haskey(header, crota) && haskey(header, longitude_crota) && !iszero(_fits_number(header[longitude_crota], longitude_crota)) &&
+            push!(repairs, "$longitude_crota on the longitude axis is ignored; only the latitude axis CROTA applies")
         if haskey(header, crota)
             iszero(cdelt[i]) && throw(ArgumentError("FITS CROTA$j$suffix gives a singular transformation matrix because CDELT$i$suffix is zero"))
             angle = deg2rad(_fits_number(header[crota], crota))
@@ -736,50 +883,65 @@ function _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_
     for i in 1:count, j in 1:count
         matrix[i, j] = cdelt[i] * pc[i, j]
     end
+    return _fits_nonsingular(matrix, has_pc ? "PCi_j$suffix and CDELTi$suffix" : "CDELTi$suffix")
+end
+
+function _fits_nonsingular(matrix, description)
+    iszero(det(matrix)) && throw(ArgumentError("FITS linear transformation matrix from $description is singular"))
     return matrix
 end
 
+# WCSLIB's wcsutrn safe translations of non-standard unit tokens; astropy applies the same list by default.
+# The ambiguous D, H, and S (debye, henry, siemens versus day, hour, second) are deliberately absent.
+const _FITS_UNIT_ALIASES = Dict(
+    "Angstroms" => "Angstrom", "angstrom" => "Angstrom", "angstroms" => "Angstrom",
+    "arcmins" => "arcmin", "ARCMIN" => "arcmin", "ARCMINS" => "arcmin", "arcsecs" => "arcsec", "ARCSEC" => "arcsec", "ARCSECS" => "arcsec",
+    "BEAM" => "beam", "Byte" => "byte", "day" => "d", "days" => "d", "DAY" => "d", "DAYS" => "d",
+    "degree" => "deg", "degrees" => "deg", "Deg" => "deg", "Degree" => "deg", "Degrees" => "deg", "DEG" => "deg", "DEGREE" => "deg", "DEGREES" => "deg",
+    "GHZ" => "GHz", "hr" => "h", "HR" => "h", "hz" => "Hz", "HZ" => "Hz", "KHZ" => "kHz", "JY" => "Jy", "KM" => "km",
+    "metre" => "m", "metres" => "m", "meter" => "m", "meters" => "m", "M" => "m", "METRE" => "m", "METRES" => "m", "METER" => "m", "METERS" => "m",
+    "MIN" => "min", "MHZ" => "MHz", "Ohm" => "ohm", "pixels" => "pixel", "PIXEL" => "pixel", "PIXELS" => "pixel",
+    "radian" => "rad", "radians" => "rad", "RAD" => "rad", "RADIAN" => "rad", "RADIANS" => "rad",
+    "sec" => "s", "second" => "s", "seconds" => "s", "SEC" => "s", "SECOND" => "s", "SECONDS" => "s",
+    "year" => "yr", "years" => "yr", "YR" => "yr", "YEAR" => "yr", "YEARS" => "yr",
+)
+
+# Translate each alphabetic token as WCSLIB's unitfix does and collapse whitespace.
+_fits_unit_translation(unit) = join(split(replace(strip(unit), r"[A-Za-z]+" => token -> get(_FITS_UNIT_ALIASES, token, token))), " ")
+
+const _FITS_ANGLE_UNITS = Dict("" => 1.0, "deg" => 1.0, "rad" => 180 / pi, "arcmin" => 1 / 60, "arcsec" => 1 / 3600, "mas" => 1 / 3.6e6)
+const _FITS_VELOCITY_UNITS = Dict("m/s" => 1.0, "m s-1" => 1.0, "m.s-1" => 1.0, "km/s" => 1e3, "km s-1" => 1e3, "km.s-1" => 1e3)
+const _FITS_SPECTRAL_UNITS = Dict(
+    "FREQ" => Dict("Hz" => 1.0, "kHz" => 1e3, "MHz" => 1e6, "GHz" => 1e9, "THz" => 1e12),
+    "AFRQ" => Dict("rad/s" => 1.0, "rad s-1" => 1.0, "rad.s-1" => 1.0),
+    "WAVE" => Dict("m" => 1.0, "cm" => 1e-2, "mm" => 1e-3, "um" => 1e-6, "nm" => 1e-9, "Angstrom" => 1e-10),
+    "ENER" => Dict("J" => 1.0, "erg" => 1e-7, "eV" => 1.602176634e-19, "keV" => 1.602176634e-16, "MeV" => 1.602176634e-13),
+    "WAVN" => Dict("1/m" => 1.0, "m-1" => 1.0, "m^-1" => 1.0, "/m" => 1.0, "1/cm" => 100.0, "cm-1" => 100.0, "cm^-1" => 100.0, "/cm" => 100.0),
+    "VRAD" => _FITS_VELOCITY_UNITS, "VOPT" => _FITS_VELOCITY_UNITS, "VELO" => _FITS_VELOCITY_UNITS,
+)
+# "a"/"yr" and "cy" are the Julian year and century of the FITS time standard, as in WCSLIB.
+const _FITS_TIME_UNITS = Dict("" => 1.0, "s" => 1.0, "min" => 60.0, "h" => 3600.0, "d" => 86400.0, "a" => 31557600.0, "yr" => 31557600.0,
+    "cy" => 3155760000.0, "ms" => 1e-3, "us" => 1e-6, "ns" => 1e-9)
+
+# Units are case-sensitive FITS strings that have already passed through _fits_unit_translation.
 function _fits_angle_scale(unit, keyword)
-    normalized = lowercase(strip(unit))
-    normalized in ("", "deg", "degree", "degrees") && return 1.0
-    normalized in ("rad", "radian", "radians") && return 180 / pi
-    normalized in ("arcmin", "amin") && return 1 / 60
-    normalized in ("arcsec", "asec") && return 1 / 3600
-    normalized == "mas" && return 1 / 3.6e6
-    throw(ArgumentError("unsupported celestial $keyword=$(repr(unit))"))
+    haskey(_FITS_ANGLE_UNITS, unit) || throw(ArgumentError("unsupported celestial $keyword=$(repr(unit))"))
+    return _FITS_ANGLE_UNITS[unit]
 end
 
 function _fits_spectral_scale(coordinate, unit, keyword)
-    normalized = lowercase(replace(strip(unit), ' ' => ""))
-    isempty(normalized) && return 1.0
-    if coordinate == "FREQ"
-        factors = Dict("hz" => 1.0, "khz" => 1e3, "mhz" => 1e6, "ghz" => 1e9, "thz" => 1e12)
-    elseif coordinate == "AFRQ"
-        factors = Dict("rad/s" => 1.0, "rads-1" => 1.0)
-    elseif coordinate in ("WAVE", "AWAV")
-        factors = Dict("m" => 1.0, "cm" => 1e-2, "mm" => 1e-3, "um" => 1e-6, "micron" => 1e-6, "nm" => 1e-9, "angstrom" => 1e-10, "aa" => 1e-10)
-    elseif coordinate in ("VRAD", "VOPT", "VELO")
-        factors = Dict("m/s" => 1.0, "ms-1" => 1.0, "km/s" => 1e3, "kms-1" => 1e3)
-    elseif coordinate == "ENER"
-        factors = Dict("j" => 1.0, "erg" => 1e-7, "ev" => 1.602176634e-19, "kev" => 1.602176634e-16, "mev" => 1.602176634e-13)
-    elseif coordinate == "WAVN"
-        factors = Dict("1/m" => 1.0, "m-1" => 1.0, "1/cm" => 100.0, "cm-1" => 100.0)
-    elseif coordinate in ("ZOPT", "BETA")
-        factors = Dict("1" => 1.0)
-    else
-        return 1.0
-    end
-    haskey(factors, normalized) || throw(ArgumentError("unsupported spectral $keyword=$(repr(unit))"))
-    return factors[normalized]
+    isempty(unit) && return 1.0
+    coordinate in ("ZOPT", "BETA") && throw(ArgumentError("spectral $keyword must be empty for dimensionless $coordinate, got $(repr(unit))"))
+    factors = get(_FITS_SPECTRAL_UNITS, coordinate == "AWAV" ? "WAVE" : coordinate, nothing)
+    factors === nothing && return 1.0
+    haskey(factors, unit) || throw(ArgumentError("unsupported spectral $keyword=$(repr(unit))"))
+    return factors[unit]
 end
 
 function _fits_time_scale(unit, keyword)
-    normalized = lowercase(strip(unit))
-    # "a"/"yr" and "cy" are the Julian year and century of the FITS time standard, as in WCSLIB.
-    factors = Dict("" => 1.0, "s" => 1.0, "sec" => 1.0, "min" => 60.0, "h" => 3600.0, "hr" => 3600.0, "d" => 86400.0, "day" => 86400.0,
-        "a" => 31557600.0, "yr" => 31557600.0, "cy" => 3155760000.0, "ms" => 1e-3, "us" => 1e-6, "ns" => 1e-9)
-    haskey(factors, normalized) || throw(ArgumentError("unsupported time $keyword=$(repr(unit))"))
-    return factors[normalized]
+    unit in ("S", "H", "D") && throw(ArgumentError("ambiguous time $keyword=$(repr(unit)); FITS reads it as siemens, henry, or debye, so use s, h, or d"))
+    haskey(_FITS_TIME_UNITS, unit) || throw(ArgumentError("unsupported time $keyword=$(repr(unit))"))
+    return _FITS_TIME_UNITS[unit]
 end
 
 function _fits_time_reference(header, suffix)
@@ -793,6 +955,15 @@ function _fits_time_reference(header, suffix)
         end
     else
         reference = _fits_number(reference, "MJDREF$suffix")
+    end
+    if reference === nothing
+        # JDREF/JDREFI/JDREFF are the Julian-date forms of the same reference epoch.
+        jd, integer, fraction = value("JDREF"), value("JDREFI"), value("JDREFF")
+        if jd !== nothing
+            reference = _fits_number(jd, "JDREF$suffix") - 2400000.5
+        elseif integer !== nothing || fraction !== nothing
+            reference = (_fits_number(something(integer, 0.0), "JDREFI$suffix") - 2400000.5) + _fits_number(something(fraction, 0.0), "JDREFF$suffix")
+        end
     end
     location = if all(keyword -> haskey(header, keyword), ("OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z"))
         ntuple(i -> _fits_number(header[("OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z")[i]], ("OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z")[i]), 3)
@@ -938,13 +1109,17 @@ function _fits_pixel_shape(header, count)
     end
 end
 
-function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, lookup_data=nothing, tabular_data=())
+function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn, lookup_data=nothing, tabular_data=())
     isfinite(minerr) && minerr >= 0 || throw(ArgumentError("minerr must be finite and nonnegative"))
+    legacy in _FITS_LEGACY_MODES || throw(ArgumentError("legacy must be :warn, :quiet, or :error, got $(repr(legacy))"))
     suffix = _fits_key(key)
+    repairs = String[]
     legacy_header = _fits_normalize_legacy(header, suffix)
     legacy_header === header || (header = _fits_header(legacy_header))
+    header = _fits_normalize_keywords(header, key, repairs)
     _fits_reject_external_data(header, suffix; allow_lookup=lookup_data !== nothing, allow_tab=!isempty(tabular_data))
     count = _fits_axis_count(header, key)
+    header = _fits_normalize_aips(header, key, count, repairs)
     prior_tpd_models = _fits_tpd_models(header, count, suffix, "CPDIS", "DP", "CPERR", minerr)
     prior_sip_models = _fits_sip_record_models(header, count, suffix, minerr)
     prior_polynomial_models = ntuple(axis -> prior_sip_models[axis] === nothing ? prior_tpd_models[axis] : prior_sip_models[axis], count)
@@ -978,10 +1153,17 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     cdelt = [_fits_number(value, "CDELT$i$suffix") for (i, value) in enumerate(keywords("CDELT", 1.0))]
     cunit = String.(keywords("CUNIT", ""))
     timeunit = String(get(header, "TIMEUNIT$suffix", get(header, "TIMEUNIT", "")))
+    unit_keywords = ["CUNIT$i$suffix" for i in 1:count]
     for i in eachindex(cunit)
         parsed[i][2] == :time && isempty(strip(cunit[i])) && (cunit[i] = timeunit)
+        translated = _fits_unit_translation(cunit[i])
+        if translated != join(split(cunit[i]), " ")
+            push!(repairs, "CUNIT$i$suffix=$(repr(cunit[i])) read as $(repr(translated))")
+            unit_keywords[i] = "CUNIT$i$suffix (written $(repr(cunit[i])))"
+        end
+        cunit[i] = translated
     end
-    scaling = [_fits_axis_scale(parsed[i], cunit[i], "CUNIT$i$suffix") for i in 1:count]
+    scaling = [_fits_axis_scale(parsed[i], cunit[i], unit_keywords[i]) for i in 1:count]
     restfrq_value = get(header, "RESTFRQ$suffix", get(header, "RESTFREQ$suffix", nothing))
     restwav_value = get(header, "RESTWAV$suffix", nothing)
     restfrq = restfrq_value === nothing ? nothing : _fits_number(restfrq_value, "RESTFRQ$suffix")
@@ -1012,7 +1194,7 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     for axis in eachindex(spectral_transforms)
         spectral_transforms[axis] === nothing || (crval[axis] = 0.0)
     end
-    raw_cd = _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis)
+    raw_cd = _fits_cd_matrix(header, count, cdelt, suffix, longitude_axis, latitude_axis, repairs)
     cd = copy(raw_cd)
     for i in 1:count
         cd[i, :] .*= linear_scaling[i]
@@ -1026,13 +1208,14 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     latpole = _fits_number(get(header, "LATPOLE$suffix", 90.0), "LATPOLE$suffix")
     if longitude_axis != 0
         lon_code, ignore_scamp_pv = _fits_projection_code(header, parsed, longitude_axis, latitude_axis, suffix)
-        ignore_scamp_pv && @warn "Ignoring SCAMP PVi_m distortion keywords on the celestial axes because CTYPE declares SIP"
+        ignore_scamp_pv && push!(repairs, "Ignoring SCAMP PVi_m distortion keywords on the celestial axes because CTYPE declares SIP")
         lat_code = parsed[latitude_axis][3]
         lon_code == "TPV" && lat_code == "TAN" && (lat_code = lon_code)
-        isempty(lon_code) && throw(ArgumentError("FITS celestial CTYPE$(longitude_axis) has no projection code"))
         lon_code == lat_code || throw(ArgumentError("FITS celestial axes use different projection codes $(repr(lon_code)) and $(repr(lat_code))"))
+        # Like WCSLIB, celestial axes without a projection code are evaluated linearly.
+        isempty(lon_code) && push!(repairs, "celestial CTYPE$longitude_axis$suffix and CTYPE$latitude_axis$suffix have no projection code and are evaluated linearly")
         projection_code = lon_code
-        if projection_code != "TAB"
+        if !isempty(projection_code) && projection_code != "TAB"
             projection = _fits_projection(projection_code, header, latitude_axis, suffix)
             default_native = native_fiducial(projection)
             use_reference_pv = projection_code != "TPV" && !ignore_scamp_pv
@@ -1079,7 +1262,7 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     else
         pixel_to_intermediate = AffineTransform(cd, -(cd * crpix))
     end
-    sip = _fits_sip_transform(header, suffix, crpix, count, getindex.(parsed, 4); enabled=projection_code != "TPV")
+    sip = _fits_sip_transform(header, suffix, crpix, count, getindex.(parsed, 4), repairs; enabled=projection_code != "TPV")
     has_lookup = lookup_data !== nothing && any(table -> table !== nothing, (lookup_data.detector_to_image..., lookup_data.cpdis...))
     has_prior_polynomial = any(model -> model !== nothing, prior_polynomial_models)
     if has_prior_polynomial
@@ -1104,16 +1287,21 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
         intermediate_to_world = intermediate_to_world | FITSTabularTransform(Val(count), tabular_data, tabular_scaling)
     end
     name = String(get(header, "WCSNAME$suffix", ""))
+    _fits_report_repairs(repairs, key, legacy)
     return WCS(Step(detector, pixel_to_intermediate), Step(intermediate, intermediate_to_world), Step(world); name, pixel_shape=_fits_pixel_shape(header, count))
 end
 
 """
-    parse_fits_wcs(source; key=' ', preserve_units=false, minerr=0.0)
+    parse_fits_wcs(source; key=' ', preserve_units=false, minerr=0.0, legacy=:warn)
 
 Parse one primary or alternate FITS image-header WCS into a compiled `WCS` pipeline.
 Pixel coordinates use the FITS 1-based convention encoded by `CRPIX`.
+
+Legacy conventions accepted by WCSLIB and astropy (for example NCP, AIPS spectral types,
+`EPOCH`, and zero-padded keyword indices) are repaired with one warning per parse when
+`legacy=:warn`, silently when `legacy=:quiet`, and rejected when `legacy=:error`.
 """
-parse_fits_wcs(source::AbstractDict; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0) = _parse_fits_wcs(_fits_header(source); key, preserve_units, minerr)
+parse_fits_wcs(source::AbstractDict; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn) = _parse_fits_wcs(_fits_header(source); key, preserve_units, minerr, legacy)
 
 function _fits_alternate_keys(header)
     keys_found = Set{Char}()
@@ -1144,9 +1332,9 @@ function _find_all_fits_wcs(parse, header)
 end
 
 """Parse every primary and alternate FITS WCS representation in `source`."""
-function find_all_fits_wcs(source::AbstractDict; preserve_units::Bool=false, minerr::Real=0.0)
+function find_all_fits_wcs(source::AbstractDict; preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     header = _fits_header(source)
-    return _find_all_fits_wcs(key -> _parse_fits_wcs(header; key, preserve_units, minerr), header)
+    return _find_all_fits_wcs(key -> _parse_fits_wcs(header; key, preserve_units, minerr, legacy), header)
 end
 
 function _fits_record_card(value)
@@ -1189,12 +1377,12 @@ end
 
 # Construction-time loaders supplied by container extensions: `image(extname, extver)` returns
 # `(data, header)` and `column(extname, extver, extlev, name)` returns one table column.
-function _parse_linked_fits_wcs(image, column, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
+function _parse_linked_fits_wcs(image, column, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     lookup = _fits_lookup_data(header, key, minerr) do spec
         data, table_header = image(spec.extname, spec.extver)
         data isa AbstractArray || throw(ArgumentError("FITS WCS lookup extension $(repr(spec.extname)) must contain an image"))
         _fits_lookup_table(data, _fits_header(table_header), spec.axes, spec.naxis)
     end
     tabular = _fits_tabular_data(column, header, key)
-    return _parse_fits_wcs(header; key, preserve_units, minerr, lookup_data=lookup, tabular_data=tabular)
+    return _parse_fits_wcs(header; key, preserve_units, minerr, legacy, lookup_data=lookup, tabular_data=tabular)
 end

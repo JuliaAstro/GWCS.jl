@@ -242,7 +242,7 @@ Composition uses boolean dependency propagation, parallel transforms produce blo
 
 ## FITS WCS
 
-`parse_fits_wcs(header; key=' ', preserve_units=false, minerr=0.0)` parses one primary or alternate FITS image-header representation into an ordinary compiled `WCS` pipeline. `find_all_fits_wcs(header; ...)` returns every representation as a `Dict{Char,WCS}` and reports malformed alternates with their key. Parsing is separate from tagged GWCS/ASDF metadata, which continues to use `parse_wcs`.
+`parse_fits_wcs(header; key=' ', preserve_units=false, minerr=0.0, legacy=:warn)` parses one primary or alternate FITS image-header representation into an ordinary compiled `WCS` pipeline. `find_all_fits_wcs(header; ...)` returns every representation as a `Dict{Char,WCS}` and reports malformed alternates with their key. Parsing is separate from tagged GWCS/ASDF metadata, which continues to use `parse_wcs`.
 
 ```julia
 header = Dict(
@@ -255,9 +255,32 @@ wcs = parse_fits_wcs(header)
 pixel_to_world(wcs, 512.0, 512.0)
 ```
 
-FITS 1-based pixel coordinates are represented explicitly by the `CRPIX` affine stage; no origin offset is applied elsewhere. Public outputs retain FITS axis order, including interleaved celestial, spectral, time, Stokes, and linear axes. Canonical outputs use degrees for celestial axes, SI units for supported linear spectral axes, and seconds for time axes. Set `preserve_units=true` to retain supported `CUNIT` values at the output boundary. Time axes are normalized deliberately: values given in `CUNITi`, or in `TIMEUNIT` when `CUNITi` is absent, are converted to seconds relative to the header's reference epoch, so downstream code never needs to interpret `TIMEUNIT`; WCSLIB and astropy instead return time values in the header's unit. Supported time units are `s` (`sec`), `min`, `h` (`hr`), `d` (`day`), `a` or `yr` (Julian year, 365.25 d), `cy` (Julian century), `ms`, `us`, and `ns`. Incomplete image shapes use `nothing` for WCS axes without a corresponding `NAXISn`.
+FITS 1-based pixel coordinates are represented explicitly by the `CRPIX` affine stage; no origin offset is applied elsewhere. Public outputs retain FITS axis order, including interleaved celestial, spectral, time, Stokes, and linear axes. Canonical outputs use degrees for celestial axes, SI units for supported linear spectral axes, and seconds for time axes. Set `preserve_units=true` to retain supported `CUNIT` values at the output boundary. Time axes are normalized deliberately: values given in `CUNITi`, or in `TIMEUNIT` when `CUNITi` is absent, are converted to seconds relative to the header's reference epoch, so downstream code never needs to interpret `TIMEUNIT`; WCSLIB and astropy instead return time values in the header's unit. Supported time units are `s`, `min`, `h`, `d`, `a` or `yr` (Julian year, 365.25 d), `cy` (Julian century), `ms`, `us`, and `ns`; the single letters `S`, `H`, and `D` are rejected because FITS reads them as siemens, henry, and debye. Incomplete image shapes use `nothing` for WCS axes without a corresponding `NAXISn`.
 
-The parser supports PC, CD, and legacy CROTA linear forms (as in WCSLIB, CROTA applies only to a celestial axis pair, and PC takes precedence over CD with a warning when a nonconforming header has both), all 28 FITS spherical projections and their PV parameters, pole parameters, SIP, TPV, pre-2012 SCAMP TAN-plus-PV headers (as in astropy, `-TAN-SIP` headers with SCAMP PV terms use SIP and ignore the PV terms with a warning), Paper IV prior and sequent TPD polynomials, legacy DSS and WAT-encoded TNX/ZPX polynomials normalized to TPD at construction, Paper IV D2IM/CPDIS lookup arrays, multilinear `-TAB` coordinate arrays, Paper III spectral algorithms, and GRI/GRA grism models. SIP AP/BP and Paper IV TPD.REV coefficients are approximate reverse initializers only: `world_to_pixel` seeds the whole-WCS numerical inverse with them and always refines against the forward WCS. Without them, the numerical inverse starts, like WCSLIB, from the solution with distortions treated as identity. CSC (COBE quadrilateralized spherical cube) is evaluated in double precision, whereas WCSLIB uses single precision, so the two differ by up to about 2e-5 degrees. FITSIO and FITSFiles are weak dependencies that add detached-header and HDU adapters; linked HDU inputs copy referenced images and table columns into backend-neutral transforms during construction. Separable monotonic 1D tables have direct inverses, while coupled tables use the checked WCS numerical inverse. RESTFRQ/RESTWAV and spectral reference-system metadata are retained on spectral frames, and time reference metadata is retained on temporal frames.
+The parser supports PC, CD, and legacy CROTA linear forms (as in WCSLIB, CROTA applies only to a celestial axis pair), all 28 FITS spherical projections and their PV parameters, pole parameters, SIP, TPV, pre-2012 SCAMP TAN-plus-PV headers, Paper IV prior and sequent TPD polynomials, legacy DSS and WAT-encoded TNX/ZPX polynomials normalized to TPD at construction, Paper IV D2IM/CPDIS lookup arrays, multilinear `-TAB` coordinate arrays, Paper III spectral algorithms, and GRI/GRA grism models. SIP AP/BP and Paper IV TPD.REV coefficients are approximate reverse initializers only: `world_to_pixel` seeds the whole-WCS numerical inverse with them and always refines against the forward WCS. Without them, the numerical inverse starts, like WCSLIB, from the solution with distortions treated as identity. CSC (COBE quadrilateralized spherical cube) is evaluated in double precision, whereas WCSLIB uses single precision, so the two differ by up to about 2e-5 degrees. FITSIO and FITSFiles are weak dependencies that add detached-header and HDU adapters; linked HDU inputs copy referenced images and table columns into backend-neutral transforms during construction. Separable monotonic 1D tables have direct inverses, while coupled tables use the checked WCS numerical inverse. RESTFRQ/RESTWAV and spectral reference-system metadata are retained on spectral frames, and time reference metadata is retained on temporal frames.
+
+### Legacy FITS conventions
+
+Headers that use deprecated or informal conventions are repaired the way WCSLIB (with all of its header-parser relaxations) and astropy (which also applies WCSLIB's `wcsfix` repairs) read them. With the default `legacy=:warn`, each parse that needs repairs emits one warning listing them; `legacy=:quiet` repairs silently, and `legacy=:error` rejects any header that needs a repair. The FITSIO and FITSFiles adapters accept the same keyword. A legacy keyword is used only when its standard spelling is absent; when both are present the standard keyword wins, except that conflicting zero-padded matrix keywords are rejected.
+
+| Legacy form | Interpretation |
+|---|---|
+| `NCP` projection | `SIN` with `PV2_1 = 0` and `PV2_2 = cot(CRVAL2)` on the latitude axis; rejected for a zero reference latitude |
+| `GLS` projection | `SFL` with its fiducial point offset to the reference latitude (`PV1_0 = 1`, `PV1_2 = CRVAL2` on the longitude axis) |
+| `FREQ`, `VELO`, `FELO` with `-LSR`, `-HEL`, `-OBS`, and `VELREF` | `SPECSYS` from the suffix, or from `VELREF mod 256` when present; `VELO` becomes `VOPT`, or `VRAD` when `VELREF ÷ 256 = 1`; `FELO` becomes `VOPT-F2W` |
+| Celestial `RA`/`DEC` (or other pairs) without a projection code | Evaluated linearly |
+| `PC00i00j`, `CD00i00j`, and zero-padded `PC0i_0j`, `CD0i_0j`, `PV0i_0m`, `PS0i_0m` | The standard keyword |
+| `PROJPn` | `PVi_n` on the latitude axis |
+| `EPOCH`, `RADECSYS`, `VSOURCE` | `EQUINOX`, `RADESYS`, and the relativistic `ZSOURCE` |
+| `DATE-REF`, `MJD-REF`, `MJD-REFI`, `MJD-REFF`, `JD-REF`, `JD-REFI`, `JD-REFF` | The hyphen-free standard keywords; `JDREF*` give the MJD reference epoch |
+| Both `PCi_j` and `CDi_j` | `PCi_j` with `CDELTi`; `CDi_j` is ignored |
+| `CDi_j` with no terms for an axis | Unit diagonal for that axis (WCSLIB's `cdfix`); `CDELTi` is ignored with `CDi_j` |
+| SIP coefficients without a `-SIP` CTYPE suffix | SIP is applied (astropy) |
+| `-TAN-SIP` with SCAMP `PVi_m` terms (m ≥ 5) | SIP is applied and the celestial `PVi_m` are ignored (astropy) |
+| Non-standard unit spellings such as `DEG`, `HZ`, `MHZ`, `Angstroms`, `SEC` | WCSLIB's safe unit translations (astropy's default); units are otherwise case-sensitive |
+| `CROTAi` on the longitude axis only | Ignored, as in WCSLIB, with a warning |
+
+Singular linear transformation matrices are rejected. WCSLIB's `cylfix` (re-centering cylindrical all-sky maps whose pixels extend beyond native longitude ±180°) is not applied, matching astropy's default, and `DATE-OBS`/`OBSGEO-L,B,H` repairs are not modeled.
 
 ## Metadata
 
