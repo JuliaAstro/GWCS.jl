@@ -37,24 +37,24 @@ end
 
 _lookup_hdu(hdus, extname, extver, extlev=1) = _fits_find_extension((hdu => _header_dictionary(hdu.cards) for hdu in hdus), extname, extver, extlev)
 
-function _parse_hdus(hdus, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
+function _parse_hdus(hdus, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     function image(extname, extver)
         table_hdu = _lookup_hdu(hdus, extname, extver)
         return table_hdu.data, _header_dictionary(table_hdu.cards)
     end
     column(extname, extver, extlev, name) = _tabular_column(_lookup_hdu(hdus, extname, extver, extlev), extname, name)
-    return _parse_linked_fits_wcs(image, column, header; key, preserve_units, minerr)
+    return _parse_linked_fits_wcs(image, column, header; key, preserve_units, minerr, legacy)
 end
 
 _hdu_header(hdus, index) = (checkbounds(hdus, index); _fits_header(_header_dictionary(hdus[index].cards)))
 
-function parse_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index::Integer; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
-    return _parse_hdus(hdus, _hdu_header(hdus, index); key, preserve_units, minerr)
+function parse_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index::Integer; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
+    return _parse_hdus(hdus, _hdu_header(hdus, index); key, preserve_units, minerr, legacy)
 end
 
-function find_all_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index::Integer; preserve_units::Bool=false, minerr::Real=0.0)
+function find_all_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index::Integer; preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     header = _hdu_header(hdus, index)
-    return _find_all_fits_wcs(key -> _parse_hdus(hdus, header; key, preserve_units, minerr), header)
+    return _find_all_fits_wcs(key -> _parse_hdus(hdus, header; key, preserve_units, minerr, legacy), header)
 end
 
 end

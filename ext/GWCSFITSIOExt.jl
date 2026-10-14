@@ -20,7 +20,7 @@ function _named_hdu(hdu::FITSIO.HDU, extname, extver, extlev=1)
     return _fits_find_extension(candidates, extname, extver, extlev)
 end
 
-function _parse_hdu(hdu::FITSIO.HDU, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
+function _parse_hdu(hdu::FITSIO.HDU, header; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     function image(extname, extver)
         table_hdu = _named_hdu(hdu, extname, extver)
         return FITSIO.read(table_hdu), _header_dictionary(FITSIO.read_header(table_hdu))
@@ -31,18 +31,18 @@ function _parse_hdu(hdu::FITSIO.HDU, header; key::Char=' ', preserve_units::Bool
         data = FITSIO.read(table_hdu, name)
         return size(data, ndims(data)) == 1 ? dropdims(data; dims=ndims(data)) : data
     end
-    return _parse_linked_fits_wcs(image, column, header; key, preserve_units, minerr)
+    return _parse_linked_fits_wcs(image, column, header; key, preserve_units, minerr, legacy)
 end
 
 _hdu_header(hdu::FITSIO.HDU) = _fits_header(_header_dictionary(FITSIO.read_header(hdu)))
 
-function parse_fits_wcs(hdu::FITSIO.HDU; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0)
-    return _parse_hdu(hdu, _hdu_header(hdu); key, preserve_units, minerr)
+function parse_fits_wcs(hdu::FITSIO.HDU; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
+    return _parse_hdu(hdu, _hdu_header(hdu); key, preserve_units, minerr, legacy)
 end
 
-function find_all_fits_wcs(hdu::FITSIO.HDU; preserve_units::Bool=false, minerr::Real=0.0)
+function find_all_fits_wcs(hdu::FITSIO.HDU; preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     header = _hdu_header(hdu)
-    return _find_all_fits_wcs(key -> _parse_hdu(hdu, header; key, preserve_units, minerr), header)
+    return _find_all_fits_wcs(key -> _parse_hdu(hdu, header; key, preserve_units, minerr, legacy), header)
 end
 
 end

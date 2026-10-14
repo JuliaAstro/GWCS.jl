@@ -912,3 +912,90 @@ end
     cobe = NativeToIntermediate(COBESphericalCube())
     @test inverse_transform(cobe)(cobe(native)) ≈ native atol=3e-3
 end
+
+# References are WCSLIB 8.10 (where it accepts the header) and Astropy 8.0.1, which applies WCSLIB's wcsfix repairs.
+@testset "Legacy FITS conventions" begin
+    celestial(code; crval=(30.0, 40.0), extra...) = merge(Dict{String,Any}("NAXIS" => 2, "CTYPE1" => "RA---$code", "CTYPE2" => "DEC--$code",
+        "CRPIX1" => 50.0, "CRPIX2" => 50.0, "CRVAL1" => crval[1], "CRVAL2" => crval[2], "CDELT1" => -0.1, "CDELT2" => 0.1), Dict{String,Any}(String(k) => v for (k, v) in extra))
+    spectral(ctype, crval, cdelt; extra...) = merge(Dict{String,Any}("NAXIS" => 1, "CTYPE1" => ctype, "CRPIX1" => 32.0, "CRVAL1" => crval, "CDELT1" => cdelt,
+        "RESTFRQ" => 1.420405751e9), Dict{String,Any}(String(k) => v for (k, v) in extra))
+    repaired(header, pattern; kwargs...) = @test_logs (:warn, pattern) parse_fits_wcs(header; kwargs...)
+
+    ncp = celestial("NCP")
+    @test pixel_to_world(repaired(ncp, r"NCP projection read as SIN"), 60.0, 43.0) ≈ SVector(28.708058345297673, 39.27700409069822) atol=1e-12
+    @test_throws "NCP projection is undefined for a zero reference latitude" parse_fits_wcs(celestial("NCP"; crval=(30.0, 0.0)))
+    @test pixel_to_world(repaired(celestial("GLS"), r"GLS projection read as SFL"), 60.0, 43.0) ≈ SVector(28.70774355295724, 39.3) atol=1e-12
+    @test pixel_to_world(repaired(merge(ncp, Dict("CTYPE1" => "RA", "CTYPE2" => "DEC")), r"no projection code"), 60.0, 43.0) ≈ SVector(29.0, 39.3) atol=1e-12
+
+    # AIPS spectral types: the suffix (or VELREF) gives SPECSYS; VELO is optical unless VELREF/256 == 1.
+    frame(wcs) = output_frame(wcs).reference_frame.spectral.specsys
+    @test frame(repaired(spectral("FREQ-LSR", 1.42e9, -2e4), r"\"FREQ-LSR\" read as \"FREQ\" with SPECSYS=\"LSRK\"")) == "LSRK"
+    velref_freq = repaired(spectral("FREQ-OBS", 1.42e9, -2e4; VELREF=2), r"VELREF=2")
+    @test frame(velref_freq) == "BARYCENT"
+    @test pixel_to_world(velref_freq, 40.0) ≈ SVector(1.41984e9)
+    @test pixel_to_world(repaired(spectral("FELO-HEL", 1.5e4, 4e3), r"read as \"VOPT-F2W\""), 40.0) ≈ SVector(47003.415890040655) rtol=1e-12
+    optical = repaired(spectral("VELO-LSR", 1.5e4, 4e3), r"read as \"VOPT\"")
+    radio = repaired(spectral("VELO-LSR", 1.5e4, 4e3; VELREF=257), r"read as \"VRAD\"")
+    @test pixel_to_world(optical, 40.0) == pixel_to_world(radio, 40.0) == SVector(47000.0)
+    @test world_axis_physical_types(optical) == ("spect.dopplerVeloc.opt",)
+    @test world_axis_physical_types(radio) == ("spect.dopplerVeloc.radio",)
+    @test frame(parse_fits_wcs(spectral("VELO-LSR", 1.5e4, 4e3; SPECSYS="SOURCE"); legacy=:quiet)) == "SOURCE"
+    @test_throws "invalid AIPS reference frame code 9" parse_fits_wcs(spectral("FREQ-LSR", 1.42e9, -2e4; VELREF=9))
+    @test_throws "unsupported nonlinear algorithm" parse_fits_wcs(spectral("FREQ-XYZ", 1.42e9, -2e4; VELREF=1))
+
+    # Keyword spellings from early drafts of Papers I-III.
+    reference = parse_fits_wcs(merge(ncp, Dict("CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "PC1_1" => 0.9, "PC1_2" => 0.2, "PC2_1" => -0.1, "PC2_2" => 1.1)))
+    @test pixel_to_world(reference, 60.0, 43.0) ≈ SVector(29.0204675322597, 39.125967753957475) atol=1e-12
+    for padded in (Dict("PC001001" => 0.9, "PC001002" => 0.2, "PC002001" => -0.1, "PC002002" => 1.1), Dict("PC01_01" => 0.9, "PC01_02" => 0.2, "PC02_01" => -0.1, "PC02_02" => 1.1))
+        @test pixel_to_world(repaired(merge(celestial("TAN"), padded), r"read as PC1_1"), 60.0, 43.0) == pixel_to_world(reference, 60.0, 43.0)
+    end
+    padded_cd = filter(pair -> !startswith(pair.first, "CDELT"), merge(celestial("TAN"), Dict("CD001001" => -0.09, "CD001002" => 0.02, "CD002001" => 0.01, "CD002002" => 0.11)))
+    @test pixel_to_world(repaired(padded_cd, r"CD001001 read as CD1_1"), 60.0, 43.0) ≈ SVector(28.65581489581939, 39.322300146818115) atol=1e-12
+    @test_throws "PC001001 and PC1_1 give conflicting values" parse_fits_wcs(merge(celestial("TAN"), Dict("PC001001" => 0.9, "PC1_1" => 1.0)))
+    @test pixel_to_world(repaired(celestial("SIN"; PROJP1=0.1, PROJP2=-0.2), r"PROJP1 read as PV2_1"), 60.0, 43.0) ≈ SVector(28.70604087434814, 39.29531321986866) atol=1e-12
+    epoch = output_frame(repaired(celestial("TAN"; EPOCH=1950.0), r"EPOCH read as EQUINOX")).reference_frame
+    @test (epoch.radesys, epoch.equinox) == ("FK4", 1950.0)
+    @test output_frame(parse_fits_wcs(celestial("TAN"; EPOCH=1950.0, EQUINOX=2000.0))).reference_frame.equinox == 2000.0
+    @test output_frame(repaired(celestial("TAN"; RADECSYS="FK5"), r"RADECSYS read as RADESYS")).reference_frame.radesys == "FK5"
+    @test output_frame(repaired(spectral("VRAD", 1.5e4, 4e3; VSOURCE=1.5e4), r"VSOURCE read as ZSOURCE")).reference_frame.spectral.zsource ≈ 5.0035866073772084e-5 rtol=1e-12
+    time_header = Dict{String,Any}("NAXIS" => 1, "CTYPE1" => "TIME", "CRPIX1" => 1.0, "CRVAL1" => 0.0, "CDELT1" => 1.0)
+    epoch_of(header) = output_frame(parse_fits_wcs(header; legacy=:quiet)).reference_frame.time.reference_epoch
+    @test output_frame(repaired(merge(time_header, Dict("MJD-REF" => 59000.5)), r"MJD-REF read as MJDREF")).reference_frame.time.reference_epoch == 59000.5
+    @test epoch_of(merge(time_header, Dict("JDREF" => 2459000.5))) == 59000.0
+    @test epoch_of(merge(time_header, Dict("JDREFI" => 2459000, "JDREFF" => 0.75))) == 59000.25
+
+    # wcsfix repairs that astropy applies by default.
+    cube = Dict{String,Any}("NAXIS" => 3, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CTYPE3" => "FREQ", "CRPIX1" => 25.0, "CRPIX2" => 25.0, "CRPIX3" => 1.0,
+        "CRVAL1" => 30.0, "CRVAL2" => 40.0, "CRVAL3" => 1.4e9, "CD1_1" => -0.01, "CD2_2" => 0.01, "CDELT3" => 1e6)
+    @test pixel_to_world(repaired(cube, r"CD3_3 set to 1"), 30.0, 20.0, 5.0) ≈ SVector(29.934777423125915, 39.94998173882473, 1.400000004e9) atol=1e-12
+    @test_throws "matrix from CDi_j is singular" parse_fits_wcs(merge(celestial("TAN"), Dict("CD1_1" => 1.0, "CD1_2" => 1.0, "CD2_1" => 1.0, "CD2_2" => 1.0)))
+    unsuffixed_sip = celestial("TAN"; A_ORDER=2, B_ORDER=2, A_2_0=1e-5, B_0_2=1e-5)
+    @test pixel_to_world(repaired(unsuffixed_sip, r"SIP coefficients applied although CTYPE lacks the -SIP suffix"), 60.0, 43.0) ≈ SVector(28.707928277445472, 39.2929427522218) atol=1e-12
+    @test pixel_to_world(repaired(celestial("TAN"; CROTA1=20.0), r"CROTA1 on the longitude axis is ignored"), 60.0, 43.0) == pixel_to_world(parse_fits_wcs(celestial("TAN")), 60.0, 43.0)
+
+    # Units are case-sensitive; only WCSLIB's safe translations are applied, as in astropy.
+    @test pixel_to_world(repaired(spectral("WAVE", 6563.0, 0.5; CUNIT1="Angstroms"), r"\"Angstroms\" read as \"Angstrom\""), 40.0) ≈ SVector(6.567e-7) rtol=1e-14
+    @test pixel_to_world(repaired(spectral("FREQ", 1420.0, -0.02; CUNIT1="MHZ"), r"\"MHZ\" read as \"MHz\""), 40.0) ≈ SVector(1.41984e9)
+    @test world_axis_units(parse_fits_wcs(spectral("FREQ", 1420.0, -0.02; CUNIT1="MHZ"); preserve_units=true, legacy=:quiet)) == ("MHz",)
+    @test_throws "unsupported spectral CUNIT1 (written \"KM/S\")=\"km/S\"" parse_fits_wcs(spectral("VRAD", 15.0, 4.0; CUNIT1="KM/S"); legacy=:quiet)
+    @test_throws "unsupported spectral CUNIT1=\"mhz\"" parse_fits_wcs(spectral("FREQ", 1420.0, -0.02; CUNIT1="mhz"))
+    @test_throws "unsupported spectral CUNIT1=\"micron\"" parse_fits_wcs(spectral("WAVE", 0.6563, 1e-5; CUNIT1="micron"))
+    @test_throws "ambiguous time CUNIT1=\"S\"" parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "S")))
+    @test pixel_to_world(repaired(merge(time_header, Dict("CUNIT1" => "SEC")), r"\"SEC\" read as \"s\""), 3.0) == SVector(2.0)
+
+    # Repair modes and alternate keys.
+    @test_logs parse_fits_wcs(ncp; legacy=:quiet)
+    @test_throws "uses legacy conventions" parse_fits_wcs(ncp; legacy=:error)
+    @test_throws "legacy must be :warn, :quiet, or :error" parse_fits_wcs(ncp; legacy=:strict)
+    @test parse_fits_wcs(celestial("TAN"); legacy=:error) isa WCS
+    alternate = Dict{String,Any}("NAXIS" => 1, "WCSAXESA" => 1, "CTYPE1A" => "VELO-HEL", "CRPIX1A" => 32.0, "CRVAL1A" => 1.5e4, "CDELT1A" => 4e3, "VELREFA" => 257, "EPOCHA" => 1950.0)
+    alternate_wcs = repaired(alternate, r"key 'A'"; key='A')
+    @test world_axis_physical_types(alternate_wcs) == ("spect.dopplerVeloc.radio",)
+    # VELREF's frame code (257 mod 256 = 1, LSRK) takes precedence over the -HEL suffix, as in WCSLIB.
+    @test frame(alternate_wcs) == "LSRK"
+    @test_throws "FITS WCS key 'A' is malformed" find_all_fits_wcs(alternate; legacy=:error)
+    legacy_cards = reduce(vcat, FITSFiles.Card(key, value) for (key, value) in ("CTYPE1" => "RA---NCP", "CTYPE2" => "DEC--NCP", "CRPIX1" => 50.0, "CRPIX2" => 50.0,
+        "CRVAL1" => 30.0, "CRVAL2" => 40.0, "CDELT1" => -0.1, "CDELT2" => 0.1))
+    @test_throws "uses legacy conventions" parse_fits_wcs(legacy_cards; legacy=:error)
+    @test pixel_to_world(parse_fits_wcs(legacy_cards; legacy=:quiet), 60.0, 43.0) ≈ SVector(28.708058345297673, 39.27700409069822) atol=1e-12
+end
