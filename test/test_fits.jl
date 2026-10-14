@@ -21,7 +21,9 @@ import FITSIO
 
     pc_header = merge(linear_header, Dict("PC1_1" => 1.0, "PC1_2" => 0.5, "PC2_1" => -0.25, "PC2_2" => 1.0))
     @test pixel_to_world(parse_fits_wcs(pc_header), 11.0, 22.0) ≈ SVector(104.0, 205.25)
-    @test_throws "must not be mixed" parse_fits_wcs(merge(pc_header, Dict("CD1_1" => 1.0)))
+    # Like WCSLIB and astropy, PCi_j and CDELTi take precedence over CDi_j in a nonconforming header.
+    mixed_matrix = @test_logs (:warn, r"both PCi_j and CDi_j") parse_fits_wcs(merge(pc_header, Dict("CD1_1" => 7.0, "CD2_2" => 9.0)))
+    @test pixel_to_world(mixed_matrix, 11.0, 22.0) ≈ SVector(104.0, 205.25)
 
     # Like WCSLIB, CROTA applies only to a celestial longitude/latitude pair.
     crota_header = merge(linear_header, Dict("CDELT1" => 1.0, "CDELT2" => 1.0, "CROTA2" => 90.0))
@@ -145,6 +147,7 @@ import FITSIO
     @test world_axis_units(parse_fits_wcs(time_header; preserve_units=true)) == ("d",)
     # Julian year and century use WCSLIB's factors; CUNITi takes precedence over TIMEUNIT.
     @test pixel_to_world(parse_fits_wcs(merge(time_header, Dict("TIMEUNIT" => "a"))), 2.0) == SVector(1.5 * 31557600.0)
+    @test pixel_to_world(parse_fits_wcs(merge(time_header, Dict("TIMEUNIT" => "yr"))), 2.0) == SVector(1.5 * 31557600.0)
     @test pixel_to_world(parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "cy"))), 2.0) == SVector(1.5 * 3155760000.0)
     @test world_axis_units(parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "cy")); preserve_units=true)) == ("cy",)
     @test_throws "unsupported time CUNIT1" parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "fortnight")))
