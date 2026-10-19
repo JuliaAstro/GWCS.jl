@@ -152,9 +152,10 @@ end
 
 # First interval `index[i:i+1]` containing `value` with distinct endpoints; runs of equal
 # index values are skipped because they define no interpolation interval.
-@inline function _tabular_interval(index, value, rev)
-    upper = searchsortedfirst(index, value; rev)
-    return upper > 1 ? upper - 1 : searchsortedlast(index, value; rev)
+# Takes an ordering object because `searchsortedfirst(...; rev)` with a runtime Bool allocates on Julia 1.10.
+@inline function _tabular_interval(index, value, order)
+    upper = searchsortedfirst(index, value, order)
+    return upper > 1 ? upper - 1 : searchsortedlast(index, value, order)
 end
 
 function _tabular_fractional_index(index, value)
@@ -166,10 +167,10 @@ function _tabular_fractional_index(index, value)
     increasing = index[end] > index[1]
     if increasing
         index[1] - (index[2] - index[1]) / 2 <= value <= index[end] + (index[end] - index[end - 1]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
-        position = value < index[1] ? 1 : value > index[end] ? length(index) - 1 : _tabular_interval(index, value, false)
+        position = value < index[1] ? 1 : value > index[end] ? length(index) - 1 : _tabular_interval(index, value, Base.Order.Forward)
     else
         index[end] - (index[end - 1] - index[end]) / 2 <= value <= index[1] + (index[1] - index[2]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
-        position = value > index[1] ? 1 : value < index[end] ? length(index) - 1 : _tabular_interval(index, value, true)
+        position = value > index[1] ? 1 : value < index[end] ? length(index) - 1 : _tabular_interval(index, value, Base.Order.Reverse)
     end
     1 <= position < length(index) || throw(DomainError(value, "TAB coordinate does not lie in a nondegenerate index-vector interval"))
     first, second = T(index[position]), T(index[position + 1])
