@@ -152,6 +152,32 @@ end
     @test car(SVector(540.0, 23.0)) == SVector(-180.0, 23.0)
 end
 
+@testset "Projection parameters and non-finite coordinates" begin
+    @test TangentPlaneToNative() === IntermediateToNative(GnomonicProjection())
+    @test inverse_transform(TangentPlaneToNative()) isa NativeToTangentPlane
+
+    # Conic and Bonne constants are precomputed at construction, so invalid parameters fail there.
+    @test ConicEquidistant{Float32}(45, 10) isa ConicEquidistant{Float32}
+    @test BonneProjection{Float32}(30).theta1 === 30.0f0
+    @test_throws "COP is degenerate for sigma = 0" ConicPerspective(0.0, 0.0)
+    @test_throws "COP is degenerate for delta" ConicPerspective(45.0, 90.0)
+    @test_throws "COD conic constant is degenerate" ConicEquidistant(0.0, 0.0)
+    @test_throws "between -90 and 90 degrees" ConicOrthomorphic(91.0, 0.0)
+    @test_throws "Bonne standard parallel" BonneProjection(91.0)
+    for projection in (ConicPerspective(60.0, 15.0), ConicEquidistant(45.0, 25.0), ConicEqualArea(-45.0, 10.0), ConicOrthomorphic(45.0, 10.0), BonneProjection(-45.0))
+        native = SVector(20.0, 30.0)
+        _test_projection_performance(NativeToIntermediate(projection), native)
+        _test_projection_performance(IntermediateToNative(projection), NativeToIntermediate(projection)(native))
+    end
+
+    for projection in (GnomonicProjection(), PlateCarreeProjection(), HammerAitoffProjection(), MollweideProjection(), ZenithalPolynomial((0.0, 1.0, -0.2)), ConicEqualArea(), HEALPixProjection())
+        for coords in (SVector(NaN, 1.0), SVector(1.0, Inf))
+            @test all(isnan, @inferred(IntermediateToNative(projection)(coords)))
+            @test all(isnan, @inferred(NativeToIntermediate(projection)(coords)))
+        end
+    end
+end
+
 @testset "HEALPix projection parameters" begin
     # References generated with Astropy's WCSLIB-backed HEALPix models.
     references = (

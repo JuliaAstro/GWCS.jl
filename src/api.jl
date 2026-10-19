@@ -46,13 +46,20 @@ function in_domain(wcs::WCS{N}, pixels::AbstractMatrix) where {N}
     return result
 end
 
-@inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN) where {Nin,Nout}
+@inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN, fill_invalid=false) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     pixels = SVector{Nin,T}(coords)
     if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)
         return _filled_coordinate(Val(Nout), T, fill_value)
     end
-    return wcs.forward(pixels)
+    fill_invalid || return wcs.forward(pixels)
+    # A DomainError means the pixel has no world coordinate; any other error is a real failure.
+    try
+        return wcs.forward(pixels)
+    catch error
+        error isa DomainError || rethrow()
+        return _filled_coordinate(Val(Nout), T, fill_value)
+    end
 end
 
 function pixel_to_world(wcs::WCS{Nin}, coords::AbstractVector; kwargs...) where {Nin}
@@ -77,9 +84,18 @@ function pixel_to_world(wcs::WCS{Nin,Nout}, pixels::AbstractMatrix; kwargs...) w
     return result
 end
 
-@inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, kwargs...) where {Nin,Nout}
+@inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, fill_invalid=false, kwargs...) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     world = SVector{Nout,T}(coords)
+    if fill_invalid
+        # A DomainError means the world coordinate has no pixel; any other error, including NoConvergence, propagates.
+        try
+            return _world_to_pixel(wcs, world; with_bounding_box, fill_value, kwargs...)
+        catch error
+            error isa DomainError || rethrow()
+            return _filled_coordinate(Val(Nin), T, fill_value)
+        end
+    end
     wcs.backward isa NoInverse && return _numerical_inverse(wcs, world; with_bounding_box, fill_value, kwargs...)
     pixels = wcs.backward(world)
     if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)

@@ -114,7 +114,7 @@ end
 @inline function (transform::FITSLogInverse)(coords::StaticVector{1})
     forward = transform.forward
     world = only(coords) * oftype(only(coords), forward.output_scale)
-    world > 0 || throw(DomainError(only(coords), "FITS logarithmic coordinate must be positive"))
+    world > 0 || isnan(world) || throw(DomainError(only(coords), "FITS logarithmic coordinate must be positive"))
     reference = oftype(world, forward.reference_value)
     return SVector(reference * log(world / reference))
 end
@@ -229,7 +229,7 @@ end
     parent = _fits_spectral_to_parent(world, Val(S), oftype(world, forward.rest_frequency), oftype(world, forward.rest_wavelength))
     wavelength = _fits_parent_to_x(parent, Val(X), Val(P), oftype(world, forward.rest_frequency), oftype(world, forward.rest_wavelength))
     sine_beta = wavelength * oftype(world, forward.denominator) - oftype(world, forward.constant)
-    abs(sine_beta) <= one(sine_beta) || throw(DomainError(sine_beta, "world coordinate lies outside the FITS grism inverse domain"))
+    abs(sine_beta) <= one(sine_beta) || isnan(sine_beta) || throw(DomainError(sine_beta, "world coordinate lies outside the FITS grism inverse domain"))
     gamma = tan(asin(sine_beta) - oftype(world, forward.beta_offset))
     return SVector(gamma - oftype(world, forward.gamma_reference))
 end

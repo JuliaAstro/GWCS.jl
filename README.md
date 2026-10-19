@@ -22,7 +22,13 @@ world_to_pixel(wcs, 1.12, 2.38)
 
 Coordinates use each boundary frame's native order. `axes_order[i]` gives the one-based transform position of native frame axis `i`; GWCS compiles static boundary remaps when this order is not the identity. Transform kernels and stored pipeline steps remain in transform order. GWCS.jl does not apply an implicit zero- or one-based pixel offset, so a FITS-equivalent pipeline must encode the FITS reference-pixel convention explicitly.
 
-`pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`.
+`pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`. Coordinates the transforms cannot map, such as the corners of an all-sky projection, raise `DomainError` by default; pass `fill_invalid=true` to return `fill_value` for them instead. This is useful for evaluating whole image grids, for example FITS all-sky maps, which have no bounding box:
+
+```julia
+world = pixel_to_world(wcs, pixel_matrix; fill_invalid=true)
+```
+
+Only `DomainError` is converted. Other errors, including `NoConvergence` from the numerical inverse (controlled by `quiet`), still propagate.
 
 ### Editing a pipeline
 
@@ -122,7 +128,7 @@ pix2sky = IntermediateToNative(projection)
 sky2pix = inverse_transform(pix2sky)
 ```
 
-Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches raise `DomainError`. The projection types are also shared by native FITS parsing, so an algorithm has one numeric implementation regardless of its metadata source.
+Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches raise `DomainError`. Non-finite coordinates propagate as `NaN`. `TangentPlaneToNative` and `NativeToTangentPlane` remain as aliases for the gnomonic `IntermediateToNative` and `NativeToIntermediate` types. The projection types are also shared by native FITS parsing, so an algorithm has one numeric implementation regardless of its metadata source.
 
 `celestial_transform` combines a projection with the Paper II native-to-celestial rotation derived from a reference longitude and latitude. It computes the default `LONPOLE` when omitted and uses `LATPOLE` to disambiguate general pole solutions:
 
@@ -150,7 +156,7 @@ Analytical and metadata-provided inverses are compiled into the WCS. Square pipe
 world_to_pixel(wcs, world_coordinate; tolerance=1e-8, maxiter=50, initial_guess=(10.0, 20.0), quiet=true)
 ```
 
-By default (`quiet=false`), nonconvergence throws `NoConvergence`, which records the best solution, accuracy, and iteration count. `quiet=true` returns the best solution instead. Numerical inversion is not available for pipelines with different pixel and world dimensions.
+By default (`quiet=false`), nonconvergence throws `NoConvergence`, which records the best solution, accuracy, and iteration count. `quiet=true` returns the best solution instead. Before iterating, the target is mapped through the inverse of the pipeline's longest analytically invertible tail (for example the TAN projection and celestial rotation of a TAN-SIP WCS), so a world coordinate that no pixel can reach raises `DomainError` exactly as with an analytical inverse, regardless of `quiet`. Non-finite world coordinates return `NaN`. Numerical inversion is not available for pipelines with different pixel and world dimensions.
 
 ### Callable transforms
 
@@ -238,7 +244,7 @@ axis_correlation_matrix(wcs)
 transform_dependencies(transform)
 ```
 
-Composition uses boolean dependency propagation, parallel transforms produce block-diagonal correlations, and fixed inputs remove the corresponding columns. Unknown external transforms use a conservative dense matrix. External transform packages may specialize `transform_dependencies`; a false entry must guarantee independence for every valid coordinate and parameter value rather than describe a Jacobian that happens to be zero at one point.
+Composition uses boolean dependency propagation, parallel transforms produce block-diagonal correlations, and fixed inputs remove the corresponding columns. FITS polynomial, lookup, and `-TAB` distortions depend only on the axes their models read, so unrelated spectral or time axes stay separable. Unknown external transforms use a conservative dense matrix. External transform packages may specialize `transform_dependencies`; a false entry must guarantee independence for every valid coordinate and parameter value rather than describe a Jacobian that happens to be zero at one point.
 
 ## FITS WCS
 
@@ -280,7 +286,7 @@ Headers that use deprecated or informal conventions are repaired the way WCSLIB 
 | Non-standard unit spellings such as `DEG`, `HZ`, `MHZ`, `Angstroms`, `SEC` | WCSLIB's safe unit translations (astropy's default); units are otherwise case-sensitive |
 | `CROTAi` on the longitude axis only | Ignored, as in WCSLIB, with a warning |
 
-Singular linear transformation matrices are rejected. WCSLIB's `cylfix` (re-centering cylindrical all-sky maps whose pixels extend beyond native longitude ±180°) is not applied, matching astropy's default, and `DATE-OBS`/`OBSGEO-L,B,H` repairs are not modeled.
+Singular linear transformation matrices are rejected. As in WCSLIB, the conic (COP, COD, COE, COO) and Bonne projections require `PV2_1` rather than defaulting it, and IRAF `WATi_n` strings are ignored unless they encode TNX or ZPX on both axes (or CTYPE declares TNX/ZPX). WCSLIB's `cylfix` (re-centering cylindrical all-sky maps whose pixels extend beyond native longitude ±180°) is not applied, matching astropy's default, and `DATE-OBS`/`OBSGEO-L,B,H` repairs are not modeled.
 
 ## Metadata
 

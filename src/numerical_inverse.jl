@@ -30,13 +30,26 @@ function _box_initial_guess(wcs::WCS{N}, box::CompoundBoundingBox{N,K}, ::Type{T
     end)
 end
 
-function _initial_guess(wcs::WCS{N}, target::StaticVector{N,T}, initial_guess, residual_function) where {N,T}
+# Splits a forward pipeline without an inverse into a non-invertible prefix and the inverse of its
+# longest analytically invertible tail, such as pixels -> SIP -> linear and linear -> TAN -> rotation.
+function _numerical_inverse_split(forward::AbstractTransform)
+    transforms = forward isa ComposedTransform ? forward.transforms : (forward,)
+    first_invertible = length(transforms) + 1
+    while first_invertible > 1 && !(_inverse_transform_checked(transforms[first_invertible - 1]) isa NoInverse)
+        first_invertible -= 1
+    end
+    prefix = compose(transforms[1:(first_invertible - 1)]...)
+    first_invertible > length(transforms) && return (prefix=prefix, tail_inverse=IdentityTransform{output_dimension(forward)}())
+    return (prefix=prefix, tail_inverse=_inverse_transform_checked(compose(transforms[first_invertible:end]...)))
+end
+
+function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, initial_guess, residual_function) where {N,T}
     if initial_guess !== nothing
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess)
     end
     initialized, used = try
-        _inverse_initialize(wcs.forward, target)
+        _inverse_initialize(wcs.inverse_split.prefix, intermediate)
     catch error
         error isa DomainError || rethrow()
         (nothing, false)
@@ -111,7 +124,11 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
         error isa DomainError || rethrow()
         SVector{N,T}(ntuple(_ -> T(NaN), N))
     end
-    estimate = _initial_guess(wcs, target, initial_guess, residual_function)
+    # Non-finite world coordinates propagate as NaN, as they do through analytical inverses.
+    all(isfinite, target) || return SVector{N,T}(ntuple(_ -> T(NaN), N))
+    # Like an analytical inverse, a DomainError from the invertible tail means no pixel maps to the target.
+    intermediate = wcs.inverse_split.tail_inverse(target)
+    estimate = _initial_guess(wcs, intermediate, T, initial_guess, residual_function)
 
     best_solution = estimate
     best_residual = residual_function(estimate)

@@ -72,3 +72,42 @@ Base.getindex(matrix::OffsetColumnMatrix, row::Int, column::Int) = matrix.parent
     @test in_image(constant_wcs, 5.0, 11.0)
     @test !in_image(constant_wcs, 7.0, 11.0)
 end
+
+@testset "Filling invalid coordinates" begin
+    sky_header(code) = Dict("NAXIS" => 2, "CTYPE1" => "RA---$code", "CTYPE2" => "DEC--$code", "CRPIX1" => 181.0, "CRPIX2" => 91.0,
+        "CRVAL1" => 0.0, "CRVAL2" => 0.0, "CDELT1" => -1.0, "CDELT2" => 1.0)
+    ait = parse_fits_wcs(sky_header("AIT"))
+    grid = [1.0 181.0 360.0; 1.0 91.0 180.0]
+    @test_throws DomainError pixel_to_world(ait, 1.0, 1.0)
+    @test_throws DomainError pixel_to_world(ait, grid)
+    filled = pixel_to_world(ait, grid; fill_invalid=true)
+    @test all(isnan, filled[:, 1]) && all(isnan, filled[:, 3])
+    @test filled[:, 2] ≈ [0.0, 0.0] atol=1e-12
+    @test pixel_to_world(ait, grid; fill_invalid=true, fill_value=-999.0)[:, 1] == [-999.0, -999.0]
+    @test all(isnan, pixel_to_world(ait, 1.0, 1.0; fill_invalid=true))
+    @test @inferred(pixel_to_world(ait, SVector(181.0, 91.0); fill_invalid=true)) == pixel_to_world(ait, SVector(181.0, 91.0))
+
+    # The antipode of a TAN reference point has no pixel under the analytical inverse.
+    tan = parse_fits_wcs(sky_header("TAN"))
+    @test_throws DomainError world_to_pixel(tan, 180.0, 0.0)
+    @test all(isnan, world_to_pixel(tan, 180.0, 0.0; fill_invalid=true))
+    @test world_to_pixel(tan, [180.0 1.0; 0.0 2.0]; fill_invalid=true)[:, 2] ≈ world_to_pixel(tan, 1.0, 2.0)
+
+    # Only DomainError is converted; NoConvergence stays under `quiet`.
+    failing = WCS(Step(Frame2D(name="pixels"), CallableTransform{2,2}((x, y) -> throw(ArgumentError("calibration unavailable")))), Step(CoordinateFrame{2}(name="world")))
+    @test_throws "calibration unavailable" pixel_to_world(failing, 1.0, 2.0; fill_invalid=true)
+    # Without AP/BP, TAN-SIP uses the numerical inverse; its analytical TAN tail still rejects the antipode.
+    sip = parse_fits_wcs(merge(sky_header("TAN"), Dict("CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "A_ORDER" => 2, "B_ORDER" => 2, "A_2_0" => 1e-6)))
+    @test sip.backward isa NoInverse
+    @test_throws DomainError world_to_pixel(sip, 180.0, 0.0)
+    @test_throws DomainError world_to_pixel(sip, 180.0, 0.0; quiet=true)
+    @test all(isnan, world_to_pixel(sip, 180.0, 0.0; fill_invalid=true))
+    @test !in_image(sip, 180.0, 0.0)
+    @test all(isnan, world_to_pixel(sip, NaN, 0.0))
+    distortion = WCS(Step(Frame2D(name="pixels"), parallel(Polynomial1D([0.0, 1.0, 1e-3]), Polynomial1D([0.0, 1.0, -5e-4]))), Step(CoordinateFrame{2}(name="world")))
+    @test_throws NoConvergence world_to_pixel(distortion, 2.5, -3.5; tolerance=1e-15, maxiter=1, fill_invalid=true)
+
+    allocated_default(wcs, coords) = @allocated pixel_to_world(wcs, coords)
+    pixel_to_world(ait, SVector(181.0, 91.0))
+    @test allocated_default(ait, SVector(181.0, 91.0)) == 0
+end

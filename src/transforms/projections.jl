@@ -216,48 +216,105 @@ end
 
 abstract type AbstractConicProjection <: AbstractSphericalProjection end
 
+function _conic_angles(::Type{T}, sigma, delta) where {T}
+    sigma_value, delta_value = T(sigma), T(delta)
+    all(isfinite, (sigma_value, delta_value)) || throw(ArgumentError("conic projection parameters must be finite"))
+    abs(sigma_value) <= 90 && abs(delta_value) <= 90 || throw(ArgumentError("conic projection parameters must be between -90 and 90 degrees"))
+    return deg2rad(sigma_value), deg2rad(delta_value)
+end
+
+function _conic_perspective_constants(sigma::T, delta::T) where {T}
+    cone = sin(sigma)
+    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COP is degenerate for sigma = 0"))
+    cos_delta = cos(delta)
+    abs(cos_delta) > _projection_tolerance(T) || throw(ArgumentError("COP is degenerate for delta = +/-90 degrees"))
+    cot_sigma = cos(sigma) / sin(sigma)
+    return sigma, cone, rad2deg(cos_delta * cot_sigma), cos_delta, cot_sigma
+end
+
+function _conic_equidistant_constants(sigma::T, delta::T) where {T}
+    cone = abs(delta) <= _projection_tolerance(T) ? sin(sigma) : sin(sigma) * sin(delta) / delta
+    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COD conic constant is degenerate"))
+    return sigma, cone, rad2deg(cos(delta) * cos(sigma) / cone)
+end
+
+function _conic_equal_area_constants(sigma::T, delta::T) where {T}
+    first_parallel, second_parallel = sigma - delta, sigma + delta
+    cone = (sin(first_parallel) + sin(second_parallel)) / 2
+    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COE conic constant is degenerate"))
+    scale = rad2deg(one(T)) / cone
+    shape = one(T) + sin(first_parallel) * sin(second_parallel)
+    y0 = scale * sqrt(max(zero(T), shape - 2cone * sin(sigma)))
+    return sigma, cone, scale, shape, y0
+end
+
+function _conic_orthomorphic_constants(sigma::T, delta::T) where {T}
+    first_parallel, second_parallel = sigma - delta, sigma + delta
+    cone = if abs(delta) <= _projection_tolerance(T)
+        sin(first_parallel)
+    else
+        first_tangent = tan((T(pi / 2) - first_parallel) / 2)
+        second_tangent = tan((T(pi / 2) - second_parallel) / 2)
+        log(cos(second_parallel) / cos(first_parallel)) / log(second_tangent / first_tangent)
+    end
+    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COO conic constant is degenerate"))
+    first_tangent = tan((T(pi / 2) - first_parallel) / 2)
+    scale = rad2deg(cos(first_parallel) / (cone * first_tangent^cone))
+    y0 = scale * tan((T(pi / 2) - sigma) / 2)^cone
+    return sigma, cone, scale, y0
+end
+
+# `constants` holds values precomputed from sigma and delta (in degrees) so evaluation avoids recomputing them.
 struct ConicPerspective{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
+    constants::NTuple{5,T}
+    ConicPerspective{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_perspective_constants(_conic_angles(T, sigma, delta)...))
 end
 
 struct ConicEquidistant{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
+    constants::NTuple{3,T}
+    ConicEquidistant{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_equidistant_constants(_conic_angles(T, sigma, delta)...))
 end
 
 struct ConicEqualArea{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
+    constants::NTuple{5,T}
+    ConicEqualArea{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_equal_area_constants(_conic_angles(T, sigma, delta)...))
 end
 
 struct ConicOrthomorphic{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
+    constants::NTuple{4,T}
+    ConicOrthomorphic{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_orthomorphic_constants(_conic_angles(T, sigma, delta)...))
 end
 
-function _conic_parameters(::Type{P}, sigma, delta) where {P}
-    sigma_value, delta_value = promote(float(sigma), float(delta))
-    all(isfinite, (sigma_value, delta_value)) || throw(ArgumentError("conic projection parameters must be finite"))
-    abs(sigma_value) <= 90 && abs(delta_value) <= 90 || throw(ArgumentError("conic projection parameters must be between -90 and 90 degrees"))
-    return P{typeof(sigma_value)}(sigma_value, delta_value)
-end
+_conic_type(sigma, delta) = promote_type(typeof(float(sigma)), typeof(float(delta)))
 
-ConicPerspective(sigma::Real=45, delta::Real=0) = _conic_parameters(ConicPerspective, sigma, delta)
-ConicEquidistant(sigma::Real=45, delta::Real=0) = _conic_parameters(ConicEquidistant, sigma, delta)
-ConicEqualArea(sigma::Real=45, delta::Real=0) = _conic_parameters(ConicEqualArea, sigma, delta)
-ConicOrthomorphic(sigma::Real=45, delta::Real=0) = _conic_parameters(ConicOrthomorphic, sigma, delta)
+ConicPerspective(sigma::Real=45, delta::Real=0) = ConicPerspective{_conic_type(sigma, delta)}(sigma, delta)
+ConicEquidistant(sigma::Real=45, delta::Real=0) = ConicEquidistant{_conic_type(sigma, delta)}(sigma, delta)
+ConicEqualArea(sigma::Real=45, delta::Real=0) = ConicEqualArea{_conic_type(sigma, delta)}(sigma, delta)
+ConicOrthomorphic(sigma::Real=45, delta::Real=0) = ConicOrthomorphic{_conic_type(sigma, delta)}(sigma, delta)
 
 """The BON/Bonne projection with standard parallel `theta1`."""
 struct BonneProjection{T<:AbstractFloat} <: AbstractSphericalProjection
     theta1::T
+    y0::T
+    function BonneProjection{T}(theta1) where {T}
+        value = T(theta1)
+        isfinite(value) && abs(value) <= 90 || throw(ArgumentError("Bonne standard parallel must be between -90 and 90 degrees"))
+        # theta1 = 0 is evaluated as SFL, so y0 is unused there.
+        radians = deg2rad(value)
+        y0 = iszero(value) ? zero(T) : rad2deg(cos(radians) / sin(radians) + radians)
+        return new{T}(value, y0)
+    end
 end
 
-function BonneProjection(theta1::Real=45)
-    value = float(theta1)
-    isfinite(value) && abs(value) <= 90 || throw(ArgumentError("Bonne standard parallel must be between -90 and 90 degrees"))
-    return BonneProjection{typeof(value)}(value)
-end
+BonneProjection(theta1::Real=45) = BonneProjection{typeof(float(theta1))}(theta1)
 
 struct TangentialSphericalCube <: AbstractSphericalProjection end
 struct COBESphericalCube <: AbstractSphericalProjection end
@@ -287,11 +344,19 @@ end
 IntermediateToNative{P}() where {P<:AbstractSphericalProjection} = IntermediateToNative(P())
 NativeToIntermediate{P}() where {P<:AbstractSphericalProjection} = NativeToIntermediate(P())
 
+"""TAN intermediate-plane to native spherical coordinates; an alias kept from earlier releases."""
+const TangentPlaneToNative = IntermediateToNative{GnomonicProjection}
+
+"""Native spherical to TAN intermediate-plane coordinates; an alias kept from earlier releases."""
+const NativeToTangentPlane = NativeToIntermediate{GnomonicProjection}
+
 inverse_transform(transform::IntermediateToNative) = NativeToIntermediate(transform.projection)
 inverse_transform(transform::NativeToIntermediate) = IntermediateToNative(transform.projection)
 
 @inline function (transform::IntermediateToNative)(coords::StaticVector{2})
     T = _evaluation_type(eltype(coords))
+    # Non-finite coordinates propagate as NaN instead of tripping projection domain checks.
+    all(isfinite, coords) || return SVector(T(NaN), T(NaN))
     phi, theta = _intermediate_to_native(transform.projection, T(coords[1]), T(coords[2]))
     return _native_bounds_check(SVector(rad2deg(phi), rad2deg(theta)), coords)
 end
@@ -307,6 +372,7 @@ end
 
 @inline function (transform::NativeToIntermediate)(coords::StaticVector{2})
     T = _evaluation_type(eltype(coords))
+    all(isfinite, coords) || return SVector(T(NaN), T(NaN))
     phi = deg2rad(T(coords[1]))
     theta = deg2rad(T(coords[2]))
     x, y = _native_to_intermediate(transform.projection, phi, theta)
@@ -631,37 +697,23 @@ end
 
 function _intermediate_to_native(projection::ConicPerspective, x, y)
     T = promote_type(typeof(x), typeof(y))
-    sigma, delta = deg2rad(T(projection.sigma)), deg2rad(T(projection.delta))
-    cone = sin(sigma)
-    abs(cone) > _projection_tolerance(T) || throw(DomainError(SVector(x, y), "COP is degenerate for sigma = 0"))
-    y0 = rad2deg(cos(delta) * cos(sigma) / sin(sigma))
+    sigma, cone, y0, cos_delta, cot_sigma = map(T, projection.constants)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, sigma)
-    return angle / cone, sigma + atan(cos(sigma) / sin(sigma) - deg2rad(radius) / cos(delta))
+    return angle / cone, sigma + atan(cot_sigma - deg2rad(radius) / cos_delta)
 end
 
 function _native_to_intermediate(projection::ConicPerspective, phi, theta)
     theta = _native_latitude(theta, projection)
     T = promote_type(typeof(phi), typeof(theta))
-    sigma, delta = deg2rad(T(projection.sigma)), deg2rad(T(projection.delta))
-    cone = sin(sigma)
-    abs(cone) > _projection_tolerance(T) || throw(DomainError(rad2deg(theta), "COP is degenerate for sigma = 0"))
-    y0 = rad2deg(cos(delta) * cos(sigma) / sin(sigma))
+    sigma, cone, y0, cos_delta, _ = map(T, projection.constants)
     angle = cone * _wrap_native_longitude(phi)
-    radius = y0 - rad2deg(cos(delta) * tan(theta - sigma))
+    radius = y0 - rad2deg(cos_delta * tan(theta - sigma))
     return radius * sin(angle), -radius * cos(angle) + y0
-end
-
-function _conic_equidistant_constants(projection, ::Type{T}) where {T}
-    sigma, delta = deg2rad(T(projection.sigma)), deg2rad(T(projection.delta))
-    cone = abs(delta) <= _projection_tolerance(T) ? sin(sigma) : sin(sigma) * sin(delta) / delta
-    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COD conic constant is degenerate"))
-    y0 = rad2deg(cos(delta) * cos(sigma) / cone)
-    return sigma, cone, y0
 end
 
 function _intermediate_to_native(projection::ConicEquidistant, x, y)
     T = promote_type(typeof(x), typeof(y))
-    sigma, cone, y0 = _conic_equidistant_constants(projection, T)
+    sigma, cone, y0 = map(T, projection.constants)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, sigma)
     return angle / cone, deg2rad(y0 + rad2deg(sigma) - radius)
 end
@@ -669,26 +721,15 @@ end
 function _native_to_intermediate(projection::ConicEquidistant, phi, theta)
     theta = _native_latitude(theta, projection)
     T = promote_type(typeof(phi), typeof(theta))
-    sigma, cone, y0 = _conic_equidistant_constants(projection, T)
+    sigma, cone, y0 = map(T, projection.constants)
     angle = cone * _wrap_native_longitude(phi)
     radius = y0 + rad2deg(sigma) - rad2deg(theta)
     return radius * sin(angle), -radius * cos(angle) + y0
 end
 
-function _conic_equal_area_constants(projection, ::Type{T}) where {T}
-    sigma, delta = deg2rad(T(projection.sigma)), deg2rad(T(projection.delta))
-    first_parallel, second_parallel = sigma - delta, sigma + delta
-    cone = (sin(first_parallel) + sin(second_parallel)) / 2
-    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COE conic constant is degenerate"))
-    scale = rad2deg(one(T)) / cone
-    shape = one(T) + sin(first_parallel) * sin(second_parallel)
-    y0 = scale * sqrt(max(zero(T), shape - 2cone * sin(sigma)))
-    return sigma, cone, scale, shape, y0
-end
-
 function _intermediate_to_native(projection::ConicEqualArea, x, y)
     T = promote_type(typeof(x), typeof(y))
-    sigma, cone, scale, shape, y0 = _conic_equal_area_constants(projection, T)
+    sigma, cone, scale, shape, y0 = map(T, projection.constants)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, sigma)
     argument = (scale^2 * shape - radius^2) * cone / (2rad2deg(one(T))^2)
     abs(argument) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "COE intermediate coordinate is outside the projection domain"))
@@ -698,32 +739,15 @@ end
 function _native_to_intermediate(projection::ConicEqualArea, phi, theta)
     theta = _native_latitude(theta, projection)
     T = promote_type(typeof(phi), typeof(theta))
-    _, cone, scale, shape, y0 = _conic_equal_area_constants(projection, T)
+    _, cone, scale, shape, y0 = map(T, projection.constants)
     radius = scale * sqrt(max(zero(T), shape - 2cone * sin(theta)))
     angle = cone * _wrap_native_longitude(phi)
     return radius * sin(angle), -radius * cos(angle) + y0
 end
 
-function _conic_orthomorphic_constants(projection, ::Type{T}) where {T}
-    sigma, delta = deg2rad(T(projection.sigma)), deg2rad(T(projection.delta))
-    first_parallel, second_parallel = sigma - delta, sigma + delta
-    cone = if abs(delta) <= _projection_tolerance(T)
-        sin(first_parallel)
-    else
-        first_tangent = tan((T(pi / 2) - first_parallel) / 2)
-        second_tangent = tan((T(pi / 2) - second_parallel) / 2)
-        log(cos(second_parallel) / cos(first_parallel)) / log(second_tangent / first_tangent)
-    end
-    abs(cone) > _projection_tolerance(T) || throw(ArgumentError("COO conic constant is degenerate"))
-    first_tangent = tan((T(pi / 2) - first_parallel) / 2)
-    scale = rad2deg(cos(first_parallel) / (cone * first_tangent^cone))
-    y0 = scale * tan((T(pi / 2) - sigma) / 2)^cone
-    return sigma, cone, scale, y0
-end
-
 function _intermediate_to_native(projection::ConicOrthomorphic, x, y)
     T = promote_type(typeof(x), typeof(y))
-    sigma, cone, scale, y0 = _conic_orthomorphic_constants(projection, T)
+    sigma, cone, scale, y0 = map(T, projection.constants)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, sigma)
     abs(radius) > _projection_tolerance(T) || throw(DomainError(SVector(x, y), "COO is singular at the projection origin"))
     return angle / cone, T(pi / 2) - 2atan((radius / scale)^(inv(cone)))
@@ -732,7 +756,7 @@ end
 function _native_to_intermediate(projection::ConicOrthomorphic, phi, theta)
     theta = _native_latitude(theta, projection)
     T = promote_type(typeof(phi), typeof(theta))
-    _, cone, scale, y0 = _conic_orthomorphic_constants(projection, T)
+    _, cone, scale, y0 = map(T, projection.constants)
     theta > T(-pi / 2) || throw(DomainError(rad2deg(theta), "COO is singular at the native south pole"))
     radius = scale * tan((T(pi / 2) - theta) / 2)^cone
     angle = cone * _wrap_native_longitude(phi)
@@ -743,8 +767,7 @@ function _intermediate_to_native(projection::BonneProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
     theta1 = T(projection.theta1)
     iszero(theta1) && return _intermediate_to_native(SansonFlamsteedProjection(), x, y)
-    theta1_radians = deg2rad(theta1)
-    y0 = rad2deg(cos(theta1_radians) / sin(theta1_radians) + theta1_radians)
+    y0 = T(projection.y0)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, theta1)
     theta = deg2rad(y0 - radius)
     abs(theta) <= T(pi / 2) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "BON intermediate coordinate is outside the projection domain"))
@@ -758,8 +781,7 @@ function _native_to_intermediate(projection::BonneProjection, phi, theta)
     T = promote_type(typeof(phi), typeof(theta))
     theta1 = T(projection.theta1)
     iszero(theta1) && return _native_to_intermediate(SansonFlamsteedProjection(), phi, theta)
-    theta1_radians = deg2rad(theta1)
-    y0 = rad2deg(cos(theta1_radians) / sin(theta1_radians) + theta1_radians)
+    y0 = T(projection.y0)
     radius = y0 - rad2deg(theta)
     angle = abs(radius) <= _projection_tolerance(T) ? zero(T) : _wrap_native_longitude(phi) * cos(theta) * rad2deg(one(T)) / radius
     return radius * sin(angle), -radius * cos(angle) + y0

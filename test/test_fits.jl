@@ -59,6 +59,10 @@ import FITSIO
     allocated_fits_inverse(wcs, world) = @allocated world_to_pixel(wcs, world)
     @test allocated_fits_forward(tan, SVector(400.0, 300.0)) == 0
     @test allocated_fits_inverse(tan, sample_world) == 0
+    # Non-finite coordinates propagate as NaN rather than raising projection domain errors.
+    @test all(isnan, pixel_to_world(tan, NaN, 300.0))
+    @test all(isnan, world_to_pixel(tan, NaN, -5.0))
+    @test all(isnan, pixel_to_world(tan, [NaN 400.0; 300.0 300.0])[:, 1])
 
     interleaved_header = Dict(
         "NAXIS" => 3, "CTYPE1" => "FREQ", "CTYPE2" => "DEC--CAR", "CTYPE3" => "RA---CAR",
@@ -204,6 +208,8 @@ import FITSIO
     world_to_pixel(log_ghz, SVector(1.4010003572279062e9))
     @test allocated_fits_forward(log_ghz, SVector(2.0)) == 0
     @test allocated_fits_inverse(log_ghz, SVector(1.4010003572279062e9)) == 0
+    @test isnan(only(pixel_to_world(log_ghz, NaN)))
+    @test isnan(only(world_to_pixel(log_ghz, NaN)))
     @test_throws "incompatible with algorithm" parse_fits_wcs(Dict("NAXIS" => 1, "CTYPE1" => "FREQ-F2W", "CRVAL1" => 1.0))
     @test_throws "requires RESTFRQ or RESTWAV" parse_fits_wcs(Dict("NAXIS" => 1, "CTYPE1" => "VELO-F2V", "CRVAL1" => 0.0))
 
@@ -231,6 +237,8 @@ import FITSIO
     world_to_pixel(grism_angstrom, SVector(5.139265914152931e-7))
     @test allocated_fits_forward(grism_angstrom, SVector(2000.0)) == 0
     @test allocated_fits_inverse(grism_angstrom, SVector(5.139265914152931e-7)) == 0
+    @test isnan(only(pixel_to_world(grism_angstrom, NaN)))
+    @test isnan(only(world_to_pixel(grism_angstrom, NaN)))
     @test_throws "singular wavelength equation" parse_fits_wcs(Dict("NAXIS" => 1, "CTYPE1" => "WAVE-GRI", "CRVAL1" => 5e-7))
 
     mixed_header = Dict(
@@ -520,6 +528,7 @@ import FITSIO
     @test_throws "FITS lookup distortions require at least two pixel axes" GWCS._parse_fits_wcs(GWCS._fits_header(one_dimensional_tpd_header); lookup_data)
     pixel_to_world(lookup_wcs, SVector(512.0, 512.0))
     @test allocated_fits_forward(lookup_wcs, SVector(512.0, 512.0)) == 0
+    @test all(isnan, pixel_to_world(lookup_wcs, NaN, 512.0))
     bilinear = BilinearLookupTable([0.0 1.0; 2.0 3.0])
     @test bilinear(SVector(0.5, 0.5)) == SVector(1.5)
     @test_throws "CDELT values must be nonzero" BilinearLookupTable(ones(2, 2); cdelt=(1, 0))
@@ -565,6 +574,8 @@ import FITSIO
     world_to_pixel(tab_wcs, SVector(3.0e10))
     @test allocated_fits_forward(tab_wcs, SVector(2.5)) == 0
     @test allocated_fits_inverse(tab_wcs, SVector(3.0e10)) == 0
+    @test isnan(only(pixel_to_world(tab_wcs, NaN)))
+    @test isnan(only(world_to_pixel(tab_wcs, NaN)))
     @test_throws "must be monotonic" FITSTabularTable((1,), reshape([10.0, 20.0, 40.0], 1, 3), ([1.0, 3.0, 2.0],))
     @test_throws "must be finite" FITSTabularTable((1,), reshape([10.0, NaN], 1, 2), ([1.0, 2.0],))
 
@@ -647,6 +658,8 @@ import FITSIO
     @test cube_models[3].axes == (3, 2)
     @test pixel_to_world(parse_fits_wcs(cube_tpv_header), 12.3, 112.3, 176.4) ≈ SVector(1.00706e9, 123.33969797345996, -23.50589278224176) atol=3e-14
     @test_throws "TPV cannot be combined" parse_fits_wcs(merge(tpv_header, Dict("CQDIS1" => "TPD", "DQ1.NAXES" => 1)))
+    # TPV only couples the celestial axes; PC1_2 couples the spectral axis to pixel axis 2.
+    @test axis_correlation_matrix(parse_fits_wcs(cube_tpv_header)) == SMatrix{3,3,Bool}([1 1 0; 0 1 1; 0 1 1])
 
     prior_tpd_header = Dict(
         "NAXIS" => 2, "CTYPE1" => "LINEAR", "CTYPE2" => "LINEAR",
@@ -692,6 +705,11 @@ import FITSIO
     @test world_to_pixel(sequent_tpd, sequent_world; initial_guess=(12.3, -3.4)) ≈ SVector(12.3, -3.4) atol=2e-12
     pixel_to_world(sequent_tpd, SVector(12.3, -3.4))
     @test allocated_fits_forward(sequent_tpd, SVector(12.3, -3.4)) == 0
+    # Prior and sequent TPD keep a third, unrelated axis separable.
+    spectral_axis = Dict("NAXIS" => 3, "CTYPE3" => "WAVE", "CRPIX3" => 1.0, "CRVAL3" => 5e-7, "CDELT3" => 1e-10)
+    for header in (prior_tpd_header, sequent_tpd_header)
+        @test axis_correlation_matrix(parse_fits_wcs(merge(header, spectral_axis))) == SMatrix{3,3,Bool}([1 1 0; 1 1 0; 0 0 1])
+    end
 
     # WCSLIB 8.9 and Astropy 8.0.1/WCSLIB 8.6 references for combined AUX and radial TPD.
     auxiliary_radial_header = Dict(
@@ -828,6 +846,13 @@ import FITSIO
     dss_with_cd["CD2_2"] = 1.0
     @test pixel_to_world(parse_fits_wcs(dss_with_cd), 200.0, 200.0) ≈ last(first(legacy_references)) atol=2e-12
     @test_throws "requires both WAT1_n and WAT2_n" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "RA---TNX", "CTYPE2" => "DEC--TNX", "WAT1_001" => "wtype=tnx")))
+    # Like WCSLIB, WAT strings that do not encode TNX/ZPX (common in IRAF spectra) are ignored.
+    linear_wat_header = Dict("NAXIS" => 1, "CTYPE1" => "LINEAR", "CRPIX1" => 1.0, "CRVAL1" => 4000.0, "CDELT1" => 1.5,
+        "WAT0_001" => "system=equispec", "WAT1_001" => "wtype=linear label=Wavelength units=angstroms")
+    @test pixel_to_world(parse_fits_wcs(linear_wat_header), 3.0) == SVector(4003.0)
+    tan_wat_header = merge(tan_header, Dict("WAT0_001" => "system=image", "WAT1_001" => "wtype=tan axtype=ra", "WAT2_001" => "wtype=tan axtype=dec"))
+    @test pixel_to_world(parse_fits_wcs(tan_wat_header), 400.0, 300.0) == pixel_to_world(tan, 400.0, 300.0)
+    @test_throws "unsupported WAT1 wtype" parse_fits_wcs(merge(tan_wat_header, Dict("CTYPE1" => "RA---TNX", "CTYPE2" => "DEC--TNX")))
 
     # Like astropy, -TAN-SIP with SCAMP PV terms uses SIP and ignores the celestial PV keywords,
     # while plain -TAN with SCAMP PV terms is TPV and ignores SIP.
@@ -884,6 +909,10 @@ import FITSIO
         southern = parse_fits_wcs(unit_projection_header(code, (30.0, -40.0), parameters))
         @test pixel_to_world(southern, 10.0, 20.0) ≈ SVector(expected) atol=1e-12
         @test world_to_pixel(southern, expected...) ≈ SVector(10.0, 20.0) atol=1e-10
+    end
+    # WCSLIB requires PV2_1 for the conic and Bonne projections rather than defaulting it.
+    for code in ("COP", "COD", "COE", "COO", "BON")
+        @test_throws "FITS $code projection requires PV2_1, as in WCSLIB" parse_fits_wcs(unit_projection_header(code, (30.0, 40.0)))
     end
     # Points beyond the projection boundary have no sky coordinates (WCSLIB status 1), not wrapped duplicates.
     for (code, parameters, pixel) in (("CAR", Dict(), (-189.0, 0.0)), ("MOL", Dict(), (170.0, 60.0)), ("SFL", Dict(), (170.0, 60.0)),

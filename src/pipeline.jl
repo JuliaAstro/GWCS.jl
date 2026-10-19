@@ -11,13 +11,14 @@ Step(frame::AbstractCoordinateFrame) = Step(frame, nothing)
 
 Validated generalized WCS pipeline with precompiled forward and inverse roots.
 """
-struct WCS{Nin,Nout,S,F,B,BB,PS}
+struct WCS{Nin,Nout,S,F,B,BB,PS,IS}
     steps::S
     forward::F
     backward::B
     name::String
     pixel_shape::PS
     bounding_box::BB
+    inverse_split::IS
 end
 
 function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
@@ -42,6 +43,7 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     backward = _inverse_transform_checked(forward)
     Nin = frame_dimension(first(compiled).frame)
     Nout = frame_dimension(last(compiled).frame)
+    inverse_split = backward isa NoInverse && Nin == Nout ? _numerical_inverse_split(forward) : nothing
     if bounding_box !== nothing
         bounding_box isa AbstractBoundingBox || throw(ArgumentError("bounding_box must be an AbstractBoundingBox or nothing"))
         input_dimension(bounding_box) == Nin || throw(DimensionMismatch("bounding box has input dimension $(input_dimension(bounding_box)), expected $Nin"))
@@ -50,7 +52,7 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     shape = pixel_shape === nothing ? nothing : Tuple(map(pixel_shape) do value
         value === nothing ? nothing : Int(value)
     end)
-    return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape)}(compiled, forward, backward, String(name), shape, bounding_box)
+    return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape),typeof(inverse_split)}(compiled, forward, backward, String(name), shape, bounding_box, inverse_split)
 end
 
 """

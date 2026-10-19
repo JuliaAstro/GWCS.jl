@@ -121,3 +121,45 @@ function transform_dependencies(transform::InverseCallableTransform{Nin,Nout}) w
     transform.transform.inverse_dependencies === nothing && return _dense_dependencies(Val(Nout), Val(Nin))
     return transform.transform.inverse_dependencies
 end
+
+function _dependency_matrix(entry, ::Val{Nout}, ::Val{Nin}) where {Nout,Nin}
+    values = ntuple(index -> entry(mod1(index, Nout), div(index - 1, Nout) + 1)::Bool, Val(Nin * Nout))
+    return SMatrix{Nout,Nin,Bool}(values)
+end
+
+transform_dependencies(table::FITSLookupTable{N,Nin}) where {N,Nin} = _dependency_matrix((_, column) -> column in table.axes, Val(1), Val(Nin))
+
+# Dependencies of the per-axis lookup offsets on the first two axes, optionally including the identity term.
+function _lookup_stage_dependencies(tables, ::Val{N}, include_identity) where {N}
+    return _dependency_matrix(Val(N), Val(N)) do row, column
+        include_identity && row == column || row <= 2 && tables[row] !== nothing && column in tables[row].axes
+    end
+end
+
+function transform_dependencies(transform::FITSLookupDistortion{N}) where {N}
+    detector = _lookup_stage_dependencies(transform.detector_to_image, Val(N), true)
+    corrected = _transform_dependencies_checked(transform.sip) .| _lookup_stage_dependencies(transform.cpdis, Val(N), false)
+    return _compose_dependencies(detector, corrected)
+end
+
+_tpd_axis_dependency(::Nothing, row, column) = row == column
+_tpd_axis_dependency(model::_FITSTPDAxis, row, column) = column in model.axes || model.docorr && row == column
+
+transform_dependencies(transform::_FITSTPDTransform{N}) where {N} = _dependency_matrix((row, column) -> _tpd_axis_dependency(transform.models[row], row, column), Val(N), Val(N))
+
+function transform_dependencies(transform::_FITSPriorDistortion{N}) where {N}
+    detector = _lookup_stage_dependencies(transform.detector_to_image, Val(N), true)
+    sip = _transform_dependencies_checked(transform.sip)
+    lookup = _compose_dependencies(detector, sip .| _lookup_stage_dependencies(transform.cpdis, Val(N), false))
+    tpd = _compose_dependencies(_compose_dependencies(detector, sip), _transform_dependencies_checked(transform.tpd))
+    return _dependency_matrix((row, column) -> transform.tpd.models[row] === nothing ? lookup[row, column] : tpd[row, column], Val(N), Val(N))
+end
+
+function _tabular_dependency(tables, row, column)
+    for table in tables
+        row in table.axes && return column in table.axes
+    end
+    return row == column
+end
+
+transform_dependencies(transform::Union{FITSTabularTransform{N},FITSTabularInverse{N}}) where {N} = _dependency_matrix((row, column) -> _tabular_dependency(transform.tables, row, column), Val(N), Val(N))
