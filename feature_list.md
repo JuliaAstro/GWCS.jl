@@ -105,6 +105,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P1** Add `axis_correlation_matrix(wcs)` based on transform dependency information.
 - [x] **P1** Add `in_image(wcs, world...)` to test whether world coordinates invert to finite pixels inside the valid domain.
 - [x] **P1** Add `in_domain(wcs, pixel...)` and matrix masks for finite coordinates inside the input domain.
+- [x] **P1** Add `fill_invalid=true` so `pixel_to_world` and `world_to_pixel` return `fill_value` for coordinates whose transforms raise `DomainError`.
+- [ ] **P1** Make invalid-coordinate filling fast: catching a thrown `DomainError` costs tens of microseconds per point (about 79 us per off-sky pixel for an AIT all-sky grid), which is impractical for all-sky maps and reprojection. Likely requires projections to report validity without throwing, selected when the WCS is constructed.
 - [ ] **P1** Add explicit output-footprint masks after footprint and celestial-boundary semantics are available.
 - [ ] **P1** Add `footprint(wcs)` for spatial, spectral, temporal, custom, or all output axes.
 - [ ] **P1** Handle longitude wrapping and pole crossings when computing and testing celestial footprints.
@@ -123,6 +125,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Allow a caller-supplied array of initial guesses for batch inversion.
 - [ ] **P2** Add a solver abstraction so alternative Julia root-finding methods can be selected without changing the WCS API.
 - [ ] **P2** Add optional Jacobian caching or analytical-Jacobian hooks for transforms that can provide them.
+- [x] **P1** Reject world coordinates that the analytically invertible tail of a numerically inverted pipeline cannot reach (for example the TAN antipode of a TAN-SIP WCS) with `DomainError` before iterating.
 
 ## Pipeline construction and mutation
 

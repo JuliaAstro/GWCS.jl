@@ -362,10 +362,14 @@ function _fits_basis_coefficients(kind, degree)
     return current
 end
 
-function _fits_wat_axis(text, axis)
+function _fits_wat_type(text)
     type_match = match(r"wtype=([^ ]+)", lowercase(text))
-    type_match === nothing && throw(ArgumentError("WAT$axis distortion has no wtype"))
-    wtype = only(type_match.captures)
+    return type_match === nothing ? nothing : only(type_match.captures)
+end
+
+function _fits_wat_axis(text, axis)
+    wtype = _fits_wat_type(text)
+    wtype === nothing && throw(ArgumentError("WAT$axis distortion has no wtype"))
     wtype in ("tnx", "zpx") || throw(ArgumentError("unsupported WAT$axis wtype $(repr(wtype))"))
     correction_match = match(axis == 1 ? r"lngcor\s*=\s*\"([^\"]*)\"" : r"latcor\s*=\s*\"([^\"]*)\"", lowercase(text))
     correction_match === nothing && throw(ArgumentError("WAT$axis $wtype distortion has no correction polynomial"))
@@ -410,6 +414,10 @@ end
 function _fits_normalize_wat(header)
     texts = (_fits_wat_string(header, 1), _fits_wat_string(header, 2))
     all(isnothing, texts) && return header
+    # Like WCSLIB, ignore WAT strings that do not encode TNX/ZPX on both axes (for example IRAF wtype=linear),
+    # unless CTYPE declares TNX or ZPX and therefore requires them.
+    declared = any(axis -> _fits_ctype(get(header, "CTYPE$axis", ""))[3] in ("TNX", "ZPX"), 1:2)
+    declared || all(text -> text !== nothing && _fits_wat_type(text) in ("tnx", "zpx"), texts) || return header
     all(!isnothing, texts) || throw(ArgumentError("WAT distortion requires both WAT1_n and WAT2_n strings"))
     first_axis = _fits_wat_axis(texts[1], 1)
     second_axis = _fits_wat_axis(texts[2], 2)
@@ -570,6 +578,11 @@ end
 
 function _fits_projection(code, header, latitude_axis, suffix)
     parameter(index, default) = _fits_number(get(header, "PV$(latitude_axis)_$(index)$suffix", default), "PV$(latitude_axis)_$(index)$suffix")
+    function required(index)
+        keyword = "PV$(latitude_axis)_$(index)$suffix"
+        haskey(header, keyword) || throw(ArgumentError("FITS $code projection requires $keyword, as in WCSLIB"))
+        return parameter(index, 0.0)
+    end
     code == "TAN" && return GnomonicProjection()
     code == "STG" && return StereographicProjection()
     code == "ARC" && return ZenithalEquidistant()
@@ -593,11 +606,11 @@ function _fits_projection(code, header, latitude_axis, suffix)
     code == "MOL" && return MollweideProjection()
     code == "PCO" && return PolyconicProjection()
     code == "AIT" && return HammerAitoffProjection()
-    code == "COP" && return ConicPerspective(parameter(1, 45.0), parameter(2, 0.0))
-    code == "COD" && return ConicEquidistant(parameter(1, 45.0), parameter(2, 0.0))
-    code == "COE" && return ConicEqualArea(parameter(1, 45.0), parameter(2, 0.0))
-    code == "COO" && return ConicOrthomorphic(parameter(1, 45.0), parameter(2, 0.0))
-    code == "BON" && return BonneProjection(parameter(1, 45.0))
+    code == "COP" && return ConicPerspective(required(1), parameter(2, 0.0))
+    code == "COD" && return ConicEquidistant(required(1), parameter(2, 0.0))
+    code == "COE" && return ConicEqualArea(required(1), parameter(2, 0.0))
+    code == "COO" && return ConicOrthomorphic(required(1), parameter(2, 0.0))
+    code == "BON" && return BonneProjection(required(1))
     code == "TSC" && return TangentialSphericalCube()
     code == "CSC" && return COBESphericalCube()
     code == "QSC" && return QuadrilateralizedSphericalCube()

@@ -62,4 +62,14 @@ GWCS.transform_dependencies(::BadDependencyValues) = SMatrix{1,1}(2)
     @test axis_correlation_matrix(DependencyOverride()) == @SMatrix [true false; false true]
     @test_throws DimensionMismatch axis_correlation_matrix(BadDependencyShape())
     @test_throws "entries must be boolean-convertible" axis_correlation_matrix(BadDependencyValues())
+
+    # FITS lookup and TAB transforms depend only on the axes their tables read.
+    table = GWCS.FITSLookupTable([0.0, 1.0, 2.0], (1,), Val(3))
+    @test axis_correlation_matrix(table) == SMatrix{1,3,Bool}(true, false, false)
+    lookup = FITSLookupDistortion(Val(3), (table, nothing), IdentityTransform{3}(), (nothing, table))
+    @test axis_correlation_matrix(lookup) == SMatrix{3,3,Bool}([1 0 0; 1 1 0; 0 0 1])
+    tabular = FITSTabularTransform(Val(3), (FITSTabularTable((1, 3), reshape(collect(1.0:8.0), 2, 2, 2), ([1.0, 2.0], [1.0, 2.0])),), (1.0, 1.0, 1.0))
+    @test axis_correlation_matrix(tabular) == SMatrix{3,3,Bool}([1 0 1; 0 1 0; 1 0 1])
+    separable = FITSTabularTransform(Val(2), (FITSTabularTable((2,), reshape([1.0, 2.0, 4.0], 1, 3), ([1.0, 2.0, 3.0],)),), (1.0, 1.0))
+    @test axis_correlation_matrix(inverse_transform(separable)) == SMatrix{2,2,Bool}([1 0; 0 1])
 end

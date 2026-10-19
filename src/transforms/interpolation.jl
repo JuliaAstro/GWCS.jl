@@ -35,6 +35,7 @@ end
 @inline function (table::FITSLookupTable{1,Nin})(coords::StaticVector{Nin}) where {Nin}
     T = promote_type(eltype(coords), eltype(table.data))
     coordinate = (T(coords[table.axes[1]]) - T(table.crval[1])) / T(table.cdelt[1]) + T(table.crpix[1])
+    isnan(coordinate) && return SVector(T(NaN))
     lower, upper, fraction = _lookup_cell(coordinate, length(table.data))
     return SVector(muladd(fraction, T(table.data[upper]) - T(table.data[lower]), T(table.data[lower])))
 end
@@ -43,6 +44,7 @@ end
     T = promote_type(eltype(coords), eltype(table.data))
     x = (T(coords[table.axes[1]]) - T(table.crval[1])) / T(table.cdelt[1]) + T(table.crpix[1])
     y = (T(coords[table.axes[2]]) - T(table.crval[2])) / T(table.cdelt[2]) + T(table.crpix[2])
+    (isnan(x) || isnan(y)) && return SVector(T(NaN))
     x0, x1, tx = _lookup_cell(x, size(table.data, 1))
     y0, y1, ty = _lookup_cell(y, size(table.data, 2))
     v00, v10 = T(table.data[x0, y0]), T(table.data[x1, y0])
@@ -192,6 +194,7 @@ end
 end
 
 @inline function _tabular_values(table::FITSTabularTable{M}, coords) where {M}
+    any(axis -> !isfinite(coords[axis]), table.axes) && return ntuple(_ -> promote_type(eltype(coords), eltype(table.coordinates))(NaN), M)
     cells = ntuple(M) do axis
         fractional = _tabular_fractional_index(table.indices[axis], coords[table.axes[axis]])
         _tabular_cell(fractional, size(table.coordinates, axis + 1))
@@ -262,6 +265,7 @@ _tabular_monotonic(values) = length(values) <= 1 || values[1] != values[end] &&
     result = SVector(coords)
     for table in transform.tables
         axis = only(table.axes)
+        isfinite(coords[axis]) || (result = Base.setindex(result, NaN, axis); continue)
         fractional = _tabular_fractional_index(view(table.coordinates, 1, :), coords[axis] / transform.scales[axis])
         result = Base.setindex(result, _tabular_index_value(only(table.indices), fractional), axis)
     end
