@@ -28,6 +28,7 @@ inverse_transform(transform::ConstantTransform{0}) = ConstantInverse(transform)
 inverse_transform(::ConstantTransform) = NoInverse()
 
 @inline function (inverse::ConstantInverse)(coords::StaticVector{1})
+    # A zero-dimensional result cannot carry NaN, so a mismatch must still throw.
     _coordinates_match(coords[1], inverse.transform.value) || throw(DomainError(coords, "coordinate does not match constant output $(inverse.transform.value)"))
     return SVector{0,_evaluation_type(eltype(coords))}()
 end
@@ -148,10 +149,11 @@ function _validate_fixed_inverse(inverse::FixedInputsInverse, coords, recovered)
     for (index, source) in enumerate(transform.sources)
         source < 0 || continue
         expected = transform.fixed_values[-source]
-        _coordinates_match(recovered[index], expected; atol=transform.atol, rtol=transform.rtol) || throw(DomainError(coords, "coordinate is outside the fixed-input slice"))
+        _coordinates_match(recovered[index], expected; atol=transform.atol, rtol=transform.rtol) || return map(value -> oftype(value, NaN), recovered)
     end
     roundtrip = transform.transform(recovered)
-    all(index -> _coordinates_match(roundtrip[index], coords[index]; atol=transform.atol, rtol=transform.rtol), eachindex(coords)) || throw(DomainError(coords, "coordinate is outside the fixed-input transform range"))
+    # A coordinate off the fixed-input slice or outside the transform range has no preimage.
+    all(index -> _coordinates_match(roundtrip[index], coords[index]; atol=transform.atol, rtol=transform.rtol), eachindex(coords)) || return map(value -> oftype(value, NaN), recovered)
     return recovered
 end
 
@@ -162,6 +164,8 @@ end
 
 @inline function (inverse::FixedInputsInverse{Nfree})(coords::StaticVector) where {Nfree}
     recovered = _recover_fixed_inputs(inverse, coords)
+    # With no free inputs the result cannot carry NaN, so an off-slice coordinate must throw.
+    Nfree == 0 && any(isnan, recovered) && throw(DomainError(coords, "coordinate is outside the fixed-input slice"))
     T = _evaluation_type(eltype(recovered))
     return SVector{Nfree,T}(ntuple(index -> recovered[inverse.transform.free_indices[index]], Nfree))
 end

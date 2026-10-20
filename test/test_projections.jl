@@ -67,17 +67,17 @@ end
     @test_throws "undefined when cos(gamma) = 0" ZenithalPerspective(0, 90)
     @test_throws "requires mu * sin(theta0) + 1 != 0" SlantZenithalPerspective(-1, 0, 90)
     @test_throws "greater than -90" AiryProjection(-90)
-    @test_throws DomainError NativeToIntermediate(GnomonicProjection())(SVector(0.0, 0.0))
-    @test_throws DomainError NativeToIntermediate(StereographicProjection())(SVector(0.0, -90.0))
-    @test_throws DomainError IntermediateToNative(ZenithalEquidistant())(SVector(0.0, 181.0))
-    @test_throws DomainError IntermediateToNative(ZenithalEqualArea())(SVector(0.0, 120.0))
-    @test_throws DomainError IntermediateToNative(SlantOrthographic())(SVector(60.0, 0.0))
-    @test_throws DomainError NativeToIntermediate(SlantOrthographic())(SVector(0.0, -1.0))
-    @test_throws DomainError IntermediateToNative(ZenithalPerspective(1.5, 15.0))(SVector(-500.0, -500.0))
-    @test_throws DomainError NativeToIntermediate(ZenithalPerspective(1.5, 15.0))(SVector(-180.0, -90.0))
-    @test_throws DomainError IntermediateToNative(SlantZenithalPerspective(1.5, 15.0, 80.0))(SVector(-500.0, -500.0))
-    @test_throws DomainError NativeToIntermediate(SlantZenithalPerspective(1.5, 15.0, 80.0))(SVector(-180.0, -90.0))
-    @test_throws DomainError NativeToIntermediate(AiryProjection())(SVector(0.0, -90.0))
+    @test all(isnan, NativeToIntermediate(GnomonicProjection())(SVector(0.0, 0.0)))
+    @test all(isnan, NativeToIntermediate(StereographicProjection())(SVector(0.0, -90.0)))
+    @test all(isnan, IntermediateToNative(ZenithalEquidistant())(SVector(0.0, 181.0)))
+    @test all(isnan, IntermediateToNative(ZenithalEqualArea())(SVector(0.0, 120.0)))
+    @test all(isnan, IntermediateToNative(SlantOrthographic())(SVector(60.0, 0.0)))
+    @test all(isnan, NativeToIntermediate(SlantOrthographic())(SVector(0.0, -1.0)))
+    @test all(isnan, IntermediateToNative(ZenithalPerspective(1.5, 15.0))(SVector(-500.0, -500.0)))
+    @test all(isnan, NativeToIntermediate(ZenithalPerspective(1.5, 15.0))(SVector(-180.0, -90.0)))
+    @test all(isnan, IntermediateToNative(SlantZenithalPerspective(1.5, 15.0, 80.0))(SVector(-500.0, -500.0)))
+    @test all(isnan, NativeToIntermediate(SlantZenithalPerspective(1.5, 15.0, 80.0))(SVector(-180.0, -90.0)))
+    @test all(isnan, NativeToIntermediate(AiryProjection())(SVector(0.0, -90.0)))
 
     cyp = CylindricalPerspective(2.0, 3.0)
     @test cyp.mu == 2.0
@@ -124,8 +124,8 @@ end
     @test quadratic_zpn.radial_limit == 1.25
     quadratic_boundary = SVector(0.0, 90.0 - rad2deg(2.5 * (1 - 1e-6)))
     @test IntermediateToNative(quadratic_zpn)(NativeToIntermediate(quadratic_zpn)(quadratic_boundary)) ≈ quadratic_boundary atol=3e-7
-    @test_throws DomainError NativeToIntermediate(quadratic_zpn)(SVector(0.0, 90.0 - rad2deg(2.5) - 0.01))
-    @test_throws DomainError IntermediateToNative(quadratic_zpn)(SVector(0.0, rad2deg(1.25) + 0.01))
+    @test all(isnan, NativeToIntermediate(quadratic_zpn)(SVector(0.0, 90.0 - rad2deg(2.5) - 0.01)))
+    @test all(isnan, IntermediateToNative(quadratic_zpn)(SVector(0.0, rad2deg(1.25) + 0.01)))
 
     strong_zpn = ZenithalPolynomial((0.0, 0.95, -0.025, -0.15833, 0.00208, 0.00792, -0.00007, -0.00019))
     extreme_references = (
@@ -142,8 +142,8 @@ end
     zpn_boundary = SVector(0.0, 90.0 - rad2deg(strong_zpn.monotonic_limit * (1 - 1e-6)))
     projected_boundary = NativeToIntermediate(strong_zpn)(zpn_boundary)
     @test IntermediateToNative(strong_zpn)(projected_boundary) ≈ zpn_boundary atol=2e-7
-    @test_throws DomainError NativeToIntermediate(strong_zpn)(SVector(0.0, zpn_limit - 0.01))
-    @test_throws DomainError IntermediateToNative(strong_zpn)(SVector(0.0, rad2deg(strong_zpn.radial_limit) * (1 + 1e-6)))
+    @test all(isnan, NativeToIntermediate(strong_zpn)(SVector(0.0, zpn_limit - 0.01)))
+    @test all(isnan, IntermediateToNative(strong_zpn)(SVector(0.0, rad2deg(strong_zpn.radial_limit) * (1 + 1e-6))))
 
     car = NativeToIntermediate(PlateCarreeProjection())
     @test car(SVector(180.0, 23.0)) == SVector(180.0, 23.0)
@@ -153,9 +153,6 @@ end
 end
 
 @testset "Projection parameters and non-finite coordinates" begin
-    @test TangentPlaneToNative() === IntermediateToNative(GnomonicProjection())
-    @test inverse_transform(TangentPlaneToNative()) isa NativeToTangentPlane
-
     # Conic and Bonne constants are precomputed at construction, so invalid parameters fail there.
     @test ConicEquidistant{Float32}(45, 10) isa ConicEquidistant{Float32}
     @test BonneProjection{Float32}(30).theta1 === 30.0f0
@@ -176,6 +173,32 @@ end
             @test all(isnan, @inferred(NativeToIntermediate(projection)(coords)))
         end
     end
+end
+
+# Projections are NaN-only: far outside every domain they must return NaN in every component, never throw or overflow.
+@testset "Projections never throw on invalid coordinates" begin
+    projections = (GnomonicProjection(), StereographicProjection(), ZenithalEquidistant(), ZenithalEqualArea(), SlantOrthographic(), SlantOrthographic(0.1, 0.2),
+        ZenithalPerspective(), ZenithalPerspective(1.5, 15.0), ZenithalPerspective(-0.5, 0.0), SlantZenithalPerspective(1.5, 15.0, 80.0), AiryProjection(), AiryProjection(75.8),
+        ZenithalPolynomial((0.0, 0.95, -0.025, -0.15833, 0.00208, 0.00792, -0.00007, -0.00019)), ZenithalPolynomial((0.0, 1.0, -0.2)),
+        PlateCarreeProjection(), CylindricalEqualArea(0.75), CylindricalPerspective(), CylindricalPerspective(-1.5, 0.5), MercatorProjection(), SansonFlamsteedProjection(), ParabolicProjection(),
+        MollweideProjection(), PolyconicProjection(), HammerAitoffProjection(), ConicPerspective(60.0, 15.0), ConicEquidistant(45.0, 25.0), ConicEqualArea(-45.0, 10.0),
+        ConicOrthomorphic(45.0, 10.0), BonneProjection(45.0), BonneProjection(0.0), TangentialSphericalCube(), COBESphericalCube(), QuadrilateralizedSphericalCube(),
+        HEALPixProjection(), HEALPixProjection(5, 2), HEALPixPolarProjection())
+    plane = [-1000.0, -360.0, -270.0, -180.0, -135.0, -90.0, -45.0, -1e-9, 0.0, 1e-9, 30.0, 45.0, 90.0, 135.0, 180.0, 270.0, 360.0, 1000.0]
+    native_lon = [-720.0, -360.0, -180.0, -90.0, -1e-9, 0.0, 1e-9, 45.0, 90.0, 179.999999, 180.0, 360.0, 720.0]
+    native_lat = [-180.0, -91.0, -90.0, -89.999999, -45.0, -1e-9, 0.0, 1e-9, 45.0, 89.999999, 90.0, 91.0, 180.0]
+    problems = String[]
+    for p in projections, (transform, grid) in ((IntermediateToNative(p), Iterators.product(plane, plane)), (NativeToIntermediate(p), Iterators.product(native_lon, native_lat)))
+        for (a, b) in grid
+            result = try
+                transform(SVector(a, b))
+            catch error
+                push!(problems, "$(GWCS._describe_transform(transform)) $((a, b)) threw $(sprint(showerror, error))"); continue
+            end
+            all(isnan, result) || all(isfinite, result) || push!(problems, "$(GWCS._describe_transform(transform)) $((a, b)) returned $result")
+        end
+    end
+    @test isempty(problems)
 end
 
 @testset "HEALPix projection parameters" begin

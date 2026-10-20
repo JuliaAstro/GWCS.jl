@@ -48,12 +48,7 @@ function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, init
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess)
     end
-    initialized, used = try
-        _inverse_initialize(wcs.inverse_split.prefix, intermediate)
-    catch error
-        error isa DomainError || rethrow()
-        (nothing, false)
-    end
+    initialized, used = _inverse_initialize(wcs.inverse_split.prefix, intermediate)
     usable = initialized !== nothing && all(isfinite, initialized)
     if used && usable
         return initialized
@@ -85,31 +80,20 @@ function _inverse_jacobian(wcs::WCS, estimate::StaticVector)
     all(isfinite, jacobian) && return jacobian
     T = eltype(estimate)
     nudged = estimate .+ sqrt(eps(T)) .* max.(one(T), abs.(estimate))
-    return try
-        _transform_jacobian_checked(wcs.forward, nudged)
-    catch error
-        error isa DomainError || rethrow()
-        jacobian
-    end
+    nudged_jacobian = _transform_jacobian_checked(wcs.forward, nudged)
+    return all(isfinite, nudged_jacobian) ? nudged_jacobian : jacobian
 end
 
-function _finish_numerical_inverse(wcs::WCS{N}, solution::StaticVector{N}; with_bounding_box, fill_value) where {N}
-    if with_bounding_box && wcs.bounding_box !== nothing && !(solution in wcs.bounding_box)
-        return _filled_coordinate(Val(N), eltype(solution), fill_value)
-    end
-    return solution
-end
-
-function _numerical_inverse(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, with_bounding_box=true, fill_value=NaN, max_backtracks=12)
+# The solvers return the raw solution; `_finish_inverse` applies validity and bounding-box handling.
+function _numerical_solve(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, max_backtracks=12)
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
     initial_guess === nothing || isempty(initial_guess) || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected 0"))
-    T = _coordinate_float_type(eltype(world))
-    return _finish_numerical_inverse(wcs, SVector{0,T}(); with_bounding_box, fill_value)
+    return SVector{0,_coordinate_float_type(eltype(world))}()
 end
 
-function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, with_bounding_box=true, fill_value=NaN, max_backtracks=12) where {N}
+function _numerical_solve(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, max_backtracks=12) where {N}
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
@@ -117,17 +101,13 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
     T = _coordinate_float_type(eltype(world))
     target = SVector{N,T}(world)
     longitude_axes = _longitude_axes(output_frame(wcs))
-    # Steps that leave a transform's domain become non-finite residuals so the line search backtracks.
-    residual_function = pixels -> try
-        _inverse_residual(wcs, pixels, target, longitude_axes)
-    catch error
-        error isa DomainError || rethrow()
-        SVector{N,T}(ntuple(_ -> T(NaN), N))
-    end
-    # Non-finite world coordinates propagate as NaN, as they do through analytical inverses.
-    all(isfinite, target) || return SVector{N,T}(ntuple(_ -> T(NaN), N))
-    # Like an analytical inverse, a DomainError from the invertible tail means no pixel maps to the target.
+    # Steps that leave a transform's domain give NaN residuals, so the line search backtracks.
+    residual_function = pixels -> _inverse_residual(wcs, pixels, target, longitude_axes)
+    undefined = SVector{N,T}(ntuple(_ -> T(NaN), N))
+    all(isfinite, target) || return undefined
+    # NaN from the analytically invertible tail proves that no pixel maps to the target.
     intermediate = wcs.inverse_split.tail_inverse(target)
+    any(isnan, intermediate) && return undefined
     estimate = _initial_guess(wcs, intermediate, T, initial_guess, residual_function)
 
     best_solution = estimate
@@ -156,7 +136,7 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
 
         step = jacobian \ residual
         accuracy = abs.(step)
-        maximum(accuracy) <= tolerance && return _finish_numerical_inverse(wcs, estimate - step; with_bounding_box, fill_value)
+        maximum(accuracy) <= tolerance && return estimate - step
 
         accepted = false
         candidate = estimate
@@ -183,19 +163,22 @@ function _numerical_inverse(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-
             if all(isfinite, jacobian) && abs(det(jacobian)) > eps(T) * scale^N
                 step = jacobian \ residual
                 accuracy = abs.(step)
-                maximum(accuracy) <= tolerance && return _finish_numerical_inverse(wcs, estimate - step; with_bounding_box, fill_value)
+                maximum(accuracy) <= tolerance && return estimate - step
             end
         end
     end
 
-    result = _finish_numerical_inverse(wcs, best_solution; with_bounding_box, fill_value)
-    quiet && return result
+    quiet && return best_solution
     message = "numerical inverse failed to converge to the requested accuracy after $iterations iterations"
     throw(NoConvergence(message, best_solution, accuracy, iterations))
 end
 
-function _numerical_inverse(wcs::WCS{Nin,Nout}, world::StaticVector; kwargs...) where {Nin,Nout}
+function _numerical_solve(wcs::WCS{Nin,Nout}, world::StaticVector; kwargs...) where {Nin,Nout}
     throw(ArgumentError("numerical inversion requires equal pixel and world dimensions, got $Nin and $Nout"))
+end
+
+function _numerical_inverse(wcs::WCS, world::StaticVector; with_bounding_box=true, fill_value=NaN, strict=false, kwargs...)
+    return _finish_inverse(wcs, world, _numerical_solve(wcs, world; kwargs...); with_bounding_box, fill_value, strict)
 end
 
 function numerical_inverse(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}

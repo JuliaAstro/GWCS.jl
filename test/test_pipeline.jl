@@ -62,7 +62,8 @@ GWCS.compile_transform(::PipelineCompileFailure) = error("pipeline compilation f
     @test sliced.bounding_box.intervals == ((-0.5, 99.5),)
     @test pixel_to_world(sliced, 11.0) ≈ pixel_to_world(wcs, 11.0, 20.0)
     @test world_to_pixel(sliced, pixel_to_world(sliced, 11.0)) ≈ SVector(11.0) atol=1e-10
-    @test_throws DomainError world_to_pixel(sliced, pixel_to_world(wcs, 11.0, 21.0))
+    @test all(isnan, world_to_pixel(sliced, pixel_to_world(wcs, 11.0, 21.0)))
+    @test_throws DomainError world_to_pixel(sliced, pixel_to_world(wcs, 11.0, 21.0); strict=true)
     @test_throws "lies outside the WCS bounding box" fix_inputs(wcs, "y" => 300.0)
 
     constant_wcs = fix_inputs(wcs, ("x" => 11.0, "y" => 20.0))

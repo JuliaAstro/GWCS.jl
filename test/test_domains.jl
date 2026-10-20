@@ -79,6 +79,7 @@ end
     @test pixel_to_world(wcs, 12.0, 13.0, 2.0) == SVector(14.0, 13.0, 2.0)
     @test all(isnan, pixel_to_world(wcs, 7.0, 3.0, 1.0))
     @test all(isnan, pixel_to_world(wcs, 2.0, 3.0, 3.0; with_bounding_box=false))
+    @test_throws DomainError pixel_to_world(wcs, 2.0, 3.0, 3.0; with_bounding_box=false, strict=true)
     @test world_to_pixel(wcs, 3.0, 3.0, 1.0) == SVector(2.0, 3.0, 1.0)
     @test world_to_pixel(wcs, 14.0, 13.0, 2.0) == SVector(12.0, 13.0, 2.0)
     @test in_image(wcs, 3.0, 3.0, 1.0)

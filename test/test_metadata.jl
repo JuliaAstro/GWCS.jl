@@ -73,7 +73,7 @@
     @test input_names(fixed) == ("x",)
     @test fixed(SVector(3.0)) == SVector(4.0, 12.0)
     @test inverse_transform(fixed)(SVector(4.0, 12.0)) == SVector(3.0)
-    @test_throws DomainError inverse_transform(fixed)(SVector(4.0, 13.0))
+    @test all(isnan, inverse_transform(fixed)(SVector(4.0, 13.0)))
 
     positional = replace(fixed_metadata, "keys: [y]" => "keys: [1]")
     @test parse_transform(GWCS._load_tagged_yaml(positional))(SVector(3.0)) == SVector(4.0, 12.0)

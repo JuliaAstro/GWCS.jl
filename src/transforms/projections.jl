@@ -344,12 +344,6 @@ end
 IntermediateToNative{P}() where {P<:AbstractSphericalProjection} = IntermediateToNative(P())
 NativeToIntermediate{P}() where {P<:AbstractSphericalProjection} = NativeToIntermediate(P())
 
-"""TAN intermediate-plane to native spherical coordinates; an alias kept from earlier releases."""
-const TangentPlaneToNative = IntermediateToNative{GnomonicProjection}
-
-"""Native spherical to TAN intermediate-plane coordinates; an alias kept from earlier releases."""
-const NativeToTangentPlane = NativeToIntermediate{GnomonicProjection}
-
 inverse_transform(transform::IntermediateToNative) = NativeToIntermediate(transform.projection)
 inverse_transform(transform::NativeToIntermediate) = IntermediateToNative(transform.projection)
 
@@ -358,6 +352,8 @@ inverse_transform(transform::NativeToIntermediate) = IntermediateToNative(transf
     # Non-finite coordinates propagate as NaN instead of tripping projection domain checks.
     all(isfinite, coords) || return SVector(T(NaN), T(NaN))
     phi, theta = _intermediate_to_native(transform.projection, T(coords[1]), T(coords[2]))
+    # An undefined point is NaN in every component, even when only one formula failed.
+    (isnan(phi) || isnan(theta)) && return SVector(oftype(phi, NaN), oftype(theta, NaN))
     return _native_bounds_check(SVector(rad2deg(phi), rad2deg(theta)), coords)
 end
 
@@ -366,7 +362,7 @@ end
 @inline function _native_bounds_check(native, coords)
     phi, theta = native
     tolerance = max(oftype(phi, 1e-11), 8 * eps(oftype(phi, 180)))
-    abs(phi) <= 180 + tolerance && abs(theta) <= 90 + tolerance || throw(DomainError(coords, "intermediate coordinate is outside the projection domain"))
+    abs(phi) <= 180 + tolerance && abs(theta) <= 90 + tolerance || return SVector(oftype(phi, NaN), oftype(theta, NaN))
     return SVector(clamp(phi, -oftype(phi, 180), oftype(phi, 180)), clamp(theta, -oftype(theta, 90), oftype(theta, 90)))
 end
 
@@ -376,7 +372,7 @@ end
     phi = deg2rad(T(coords[1]))
     theta = deg2rad(T(coords[2]))
     x, y = _native_to_intermediate(transform.projection, phi, theta)
-    return SVector(x, y)
+    isnan(x) || isnan(y) ? SVector(oftype(x, NaN), oftype(y, NaN)) : SVector(x, y)
 end
 
 @inline function _zenithal_phi(x, y)
@@ -389,6 +385,12 @@ end
     return radius * sine, -radius * cosine
 end
 
+# Coordinates with no image under a projection evaluate to NaN; WCS-level evaluation decides whether to throw or fill.
+@inline function _nan_pair(a, b)
+    T = promote_type(typeof(a), typeof(b))
+    return T(NaN), T(NaN)
+end
+
 @inline function _projection_tolerance(::Type{T}) where {T}
     return T(100) * eps(T)
 end
@@ -396,14 +398,14 @@ end
 function _native_latitude(theta, projection)
     limit = oftype(theta, pi / 2)
     tolerance = _projection_tolerance(typeof(theta))
-    abs(theta) <= limit + tolerance || throw(DomainError(rad2deg(theta), "$(typeof(projection)) native latitude must be between -90 and 90 degrees"))
+    abs(theta) <= limit + tolerance || return oftype(theta, NaN)
     return clamp(theta, -limit, limit)
 end
 
 @inline _wrap_native_longitude(phi) = phi - oftype(phi, 2pi) * round(phi / oftype(phi, 2pi))
 
 @inline function _intermediate_to_native(::PlateCarreeProjection, x, y)
-    abs(y) <= oftype(y, 90) + _projection_tolerance(typeof(y)) || throw(DomainError(SVector(x, y), "CAR intermediate latitude must be between -90 and 90 degrees"))
+    abs(y) <= oftype(y, 90) + _projection_tolerance(typeof(y)) || return _nan_pair(x, y)
     return deg2rad(x), deg2rad(clamp(y, oftype(y, -90), oftype(y, 90)))
 end
 
@@ -415,7 +417,7 @@ end
 function _intermediate_to_native(projection::CylindricalEqualArea, x, y)
     T = promote_type(typeof(x), typeof(y))
     argument = T(projection.lambda) * deg2rad(y)
-    abs(argument) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "CEA intermediate coordinate is outside the projection domain"))
+    abs(argument) <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
     return deg2rad(x), asin(clamp(argument, -one(T), one(T)))
 end
 
@@ -429,7 +431,7 @@ function _intermediate_to_native(projection::CylindricalPerspective, x, y)
     mu, lambda = T(projection.mu), T(projection.lambda)
     eta = deg2rad(y) / (mu + lambda)
     argument = eta * mu / hypot(eta, one(T))
-    abs(argument) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "CYP intermediate coordinate is outside the projection domain"))
+    abs(argument) <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
     return deg2rad(x) / lambda, atan(eta) + asin(clamp(argument, -one(T), one(T)))
 end
 
@@ -438,7 +440,7 @@ function _native_to_intermediate(projection::CylindricalPerspective, phi, theta)
     T = promote_type(typeof(phi), typeof(theta))
     mu, lambda = T(projection.mu), T(projection.lambda)
     denominator = mu + cos(theta)
-    iszero(denominator) && throw(DomainError(rad2deg(theta), "CYP is singular where mu + cos(theta) = 0"))
+    iszero(denominator) && return _nan_pair(phi, theta)
     return rad2deg(lambda * _wrap_native_longitude(phi)), rad2deg((mu + lambda) * sin(theta) / denominator)
 end
 
@@ -449,18 +451,18 @@ end
 
 function _native_to_intermediate(projection::MercatorProjection, phi, theta)
     theta = _native_latitude(theta, projection)
-    abs(theta) < oftype(theta, pi / 2) - _projection_tolerance(typeof(theta)) || throw(DomainError(rad2deg(theta), "MER is singular at native latitude +/-90 degrees"))
+    abs(theta) < oftype(theta, pi / 2) - _projection_tolerance(typeof(theta)) || return _nan_pair(phi, theta)
     return rad2deg(_wrap_native_longitude(phi)), rad2deg(log(tan(oftype(theta, pi / 4) + theta / 2)))
 end
 
 function _intermediate_to_native(::SansonFlamsteedProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
-    abs(y) <= T(90) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "SFL intermediate coordinate is outside the projection domain"))
+    abs(y) <= T(90) + _projection_tolerance(T) || return _nan_pair(x, y)
     theta = deg2rad(clamp(y, T(-90), T(90)))
     cosine = cos(theta)
     if abs(cosine) <= _projection_tolerance(T)
         abs(x) <= _projection_tolerance(T) && return zero(T), theta
-        throw(DomainError(SVector(x, y), "SFL longitude is undefined at a native pole"))
+        return _nan_pair(x, y)
     end
     return deg2rad(x) / cosine, theta
 end
@@ -473,13 +475,13 @@ end
 function _intermediate_to_native(::ParabolicProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
     argument = deg2rad(y) / T(pi)
-    abs(argument) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "PAR intermediate coordinate is outside the projection domain"))
+    abs(argument) <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
     theta = 3asin(clamp(argument, -one(T), one(T)))
-    abs(theta) <= T(pi / 2) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "PAR intermediate coordinate is outside the projection domain"))
+    abs(theta) <= T(pi / 2) + _projection_tolerance(T) || return _nan_pair(x, y)
     scale = 2cos(2theta / 3) - one(T)
     if abs(scale) <= _projection_tolerance(T)
         abs(x) <= _projection_tolerance(T) && return zero(T), clamp(theta, T(-pi / 2), T(pi / 2))
-        throw(DomainError(SVector(x, y), "PAR longitude is undefined at a native pole"))
+        return _nan_pair(x, y)
     end
     return deg2rad(x) / scale, theta
 end
@@ -491,6 +493,7 @@ end
 
 function _mollweide_angle(theta)
     T = typeof(theta)
+    isnan(theta) && return theta
     abs(abs(theta) - T(pi / 2)) <= _projection_tolerance(T) && return copysign(T(pi / 2), theta)
     angle = theta
     target = T(pi) * sin(theta)
@@ -502,20 +505,20 @@ function _mollweide_angle(theta)
         angle -= step
         abs(step) <= _projection_tolerance(T) && return angle
     end
-    throw(DomainError(rad2deg(theta), "MOL auxiliary-angle solve failed to converge"))
+    error("MOL auxiliary-angle solve failed to converge at native latitude $(rad2deg(theta)) degrees")
 end
 
 function _intermediate_to_native(::MollweideProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
     root_two = sqrt(T(2))
     sine = deg2rad(y) / root_two
-    abs(sine) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "MOL intermediate coordinate is outside the projection domain"))
+    abs(sine) <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
     angle = asin(clamp(sine, -one(T), one(T)))
     theta = asin(clamp((2angle + sin(2angle)) / T(pi), -one(T), one(T)))
     cosine = cos(angle)
     if abs(cosine) <= _projection_tolerance(T)
         abs(x) <= _projection_tolerance(T) && return zero(T), theta
-        throw(DomainError(SVector(x, y), "MOL longitude is undefined at a native pole"))
+        return _nan_pair(x, y)
     end
     return deg2rad(x) * T(pi) / (2root_two * cosine), theta
 end
@@ -608,7 +611,7 @@ function _intermediate_to_native(::HammerAitoffProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
     u, v = deg2rad(T(x)), deg2rad(T(y))
     discriminant = one(T) - u^2 / 8 - v^2 / 2
-    discriminant >= -_projection_tolerance(T) || throw(DomainError(SVector(x, y), "AIT intermediate coordinate is outside the projection domain"))
+    discriminant >= -_projection_tolerance(T) || return _nan_pair(x, y)
     z = sqrt(max(discriminant, zero(T)))
     scale = sqrt(2 / (1 + z^2))
     theta = asin(clamp(v / scale, -one(T), one(T)))
@@ -622,7 +625,7 @@ function _native_to_intermediate(projection::HammerAitoffProjection, phi, theta)
     theta = _native_latitude(theta, projection)
     wrapped = _wrap_native_longitude(phi)
     denominator = one(theta) + cos(theta) * cos(wrapped / 2)
-    denominator > zero(theta) || throw(DomainError(SVector(rad2deg(phi), rad2deg(theta)), "AIT native coordinate is outside the projection domain"))
+    denominator > zero(theta) || return _nan_pair(phi, theta)
     scale = sqrt(2 / denominator)
     return rad2deg(2scale * cos(theta) * sin(wrapped / 2)), rad2deg(scale * sin(theta))
 end
@@ -642,11 +645,10 @@ function _intermediate_to_native(projection::ZenithalPolynomial{N}, x, y) where 
     coefficients = projection.coefficients
     polynomial(value) = _projection_polynomial(coefficients, value) - target
     if N == 1
-        abs(polynomial(zero(T))) <= _projection_tolerance(T) || throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
+        abs(polynomial(zero(T))) <= _projection_tolerance(T) || return _nan_pair(x, y)
         distance = zero(T)
     elseif N == 2
         slope = T(coefficients[2])
-        iszero(slope) && throw(DomainError(SVector(x, y), "ZPN polynomial is degenerate"))
         distance = (target - T(coefficients[1])) / slope
     else
         lower = zero(T)
@@ -654,8 +656,8 @@ function _intermediate_to_native(projection::ZenithalPolynomial{N}, x, y) where 
         abs(lower_value) <= _projection_tolerance(T) && return _zenithal_phi(x, y), T(pi / 2)
         upper = T(projection.monotonic_limit)
         upper_value = polynomial(upper)
-        target < T(coefficients[1]) - _projection_tolerance(T) && throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
-        target > T(projection.radial_limit) + _projection_tolerance(T) && throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
+        target < T(coefficients[1]) - _projection_tolerance(T) && return _nan_pair(x, y)
+        target > T(projection.radial_limit) + _projection_tolerance(T) && return _nan_pair(x, y)
         for _ in 1:64
             middle = (lower + upper) / 2
             middle_value = polynomial(middle)
@@ -670,14 +672,14 @@ function _intermediate_to_native(projection::ZenithalPolynomial{N}, x, y) where 
         end
         distance = (lower + upper) / 2
     end
-    zero(T) <= distance <= T(pi) || throw(DomainError(SVector(x, y), "ZPN intermediate coordinate is outside the projection domain"))
+    zero(T) <= distance <= T(pi) || return _nan_pair(x, y)
     return _zenithal_phi(x, y), T(pi / 2) - distance
 end
 
 function _native_to_intermediate(projection::ZenithalPolynomial, phi, theta)
     theta = _native_latitude(theta, projection)
     distance = oftype(theta, pi / 2) - theta
-    distance <= projection.monotonic_limit + _projection_tolerance(typeof(distance)) || throw(DomainError(SVector(rad2deg(phi), rad2deg(theta)), "ZPN native coordinate is outside the first monotonic interval"))
+    distance <= projection.monotonic_limit + _projection_tolerance(typeof(distance)) || return _nan_pair(phi, theta)
     radius = rad2deg(_projection_polynomial(projection.coefficients, distance))
     return _zenithal_xy(radius, phi)
 end
@@ -732,7 +734,7 @@ function _intermediate_to_native(projection::ConicEqualArea, x, y)
     sigma, cone, scale, shape, y0 = map(T, projection.constants)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, sigma)
     argument = (scale^2 * shape - radius^2) * cone / (2rad2deg(one(T))^2)
-    abs(argument) <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "COE intermediate coordinate is outside the projection domain"))
+    abs(argument) <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
     return angle / cone, asin(clamp(argument, -one(T), one(T)))
 end
 
@@ -749,7 +751,7 @@ function _intermediate_to_native(projection::ConicOrthomorphic, x, y)
     T = promote_type(typeof(x), typeof(y))
     sigma, cone, scale, y0 = map(T, projection.constants)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, sigma)
-    abs(radius) > _projection_tolerance(T) || throw(DomainError(SVector(x, y), "COO is singular at the projection origin"))
+    abs(radius) > _projection_tolerance(T) || return _nan_pair(x, y)
     return angle / cone, T(pi / 2) - 2atan((radius / scale)^(inv(cone)))
 end
 
@@ -757,7 +759,7 @@ function _native_to_intermediate(projection::ConicOrthomorphic, phi, theta)
     theta = _native_latitude(theta, projection)
     T = promote_type(typeof(phi), typeof(theta))
     _, cone, scale, y0 = map(T, projection.constants)
-    theta > T(-pi / 2) || throw(DomainError(rad2deg(theta), "COO is singular at the native south pole"))
+    theta > T(-pi / 2) || return _nan_pair(phi, theta)
     radius = scale * tan((T(pi / 2) - theta) / 2)^cone
     angle = cone * _wrap_native_longitude(phi)
     return radius * sin(angle), -radius * cos(angle) + y0
@@ -770,7 +772,7 @@ function _intermediate_to_native(projection::BonneProjection, x, y)
     y0 = T(projection.y0)
     radius, angle = _conic_radius_angle(T(x), T(y), y0, theta1)
     theta = deg2rad(y0 - radius)
-    abs(theta) <= T(pi / 2) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "BON intermediate coordinate is outside the projection domain"))
+    abs(theta) <= T(pi / 2) + _projection_tolerance(T) || return _nan_pair(x, y)
     cosine = cos(theta)
     phi = abs(cosine) <= _projection_tolerance(T) ? zero(T) : angle * deg2rad(radius) / cosine
     return phi, clamp(theta, T(-pi / 2), T(pi / 2))
@@ -836,7 +838,7 @@ function _cube_canvas_face(x, y)
     else
         face = 1
     end
-    max(abs(face_x), abs(face_y)) <= one(T) + tolerance || throw(DomainError(SVector(x, y), "cube intermediate coordinate is outside the projection domain"))
+    max(abs(face_x), abs(face_y)) <= one(T) + tolerance || return 1, oftype(face_x, NaN), oftype(face_y, NaN)
     return face, clamp(face_x, -one(T), one(T)), clamp(face_y, -one(T), one(T))
 end
 
@@ -1007,7 +1009,7 @@ function _intermediate_to_native(projection::HEALPixProjection, x, y)
         return deg2rad(x), asin(clamp(y / scale, -one(T), one(T)))
     end
     sigma = (K + 1) / 2 - abs(y) / step
-    zero(T) <= sigma <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "HPX intermediate coordinate is outside the projection domain"))
+    zero(T) <= sigma <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
     theta = copysign(asin(clamp(1 - sigma^2 / K, -one(T), one(T))), y)
     center = -180 + (2floor((x + 180) * H / 360) + 1) * step
     difference = x - center
@@ -1016,7 +1018,7 @@ function _intermediate_to_native(projection::HEALPixProjection, x, y)
         difference += isodd(facet) ? -step : step
     end
     # As in WCSLIB's hpxx2s, points between the polar facet triangles are not on the sphere.
-    abs(difference) < (step + T(1e-12)) * sigma || iszero(difference) || throw(DomainError(SVector(x, y), "HPX intermediate coordinate is outside the projection domain"))
+    abs(difference) < (step + T(1e-12)) * sigma || iszero(difference) || return _nan_pair(x, y)
     phi = iszero(sigma) ? zero(T) : deg2rad(x + difference * (inv(sigma) - 1))
     return phi, theta
 end
@@ -1065,7 +1067,7 @@ function _intermediate_to_native(::HEALPixPolarProjection, x, y)
     abs_second = abs(second)
     # Facet checks from WCSLIB's xphx2s; points outside the facets are not on the sphere.
     outside = abs_second <= 45 ? abs(facet_offset) > 45 + T(1e-12) : second < -45 && abs(facet_offset) > second + 90 + T(1e-12)
-    outside && throw(DomainError(SVector(x, y), "XPH intermediate coordinate is outside the projection domain"))
+    outside && return _nan_pair(x, y)
     if abs_second <= 45
         return deg2rad(base + first), asin(clamp(second / T(67.5), -one(T), one(T)))
     elseif abs_second <= 90 + _projection_tolerance(T)
@@ -1074,7 +1076,7 @@ function _intermediate_to_native(::HEALPixPolarProjection, x, y)
         theta = copysign(asin(clamp(1 - sigma^2 / 3, -one(T), one(T))), second)
         return phi, theta
     end
-    throw(DomainError(SVector(x, y), "XPH intermediate coordinate is outside the projection domain"))
+    return _nan_pair(x, y)
 end
 
 @inline function _intermediate_to_native(::GnomonicProjection, x, y)
@@ -1085,7 +1087,7 @@ end
 @inline function _native_to_intermediate(projection::GnomonicProjection, phi, theta)
     theta = _native_latitude(theta, projection)
     sine, cosine = sincos(theta)
-    sine > zero(sine) || throw(DomainError(rad2deg(theta), "TAN native latitude must be positive"))
+    sine > zero(sine) || return _nan_pair(phi, theta)
     return _zenithal_xy(rad2deg(cosine / sine), phi)
 end
 
@@ -1099,14 +1101,14 @@ end
 @inline function _native_to_intermediate(projection::StereographicProjection, phi, theta)
     theta = _native_latitude(theta, projection)
     denominator = one(theta) + sin(theta)
-    iszero(denominator) && throw(DomainError(rad2deg(theta), "STG is singular at native latitude -90 degrees"))
+    iszero(denominator) && return _nan_pair(phi, theta)
     return _zenithal_xy(rad2deg(2cos(theta) / denominator), phi)
 end
 
 @inline function _intermediate_to_native(::ZenithalEquidistant, x, y)
     T = promote_type(typeof(x), typeof(y))
     theta = oftype(one(T), pi / 2) - deg2rad(hypot(x, y))
-    theta >= -oftype(theta, pi / 2) - _projection_tolerance(T) || throw(DomainError(SVector(x, y), "ARC intermediate coordinate is outside the projection domain"))
+    theta >= -oftype(theta, pi / 2) - _projection_tolerance(T) || return _nan_pair(x, y)
     return _zenithal_phi(x, y), max(theta, -oftype(theta, pi / 2))
 end
 
@@ -1119,7 +1121,7 @@ end
     T = promote_type(typeof(x), typeof(y))
     argument = deg2rad(hypot(x, y)) / 2
     tolerance = _projection_tolerance(T)
-    argument <= one(T) + tolerance || throw(DomainError(SVector(x, y), "ZEA intermediate coordinate is outside the projection domain"))
+    argument <= one(T) + tolerance || return _nan_pair(x, y)
     theta = oftype(one(T), pi / 2) - 2asin(clamp(argument, zero(T), one(T)))
     return _zenithal_phi(x, y), theta
 end
@@ -1140,7 +1142,7 @@ function _intermediate_to_native(projection::SlantOrthographic, x, y)
     radius_squared = xr^2 + yr^2
 
     if iszero(squared_slant)
-        radius_squared <= one(T) + _projection_tolerance(T) || throw(DomainError(SVector(x, y), "SIN intermediate coordinate is outside the projection domain"))
+        radius_squared <= one(T) + _projection_tolerance(T) || return _nan_pair(x, y)
         radius_squared = min(radius_squared, one(T))
         phi = iszero(radius_squared) ? zero(T) : atan(xr, -yr)
         theta = radius_squared < T(0.5) ? acos(sqrt(radius_squared)) : asin(sqrt(one(T) - radius_squared))
@@ -1157,7 +1159,7 @@ function _intermediate_to_native(projection::SlantOrthographic, x, y)
         c = radius_squared - 2xy + squared_slant - one(T)
         discriminant = b^2 - a * c
         tolerance = _projection_tolerance(T)
-        discriminant >= -tolerance || throw(DomainError(SVector(x, y), "SIN intermediate coordinate has no native solution"))
+        discriminant >= -tolerance || return _nan_pair(x, y)
         root = sqrt(max(discriminant, zero(T)))
         sine1 = (-b + root) / a
         sine2 = (-b - root) / a
@@ -1165,7 +1167,7 @@ function _intermediate_to_native(projection::SlantOrthographic, x, y)
         if sine > one(T) + tolerance
             sine = min(sine1, sine2)
         end
-        -one(T) - tolerance <= sine <= one(T) + tolerance || throw(DomainError(SVector(x, y), "SIN intermediate coordinate has no native solution"))
+        -one(T) - tolerance <= sine <= one(T) + tolerance || return _nan_pair(x, y)
         sine = clamp(sine, -one(T), one(T))
         theta = asin(sine)
         z = one(T) - sine
@@ -1184,10 +1186,10 @@ function _native_to_intermediate(projection::SlantOrthographic, phi, theta)
     sine_phi, cosine_phi = sincos(phi)
     sine_theta, cosine_theta = sincos(theta)
     if iszero(T(projection.squared_slant))
-        theta >= zero(T) || throw(DomainError(rad2deg(theta), "standard SIN native latitude must be non-negative"))
+        theta >= zero(T) || return _nan_pair(phi, theta)
     else
         minimum_theta = -atan(xi * sine_phi - eta * cosine_phi)
-        theta >= minimum_theta - _projection_tolerance(T) || throw(DomainError(rad2deg(theta), "slant SIN native coordinate is outside the projection domain"))
+        theta >= minimum_theta - _projection_tolerance(T) || return _nan_pair(phi, theta)
     end
     offset = one(T) - sine_theta
     return rad2deg(cosine_theta * sine_phi + xi * offset), rad2deg(-cosine_theta * cosine_phi + eta * offset)
@@ -1202,11 +1204,11 @@ function _intermediate_to_native(projection::ZenithalPerspective, x, y)
     radius = hypot(x, yc)
     iszero(radius) && return zero(T), oftype(one(T), pi / 2)
     q = T(projection.scale) + y * sine_gamma
-    iszero(q) && throw(DomainError(SVector(x, y), "AZP intermediate coordinate is singular"))
+    iszero(q) && return _nan_pair(x, y)
     ratio = radius / q
     argument = ratio * mu / sqrt(ratio^2 + one(T))
     tolerance = _projection_tolerance(T)
-    abs(argument) <= one(T) + tolerance || throw(DomainError(SVector(x, y), "AZP intermediate coordinate has no native solution"))
+    abs(argument) <= one(T) + tolerance || return _nan_pair(x, y)
     angle = atan(one(T), ratio)
     offset = asin(clamp(argument, -one(T), one(T)))
     first_solution = angle - offset
@@ -1225,10 +1227,10 @@ function _native_to_intermediate(projection::ZenithalPerspective, phi, theta)
     sine_theta, cosine_theta = sincos(theta)
     tangent_gamma = T(projection.tan_gamma)
     denominator = mu + sine_theta + cosine_theta * tangent_gamma * cosine_phi
-    iszero(denominator) && throw(DomainError(rad2deg(theta), "AZP native coordinate is singular"))
+    iszero(denominator) && return _nan_pair(phi, theta)
 
     theta_degrees = rad2deg(theta)
-    theta_degrees >= T(projection.divergence_latitude) - _projection_tolerance(T) || throw(DomainError(theta_degrees, "AZP native coordinate overlaps another projection branch"))
+    theta_degrees >= T(projection.divergence_latitude) - _projection_tolerance(T) || return _nan_pair(phi, theta)
     if abs(T(projection.mu_cos_gamma)) < one(T)
         slope = tangent_gamma * cosine_phi
         argument = mu / sqrt(one(T) + slope^2)
@@ -1239,7 +1241,7 @@ function _native_to_intermediate(projection::ZenithalPerspective, phi, theta)
             second_limit = angle + offset + oftype(angle, pi)
             first_limit > oftype(angle, pi / 2) && (first_limit -= oftype(angle, 2pi))
             second_limit > oftype(angle, pi / 2) && (second_limit -= oftype(angle, 2pi))
-            theta >= max(first_limit, second_limit) - _projection_tolerance(T) || throw(DomainError(theta_degrees, "AZP native coordinate is beyond the projection divergence"))
+            theta >= max(first_limit, second_limit) - _projection_tolerance(T) || return _nan_pair(phi, theta)
         end
     end
 
@@ -1270,7 +1272,7 @@ function _intermediate_to_native(projection::SlantZenithalPerspective, x, y)
         c = radius_squared - 2xy + t - one(T)
         discriminant = b^2 - a * c
         tolerance = _projection_tolerance(T)
-        discriminant >= -tolerance || throw(DomainError(SVector(x, y), "SZP intermediate coordinate has no native solution"))
+        discriminant >= -tolerance || return _nan_pair(x, y)
         root = sqrt(max(discriminant, zero(T)))
         sine1 = (-b + root) / a
         sine2 = (-b - root) / a
@@ -1278,7 +1280,7 @@ function _intermediate_to_native(projection::SlantZenithalPerspective, x, y)
         if sine > one(T) + tolerance
             sine = min(sine1, sine2)
         end
-        -one(T) - tolerance <= sine <= one(T) + tolerance || throw(DomainError(SVector(x, y), "SZP intermediate coordinate has no native solution"))
+        -one(T) - tolerance <= sine <= one(T) + tolerance || return _nan_pair(x, y)
         sine = clamp(sine, -one(T), one(T))
         theta = asin(sine)
         z = one(T) - sine
@@ -1299,10 +1301,10 @@ function _native_to_intermediate(projection::SlantZenithalPerspective, phi, thet
     sine_theta, cosine_theta = sincos(theta)
     offset = one(T) - sine_theta
     denominator = zp - offset
-    iszero(denominator) && throw(DomainError(rad2deg(theta), "SZP native coordinate is singular"))
+    iszero(denominator) && return _nan_pair(phi, theta)
 
     theta_degrees = rad2deg(theta)
-    theta_degrees >= T(projection.divergence_latitude) - _projection_tolerance(T) || throw(DomainError(theta_degrees, "SZP native coordinate is beyond the projection divergence"))
+    theta_degrees >= T(projection.divergence_latitude) - _projection_tolerance(T) || return _nan_pair(phi, theta)
     mu = T(projection.mu)
     if abs(mu) > one(T)
         slope = xp * sine_phi - yp * cosine_phi
@@ -1316,7 +1318,7 @@ function _native_to_intermediate(projection::SlantZenithalPerspective, phi, thet
                 second_limit = angle + offset_angle + oftype(angle, pi)
                 first_limit > oftype(angle, pi / 2) && (first_limit -= oftype(angle, 2pi))
                 second_limit > oftype(angle, pi / 2) && (second_limit -= oftype(angle, 2pi))
-                theta >= max(first_limit, second_limit) - _projection_tolerance(T) || throw(DomainError(theta_degrees, "SZP native coordinate overlaps another projection branch"))
+                theta >= max(first_limit, second_limit) - _projection_tolerance(T) || return _nan_pair(phi, theta)
             end
         end
     end
@@ -1331,8 +1333,8 @@ end
 @inline function _airy_radius(projection::AiryProjection, theta)
     T = typeof(theta)
     xi = (oftype(theta, pi / 2) - theta) / 2
-    xi >= zero(T) || throw(DomainError(rad2deg(theta), "Airy native latitude must not exceed 90 degrees"))
-    xi < oftype(theta, pi / 2) || throw(DomainError(rad2deg(theta), "Airy projection is singular at native latitude -90 degrees"))
+    xi >= zero(T) || return oftype(theta, NaN)
+    xi < oftype(theta, pi / 2) || return oftype(theta, NaN)
     coefficient = T(projection.coefficient)
     if xi < cbrt(eps(T))
         return rad2deg(2xi * T(projection.slope))
@@ -1350,7 +1352,7 @@ function _intermediate_to_native(projection::AiryProjection, x, y)
     lower = zero(T)
     upper = oftype(one(T), pi / 2) - sqrt(eps(T))
     upper_radius = _airy_radius(projection, oftype(one(T), pi / 2) - 2upper)
-    target <= upper_radius || throw(DomainError(SVector(x, y), "Airy intermediate coordinate is outside the supported projection domain"))
+    target <= upper_radius || return _nan_pair(x, y)
     for _ in 1:96
         midpoint = (lower + upper) / 2
         theta = oftype(one(T), pi / 2) - 2midpoint

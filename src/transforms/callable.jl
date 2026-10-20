@@ -46,9 +46,18 @@ end
     return SVector{N}(result)
 end
 
-@inline function (transform::CallableTransform{Nin,Nout})(coords::StaticVector{Nin}) where {Nin,Nout}
-    return _callable_output(Val(Nout), transform.forward(coords...))
+# User functions may throw DomainError (for example Base `sqrt` of a negative number) where GWCS
+# transforms return NaN, so convert it; numerical-inverse steps routinely leave a function's domain.
+@inline function _callable_evaluate(f, ::Val{N}, coords) where {N}
+    try
+        return _callable_output(Val(N), f(coords...))
+    catch error
+        error isa DomainError || rethrow()
+        return SVector{N}(ntuple(_ -> _evaluation_type(eltype(coords))(NaN), N))
+    end
 end
+
+@inline (transform::CallableTransform{Nin,Nout})(coords::StaticVector{Nin}) where {Nin,Nout} = _callable_evaluate(transform.forward, Val(Nout), coords)
 
 inverse_transform(::CallableTransform{Nin,Nout,F,Nothing,J,D,ID}) where {Nin,Nout,F,J,D,ID} = NoInverse()
 
@@ -56,9 +65,7 @@ function inverse_transform(transform::CallableTransform{Nin,Nout}) where {Nin,No
     return InverseCallableTransform{Nout,Nin,typeof(transform)}(transform)
 end
 
-@inline function (transform::InverseCallableTransform{Nin,Nout})(coords::StaticVector{Nin}) where {Nin,Nout}
-    return _callable_output(Val(Nout), transform.transform.inverse(coords...))
-end
+@inline (transform::InverseCallableTransform{Nin,Nout})(coords::StaticVector{Nin}) where {Nin,Nout} = _callable_evaluate(transform.transform.inverse, Val(Nout), coords)
 
 inverse_transform(transform::InverseCallableTransform) = transform.transform
 

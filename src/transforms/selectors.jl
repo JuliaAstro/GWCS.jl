@@ -71,11 +71,13 @@ function inverse_transform(transform::RegionSelector)
     return RegionSelector(mapper, selector; undefined_value=transform.undefined_value)
 end
 
-function transform_jacobian(transform::RegionSelector{Nin}, coords::StaticVector{Nin}) where {Nin}
+function transform_jacobian(transform::RegionSelector{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
+    # Outside every region the selector has no derivative.
+    undefined = SMatrix{Nout,Nin}(ntuple(_ -> _evaluation_type(eltype(coords))(NaN), Nin * Nout))
     label = map_label(transform.label_mapper, coords)
-    label === nothing && throw(DomainError(coords, "coordinate does not select a region transform"))
+    label === nothing && return undefined
     index = get(transform.lookup, label, 0)
-    iszero(index) && throw(DomainError(coords, "label $label has no region transform"))
+    iszero(index) && return undefined
     return _transform_jacobian_at(transform.transforms, index, coords)
 end
 
