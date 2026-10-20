@@ -100,8 +100,10 @@ end
     @test compile_transform(selector) isa RegionSelector
     @test inverse_transform(selector) isa NoInverse
 
+    # A custom undefined value is stored for ASDF round trips; evaluation still marks the miss with NaN.
     filled = RegionSelector(mapper, (:left => left, :right => right); undefined_value=-100)
-    @test filled(SVector(11.0, 4.0)) == SVector(-100.0, -100.0)
+    @test filled.undefined_value == -100
+    @test all(isnan, filled(SVector(11.0, 4.0)))
 
     forward_mapper = CallableLabelMapper{2,Int}((x, y) -> x < 5 ? 1 : 2)
     backward_mapper = CallableLabelMapper{2,Int}((x, y) -> x < 6 ? 1 : 2)
@@ -109,6 +111,8 @@ end
     reversible = RegionSelector(paired_mapper, (1 => (Shift(1) & Shift(1)), 2 => (Shift(2) & Shift(2))))
     backward = inverse_transform(reversible)
     @test backward isa RegionSelector
+    # As in Python GWCS, the inverse selector does not inherit a custom undefined value.
+    @test isnan(inverse_transform(RegionSelector(paired_mapper, (1 => (Shift(1) & Shift(1)), 2 => (Shift(2) & Shift(2))); undefined_value=-100)).undefined_value)
     @test reversible(SVector(1.0, 2.0)) == SVector(2.0, 3.0)
     @test backward(SVector(2.0, 3.0)) == SVector(1.0, 2.0)
 

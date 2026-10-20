@@ -53,7 +53,7 @@ Labels are dispatch metadata, not numeric coordinates. Keep `AbstractLabelMapper
 
 - A label mapper returns a concrete label or `nothing`.
 - `nothing` means no match; do not reserve `0` or `""` as universal Julia sentinels.
-- `RegionSelector` returns its configured undefined output when no branch applies.
+- `RegionSelector` evaluates to `NaN` when no branch applies. Its `undefined_value` (Python GWCS's `undefined_transform_value`) is stored only so ASDF files round-trip exactly, and the inverse selector does not inherit it, as in Python GWCS.
 - Keep region selection separate from input domains. A `CompoundBoundingBox` decides domain membership; a label mapper decides which transform applies.
 - Match Python GWCS semantics deliberately when parsing its metadata. For example, dictionary label matching uses NumPy's asymmetric `isclose` rule, not Julia's `isapprox` rule.
 - Construct an inverse region selector only when the inverse label mapper and every branch provide compatible inverses.

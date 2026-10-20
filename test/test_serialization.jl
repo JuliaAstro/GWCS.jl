@@ -128,6 +128,8 @@ end
         parsed = parse_transform(to_metadata(original))
         @test parsed(coordinates[name]) ≈ original(coordinates[name])
     end
+    # The stored undefined value round-trips exactly even though evaluation returns NaN.
+    @test GWCS.metadata_value(to_metadata(parse_transform(fixture["array"])))["undefined_transform_value"] == -100
 
     mapper = ArrayLabelMapper([9 1; 2 9]; no_label=9)
     parsed_mapper = GWCS._parse_label_mapper(to_metadata(mapper), "mapper", default_transform_registry())
