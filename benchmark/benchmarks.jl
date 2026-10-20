@@ -130,6 +130,8 @@ const SIP_B = FITS_SIP.pipeline.sip.b
 const SIP_AP = FITS_SIP.pipeline.sip.ap
 const SIP_BP = FITS_SIP.pipeline.sip.bp
 const GWCS_SIP = tan_sip_wcs(FITS_SIP, SIP_A, SIP_B, SIP_AP, SIP_BP)
+# Without AP/BP the WCS has no analytical inverse, so world_to_pixel runs the Newton solver.
+const GWCS_SIP_NUMERICAL = parse_fits_wcs(filter(pair -> !startswith(first(pair), r"AP_|BP_"), SIP_HEADER))
 const GWCS_SPECTRAL = parse_fits_wcs(SPECTRAL_HEADER)
 # Python GWCS's V2V3 -> sky idiom, which changes dimension inside the composition (2 -> 3 -> 3 -> 2).
 const SKY_ROTATION_WCS = GWCS.WCS(Step(PIXEL_FRAME, compose(parallel(Scale(1e-4), Scale(1e-4)), SphericalToCartesian(), Rotation3D([0.01, -0.02, 30.0, -5.4, 83.8], "zyxyz"), CartesianToSpherical())), Step(WORLD_FRAME))
@@ -222,6 +224,8 @@ const SKY_ROTATION_WORLD = GWCS.pixel_to_world(SKY_ROTATION_WCS, PIXEL)
 @assert GWCS_GRISM_WORLD ≈ FITS_GRISM_WORLD rtol=1e-12
 @assert GWCS.world_to_pixel(GWCS_SPECTRAL, GWCS_SPECTRAL_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
 @assert GWCS.world_to_pixel(GWCS_GRISM, GWCS_GRISM_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
+@assert GWCS_SIP_NUMERICAL.backward isa GWCS.NoInverse
+@assert GWCS.world_to_pixel(GWCS_SIP_NUMERICAL, GWCS_SIP_WORLD) ≈ PIXEL atol=1e-6
 @assert GWCS.world_to_pixel(SKY_ROTATION_WCS, SKY_ROTATION_WORLD) ≈ PIXEL atol=1e-6
 
 const SUITE = BenchmarkGroup()
@@ -252,6 +256,7 @@ for (name, fits, gwcs, fits_world, gwcs_world) in (
 end
 
 SUITE["pixel_to_world"]["sky-rotation/GWCS"] = @benchmarkable GWCS.pixel_to_world($SKY_ROTATION_WCS, $PIXEL) evals=100
+SUITE["world_to_pixel"]["TAN-SIP numerical/GWCS"] = @benchmarkable GWCS.world_to_pixel($GWCS_SIP_NUMERICAL, $GWCS_SIP_WORLD) evals=100
 SUITE["world_to_pixel"]["sky-rotation/GWCS"] = @benchmarkable GWCS.world_to_pixel($SKY_ROTATION_WCS, $SKY_ROTATION_WORLD) evals=100
 
 SUITE["construction"]["affine/GWCS"] = @benchmarkable affine_wcs($(FITS_LINEAR.crpix), $(FITS_LINEAR.crval), $(FITS_LINEAR.cd)) evals=1

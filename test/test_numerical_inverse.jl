@@ -1,3 +1,6 @@
+using ASDF
+using Logging
+
 struct ZeroTransform <: AbstractTransform{0,0} end
 
 (::ZeroTransform)(::StaticVector{0}) = SVector{0,Float64}()
@@ -72,9 +75,48 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     bounded_initializer = WCS(Step(CoordinateFrame{1}(name="bounded_input"), domain_initializer), Step(CoordinateFrame{1}(name="bounded_output")); bounding_box=BoundingBox(((2.0, 4.0),)))
     @test world_to_pixel(bounded_initializer, pixel_to_world(bounded_initializer, 2.5); tolerance=1e-12, quiet=false) ≈ SVector(2.5) atol=1e-12
 
+    # Newton runs only on the non-invertible prefix; the invertible tail is inverted once and never evaluated forward.
+    tail_calls = Ref(0)
+    counted_tail = CallableTransform{2,2}((x, y) -> (tail_calls[] += 1; (2x + 1, 3y - 1)); inverse=(u, v) -> ((u - 1) / 2, (v + 1) / 3))
+    split_wcs = WCS(Step(pixels, distortion | counted_tail), Step(world))
+    split_world = pixel_to_world(split_wcs, pixel)
+    tail_calls[] = 0
+    @test world_to_pixel(split_wcs, split_world; tolerance=1e-12) ≈ pixel atol=1e-12
+    @test tail_calls[] == 0
+
+    sip_header = Dict("NAXIS" => 2, "CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "CRPIX1" => 512.0, "CRPIX2" => 512.0, "CRVAL1" => 83.8, "CRVAL2" => -5.4,
+        "CD1_1" => -2.7778e-4, "CD1_2" => 0.0, "CD2_1" => 0.0, "CD2_2" => 2.7778e-4, "A_ORDER" => 2, "A_2_0" => 5e-6, "B_ORDER" => 2, "B_0_2" => 2e-6)
+    sip = parse_fits_wcs(sip_header)
+    sip_world = pixel_to_world(sip, SVector(100.0, 900.0))
+    @test @inferred(world_to_pixel(sip, sip_world)) ≈ SVector(100.0, 900.0) atol=1e-9
+    allocated_inverse(wcs, value) = @allocated world_to_pixel(wcs, value)
+    allocated_inverse(sip, sip_world)
+    @test allocated_inverse(sip, sip_world) == 0
+
     # Callable transforms turn a DomainError from user code (here Base sqrt) into NaN, like GWCS transforms.
     @test all(isnan, CallableTransform{1,1}(x -> sqrt(x))(SVector(-1.0)))
     # The first Newton step from 1 lands at -0.8, outside sqrt's domain; it must backtrack rather than throw.
     root_wcs = WCS(Step(CoordinateFrame{1}(name="root_input"), CallableTransform{1,1}(x -> sqrt(x))), Step(CoordinateFrame{1}(name="root_output")))
     @test world_to_pixel(root_wcs, SVector(0.1); initial_guess=(1.0,), tolerance=1e-12) ≈ SVector(0.01) atol=1e-12
+end
+
+@testset "Numerical inverse world-space fallback" begin
+    # A Python GWCS pipeline (validation/generate_sky_correction_fixture.py) whose only non-invertible step is a
+    # sky-space correction after the projection. Near RA 0/360 the corrected longitude can sit 360 degrees from the
+    # inverted tail's, so the intermediate-space solve fails and the world-space solve must take over.
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "sky_correction.asdf"); extensions=true)
+    end
+    wcs = parse_wcs(fixture["wcs"])
+    pixels, world = fixture["pixels"][], fixture["world"][]
+    @test wcs.backward isa NoInverse
+    @test maximum(abs, pixel_to_world(wcs, pixels) - world) < 1e-12
+    @test maximum(abs, world_to_pixel(wcs, world; tolerance=1e-10) - pixels) < 1e-8
+
+    seam = findfirst(i -> pixels[:, i] == [512.0, 512.0], axes(pixels, 2))
+    target = SVector(world[1, seam], world[2, seam])
+    intermediate = wcs.inverse_split.tail_inverse(target)
+    guess = GWCS._initial_guess(wcs, intermediate, Float64, nothing, wcs.inverse_split.prefix)
+    @test !first(GWCS._newton(wcs.inverse_split.prefix, intermediate, (false, false), guess, 1e-10, 30, 12))
+    @test world_to_pixel(wcs, target; tolerance=1e-10) ≈ SVector(512.0, 512.0) atol=1e-8
 end

@@ -1,0 +1,267 @@
+#ASDF 1.0.0
+#ASDF_STANDARD 1.6.0
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+--- !core/asdf-1.1.0
+asdf_library: !core/software-1.0.0 {author: The ASDF Developers, homepage: 'http://github.com/asdf-format/asdf',
+  name: asdf, version: 5.3.1}
+history:
+  extensions:
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/core/extensions/core-1.6.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf, version: 5.3.1}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://astropy.org/astropy/extensions/units-1.3.0
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/coordinates/extensions/coordinates-1.0.0
+    manifest_software: !core/software-1.0.0 {name: asdf_coordinates_schemas, version: 0.5.1}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/transform/extensions/transform-1.7.0
+    manifest_software: !core/software-1.0.0 {name: asdf_transform_schemas, version: 0.6.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/gwcs/extensions/gwcs-1.4.0
+    manifest_software: !core/software-1.0.0 {name: asdf_wcs_schemas, version: 0.5.0}
+    software: !core/software-1.0.0 {name: gwcs, version: 1.0.3}
+pixels: !core/ndarray-1.1.0
+  data:
+  - [505.0, 0.0]
+  - [506.0, 0.0]
+  - [507.0, 0.0]
+  - [508.0, 0.0]
+  - [509.0, 0.0]
+  - [510.0, 0.0]
+  - [511.0, 0.0]
+  - [512.0, 0.0]
+  - [513.0, 0.0]
+  - [514.0, 0.0]
+  - [515.0, 0.0]
+  - [516.0, 0.0]
+  - [517.0, 0.0]
+  - [518.0, 0.0]
+  - [519.0, 0.0]
+  - [520.0, 0.0]
+  - [505.0, 512.0]
+  - [506.0, 512.0]
+  - [507.0, 512.0]
+  - [508.0, 512.0]
+  - [509.0, 512.0]
+  - [510.0, 512.0]
+  - [511.0, 512.0]
+  - [512.0, 512.0]
+  - [513.0, 512.0]
+  - [514.0, 512.0]
+  - [515.0, 512.0]
+  - [516.0, 512.0]
+  - [517.0, 512.0]
+  - [518.0, 512.0]
+  - [519.0, 512.0]
+  - [520.0, 512.0]
+  - [505.0, 1024.0]
+  - [506.0, 1024.0]
+  - [507.0, 1024.0]
+  - [508.0, 1024.0]
+  - [509.0, 1024.0]
+  - [510.0, 1024.0]
+  - [511.0, 1024.0]
+  - [512.0, 1024.0]
+  - [513.0, 1024.0]
+  - [514.0, 1024.0]
+  - [515.0, 1024.0]
+  - [516.0, 1024.0]
+  - [517.0, 1024.0]
+  - [518.0, 1024.0]
+  - [519.0, 1024.0]
+  - [520.0, 1024.0]
+  datatype: float64
+  shape: [48, 2]
+wcs: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+  name: sky_correction
+  pixel_shape: null
+  steps:
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/frame2d-1.2.0>
+      axes_names: [x, y]
+      axes_order: [0, 1]
+      axis_physical_types: ['custom:x', 'custom:y']
+      name: detector
+      unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+    transform: !transform/compose-1.4.0
+      forward:
+      - !transform/compose-1.4.0
+        forward:
+        - !transform/compose-1.4.0
+          forward:
+          - !transform/affine-1.5.0
+            inputs: [x, y]
+            matrix: !core/ndarray-1.1.0
+              data:
+              - [-0.00027778, 0.0]
+              - [0.0, 0.00027778]
+              datatype: float64
+              shape: [2, 2]
+            outputs: [x, y]
+            translation: !core/ndarray-1.1.0
+              data: [0.14222336, -0.14222336]
+              datatype: float64
+              shape: [2]
+          - !transform/compose-1.4.0
+            forward:
+            - !transform/gnomonic-1.4.0
+              direction: pix2sky
+              inputs: [x, y]
+              outputs: [phi, theta]
+            - !transform/rotate3d-1.5.0
+              direction: native2celestial
+              inputs: [phi_N, theta_N]
+              outputs: [alpha_C, delta_C]
+              phi: 0.0
+              psi: 180.0
+              theta: 10.0
+            inputs: [x, y]
+            outputs: [alpha_C, delta_C]
+          inputs: [x, y]
+          outputs: [alpha_C, delta_C]
+        - !transform/compose-1.4.0
+          forward:
+          - !transform/remap_axes-1.5.0
+            inputs: [x0, x1]
+            mapping: [0, 1, 0, 1]
+            outputs: [x0, x1, x2, x3]
+          - !transform/concatenate-1.4.0
+            forward:
+            - !transform/polynomial-1.3.0
+              coefficients: !core/ndarray-1.1.0
+                data:
+                - [0.0, 0.0, 0.0001]
+                - [1.0, 0.0, 0.0]
+                - [0.0, 0.0, 0.0]
+                datatype: float64
+                shape: [3, 3]
+              domain:
+              - &id001 [-1, 1]
+              - *id001
+              inputs: [x, y]
+              outputs: [z]
+              window:
+              - *id001
+              - *id001
+            - !transform/polynomial-1.3.0
+              coefficients: !core/ndarray-1.1.0
+                data:
+                - [0.0, 1.0, 2.0e-06]
+                - [0.0, 0.0, 0.0]
+                - [0.0, 0.0, 0.0]
+                datatype: float64
+                shape: [3, 3]
+              domain:
+              - *id001
+              - *id001
+              inputs: [x, y]
+              outputs: [z]
+              window:
+              - *id001
+              - *id001
+            inputs: [x0, y0, x1, y1]
+            outputs: [z0, z1]
+          inputs: [x0, x1]
+          outputs: [z0, z1]
+        inputs: [x, y]
+        outputs: [z0, z1]
+      - !transform/compose-1.4.0
+        forward:
+        - !transform/compose-1.4.0
+          forward:
+          - !<tag:stsci.edu:gwcs/spherical_cartesian-1.3.0>
+            inputs: [lon, lat]
+            outputs: [x, y, z]
+            transform_type: spherical_to_cartesian
+            wrap_lon_at: 360
+          - !transform/rotate_sequence_3d-1.2.0
+            angles: [20.0, -29.999999999999996, 40.0]
+            axes_order: zyx
+            inputs: [x, y, z]
+            outputs: [x, y, z]
+            rotation_type: cartesian
+          inputs: [lon, lat]
+          outputs: [x, y, z]
+        - !<tag:stsci.edu:gwcs/spherical_cartesian-1.3.0>
+          inputs: [x, y, z]
+          outputs: [lon, lat]
+          transform_type: cartesian_to_spherical
+          wrap_lon_at: 360
+        inputs: [lon, lat]
+        outputs: [lon, lat]
+      inputs: [x, y]
+      outputs: [lon, lat]
+  - !<tag:stsci.edu:gwcs/step-1.3.0>
+    frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+      axes_names: [lon, lat]
+      axes_order: [0, 1]
+      axis_physical_types: [pos.eq.ra, pos.eq.dec]
+      name: world
+      reference_frame: !<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>
+        frame_attributes: {}
+      unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+    transform: null
+world: !core/ndarray-1.1.0
+  data:
+  - [332.58725128666015, -1.4082233976053191]
+  - [332.58706294373405, -1.408019168509185]
+  - [332.5868746008406, -1.4078149393974693]
+  - [332.5866862579798, -1.4076107102701754]
+  - [332.5864979151516, -1.4074064811273141]
+  - [332.5863095723561, -1.4072022519688703]
+  - [332.58612122959323, -1.4069980227948897]
+  - [332.58593288686296, -1.4067937936053514]
+  - [332.58574454416544, -1.4065895644003066]
+  - [332.5855562015006, -1.406385335179774]
+  - [332.5853678588684, -1.4061811059437332]
+  - [332.5851795162688, -1.405976876692117]
+  - [332.584991173702, -1.405772647425103]
+  - [332.58480283116785, -1.4055684181426178]
+  - [332.5846144886663, -1.4053641888446726]
+  - [332.5844261461975, -1.4051599595312227]
+  - [332.6920368609674, -1.3120191466264968]
+  - [332.69184851594906, -1.3118149252250464]
+  - [332.69166017096114, -1.3116107038090283]
+  - [332.6914718260036, -1.3114064823784688]
+  - [332.6912834810764, -1.3112022609333556]
+  - [332.6910951361796, -1.3109980394737066]
+  - [332.69090679131324, -1.3107938179995393]
+  - [332.6907184464772, -1.310589596510851]
+  - [332.6905301016716, -1.310385375007684]
+  - [332.6903417568964, -1.310181153489995]
+  - [332.69015341215163, -1.3099769319579002]
+  - [332.6899650674372, -1.3097727104112513]
+  - [332.6897767227532, -1.309568488850233]
+  - [332.68958837809964, -1.3093642672747405]
+  - [332.6894000334765, -1.309160045684812]
+  - [332.68921168888374, -1.3089558240804822]
+  - [332.79681697084726, -1.2158132027903776]
+  - [332.7966286249895, -1.2156089897686144]
+  - [332.7964402791599, -1.2154047767332938]
+  - [332.7962519333584, -1.2152005636844367]
+  - [332.796063587585, -1.2149963506220585]
+  - [332.7958752418398, -1.214792137546198]
+  - [332.7956868961226, -1.2145879244568305]
+  - [332.79549855043365, -1.2143837113539904]
+  - [332.7953102047727, -1.2141794982376481]
+  - [332.79512185914, -1.213975285107897]
+  - [332.7949335135354, -1.2137710719646924]
+  - [332.7947451679589, -1.2135668588080641]
+  - [332.7945568224106, -1.2133626456379596]
+  - [332.79436847689044, -1.2131584324544817]
+  - [332.79418013139843, -1.2129542192575855]
+  - [332.7939917859346, -1.2127500060473664]
+  datatype: float64
+  shape: [48, 2]
+...
