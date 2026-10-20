@@ -131,6 +131,8 @@ const SIP_AP = FITS_SIP.pipeline.sip.ap
 const SIP_BP = FITS_SIP.pipeline.sip.bp
 const GWCS_SIP = tan_sip_wcs(FITS_SIP, SIP_A, SIP_B, SIP_AP, SIP_BP)
 const GWCS_SPECTRAL = parse_fits_wcs(SPECTRAL_HEADER)
+# Python GWCS's V2V3 -> sky idiom, which changes dimension inside the composition (2 -> 3 -> 3 -> 2).
+const SKY_ROTATION_WCS = GWCS.WCS(Step(PIXEL_FRAME, compose(parallel(Scale(1e-4), Scale(1e-4)), SphericalToCartesian(), Rotation3D([0.01, -0.02, 30.0, -5.4, 83.8], "zyxyz"), CartesianToSpherical())), Step(WORLD_FRAME))
 const GWCS_GRISM = parse_fits_wcs(GRISM_HEADER)
 const LOOKUP_TRANSFORM = BilinearLookupTable([0.0 0.1; -0.1 0.2])
 const TABULAR_TABLE = FITSTabularTable((1,), reshape([10.0, 20.0, 40.0], 1, 3), ([1.0, 2.0, 3.0],))
@@ -208,6 +210,7 @@ const FITS_SPECTRAL_WORLD = FITSWCS.pixel_to_world(FITS_SPECTRAL, SPECTRAL_PIXEL
 const FITS_GRISM_WORLD = FITSWCS.pixel_to_world(FITS_GRISM, SPECTRAL_PIXEL)
 const GWCS_SPECTRAL_WORLD = GWCS.pixel_to_world(GWCS_SPECTRAL, SPECTRAL_PIXEL)
 const GWCS_GRISM_WORLD = GWCS.pixel_to_world(GWCS_GRISM, SPECTRAL_PIXEL)
+const SKY_ROTATION_WORLD = GWCS.pixel_to_world(SKY_ROTATION_WCS, PIXEL)
 
 @assert GWCS_LINEAR_WORLD ≈ FITS_LINEAR_WORLD rtol=1e-12
 @assert GWCS_TAN_WORLD ≈ FITS_TAN_WORLD atol=1e-11
@@ -219,6 +222,7 @@ const GWCS_GRISM_WORLD = GWCS.pixel_to_world(GWCS_GRISM, SPECTRAL_PIXEL)
 @assert GWCS_GRISM_WORLD ≈ FITS_GRISM_WORLD rtol=1e-12
 @assert GWCS.world_to_pixel(GWCS_SPECTRAL, GWCS_SPECTRAL_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
 @assert GWCS.world_to_pixel(GWCS_GRISM, GWCS_GRISM_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
+@assert GWCS.world_to_pixel(SKY_ROTATION_WCS, SKY_ROTATION_WORLD) ≈ PIXEL atol=1e-6
 
 const SUITE = BenchmarkGroup()
 
@@ -246,6 +250,9 @@ for (name, fits, gwcs, fits_world, gwcs_world) in (
     SUITE["world_to_pixel"]["$name/FITSWCS"] = @benchmarkable FITSWCS.world_to_pixel($fits, $fits_world) evals=100
     SUITE["world_to_pixel"]["$name/GWCS"] = @benchmarkable GWCS.world_to_pixel($gwcs, $gwcs_world) evals=100
 end
+
+SUITE["pixel_to_world"]["sky-rotation/GWCS"] = @benchmarkable GWCS.pixel_to_world($SKY_ROTATION_WCS, $PIXEL) evals=100
+SUITE["world_to_pixel"]["sky-rotation/GWCS"] = @benchmarkable GWCS.world_to_pixel($SKY_ROTATION_WCS, $SKY_ROTATION_WORLD) evals=100
 
 SUITE["construction"]["affine/GWCS"] = @benchmarkable affine_wcs($(FITS_LINEAR.crpix), $(FITS_LINEAR.crval), $(FITS_LINEAR.cd)) evals=1
 SUITE["construction"]["TAN/GWCS"] = @benchmarkable tan_wcs($FITS_TAN) evals=1
