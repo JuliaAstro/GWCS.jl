@@ -14,10 +14,10 @@ function ComposedTransform(@nospecialize(transforms::Tuple))
     return ComposedTransform{Nin,Nout,typeof(transforms)}(transforms)
 end
 
-@inline _apply_composed(::Tuple{}, coords) = coords
-
-@inline function _apply_composed(transforms::Tuple, coords)
-    return _apply_composed(Base.tail(transforms), first(transforms)(coords))
+# Unrolled because the recursive form widens to Any when the coordinate dimension changes along the chain.
+@generated function _apply_composed(transforms::Tuple, coords)
+    steps = [:(coords = transforms[$i](coords)) for i in 1:fieldcount(transforms)]
+    return :($(Expr(:meta, :inline)); $(steps...); coords)
 end
 
 @inline function (transform::ComposedTransform)(coords::StaticVector)
@@ -101,13 +101,9 @@ _numeric_transform(transform::ComposedTransform) = compose(map(_numeric_transfor
 input_names(transform::ComposedTransform) = input_names(first(transform.transforms))
 output_names(transform::ComposedTransform) = output_names(last(transform.transforms))
 
-@inline _apply_composed_jacobian(::Tuple{}, coords, jacobian) = (coords, jacobian)
-
-@inline function _apply_composed_jacobian(transforms::Tuple, coords, jacobian)
-    transform = first(transforms)
-    local_jacobian = _transform_jacobian_checked(transform, coords)
-    outputs = transform(coords)
-    return _apply_composed_jacobian(Base.tail(transforms), outputs, local_jacobian * jacobian)
+@generated function _apply_composed_jacobian(transforms::Tuple, coords, jacobian)
+    steps = [:(jacobian = _transform_jacobian_checked(transforms[$i], coords) * jacobian; coords = transforms[$i](coords)) for i in 1:fieldcount(transforms)]
+    return :($(Expr(:meta, :inline)); $(steps...); (coords, jacobian))
 end
 
 function transform_jacobian(transform::ComposedTransform{Nin}, coords::StaticVector{Nin}) where {Nin}

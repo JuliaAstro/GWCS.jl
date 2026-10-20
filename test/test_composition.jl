@@ -33,6 +33,21 @@ GWCS.compile_transform(::ArithmeticUncompiled) = ArithmeticCompiled()
     @test compose(IdentityTransform{2}()) isa IdentityTransform{2}
 end
 
+@testset "Composition infers across dimension changes" begin
+    # The usual sky rotation goes 2 -> 3 -> 3 -> 2 dimensions, which defeated inference of the recursive evaluator.
+    affine = AffineTransform(SMatrix{2,2}(1.0, 0.0, 0.0, 1.0), SVector(0.1, 0.2))
+    rotation = Rotation3D([10.0], "z")
+    sky = affine | SphericalToCartesian() | rotation | CartesianToSpherical()
+    coords = SVector(10.0, 20.0)
+    @test @inferred(sky(coords)) ≈ CartesianToSpherical()(rotation(SphericalToCartesian()(affine(coords))))
+    @test @inferred(transform_jacobian(sky, coords)) isa SMatrix{2,2,Float64}
+    allocated_forward(transform, value) = @allocated transform(value)
+    allocated_jacobian(transform, value) = @allocated transform_jacobian(transform, value)
+    allocated_forward(sky, coords); allocated_jacobian(sky, coords)
+    @test allocated_forward(sky, coords) == 0
+    @test allocated_jacobian(sky, coords) == 0
+end
+
 @testset "Elementwise arithmetic composition" begin
     left = Shift(1.0)
     right = Scale(2.0)
