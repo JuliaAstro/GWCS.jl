@@ -24,9 +24,12 @@ end
     return oftype(frequency, _FITS_SPEED_OF_LIGHT) * (ratio^2 - 1) / (ratio^2 + 1)
 end
 
+# A velocity beyond the speed of light has no frequency or wavelength (WCSLIB's sqrt gives NaN); v = -c or +c,
+# where WCSLIB's divisor vanishes, is invalid there too.
 @inline function _fits_velocity_to_frequency(velocity, rest_frequency)
     light = oftype(velocity, _FITS_SPEED_OF_LIGHT)
-    return rest_frequency * sqrt((light - velocity) / (light + velocity))
+    ratio = (light - velocity) / (light + velocity)
+    return isfinite(ratio) && ratio >= 0 ? rest_frequency * sqrt(ratio) : oftype(ratio, NaN)
 end
 
 @inline function _fits_wavelength_to_velocity(wavelength, rest_wavelength)
@@ -37,7 +40,8 @@ end
 
 @inline function _fits_velocity_to_wavelength(velocity, rest_wavelength)
     light = oftype(velocity, _FITS_SPEED_OF_LIGHT)
-    return rest_wavelength * sqrt((light + velocity) / (light - velocity))
+    ratio = (light + velocity) / (light - velocity)
+    return isfinite(ratio) && ratio >= 0 ? rest_wavelength * sqrt(ratio) : oftype(ratio, NaN)
 end
 
 @inline function _fits_spectral_to_parent(value, ::Val{S}, rest_frequency, rest_wavelength) where {S}

@@ -197,6 +197,17 @@ import FITSIO
         @test only(value) ≈ expected rtol=8e-11
         @test world_to_pixel(spectral, value) ≈ SVector(2.5) atol=4e-9
     end
+    # A velocity beyond the speed of light has no frequency or wavelength: NaN, not a DomainError from sqrt.
+    for (ctype_value, unit, crval_value, cdelt_value, extra, _) in spectral_cases
+        occursin("V2", ctype_value) || occursin("2V", ctype_value) || continue
+        header = Dict{String,Any}("NAXIS" => 1, "CTYPE1" => ctype_value, "CUNIT1" => unit, "CRPIX1" => 1.0, "CRVAL1" => crval_value, "CDELT1" => cdelt_value, extra...)
+        spectral = parse_fits_wcs(header)
+        if startswith(ctype_value, "VELO") || startswith(ctype_value, "BETA")
+            @test all(isnan, world_to_pixel(spectral, ctype_value == "BETA-F2V" ? 1.5 : 4e8))
+        else
+            @test all(isnan, pixel_to_world(spectral, 1e7))
+        end
+    end
     log_ghz_header = Dict("NAXIS" => 1, "CTYPE1" => "FREQ-LOG", "CUNIT1" => "GHz", "CRPIX1" => 1.0, "CRVAL1" => 1.4, "CDELT1" => 0.001)
     log_ghz = parse_fits_wcs(log_ghz_header)
     log_ghz_preserved = parse_fits_wcs(log_ghz_header; preserve_units=true)
