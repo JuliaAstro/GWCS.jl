@@ -39,8 +39,23 @@ function _numerical_inverse_split(forward::AbstractTransform)
         first_invertible -= 1
     end
     prefix = compose(transforms[1:(first_invertible - 1)]...)
-    first_invertible > length(transforms) && return (prefix=prefix, tail_inverse=IdentityTransform{output_dimension(forward)}())
-    return (prefix=prefix, tail_inverse=_inverse_transform_checked(compose(transforms[first_invertible:end]...)))
+    # Newton evaluates `prefix`; only the initial guess uses `initializer`, where the WithInverse leaves would cost
+    # the solve itself a little.
+    initializer = _with_initializer_inverses(prefix)
+    first_invertible > length(transforms) && return (prefix=prefix, initializer=initializer, tail_inverse=IdentityTransform{output_dimension(forward)}())
+    return (prefix=prefix, initializer=initializer, tail_inverse=_inverse_transform_checked(compose(transforms[first_invertible:end]...)))
+end
+
+# The initial guess inverts each invertible prefix leaf on every solve; storing those inverses as WithInverse
+# leaves, which evaluate as the leaf itself, keeps it from building transforms, such as an inverse region selector,
+# at runtime. Leaves without an inverse keep their own initializers.
+_with_initializer_inverses(transform::ComposedTransform) = ComposedTransform(map(_with_initializer_inverses, transform.transforms))
+_with_initializer_inverses(transform::ParallelTransform) = ParallelTransform(map(_with_initializer_inverses, transform.transforms))
+_with_initializer_inverses(transform::WithInverse) = transform
+
+function _with_initializer_inverses(transform::AbstractTransform)
+    inverse = _inverse_transform_checked(transform)
+    return inverse isa NoInverse ? transform : WithInverse(transform, inverse)
 end
 
 function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, initial_guess, solve) where {N,T}
@@ -48,7 +63,7 @@ function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, init
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess)
     end
-    initialized, used = _inverse_initialize(wcs.inverse_split.prefix, intermediate)
+    initialized, used = _inverse_initialize(wcs.inverse_split.initializer, intermediate)
     usable = initialized !== nothing && all(isfinite, initialized)
     if used && usable
         return initialized
