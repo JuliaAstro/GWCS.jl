@@ -60,14 +60,14 @@ function compose(@nospecialize(transforms::AbstractTransform...))
 
     fused = Any[]
     for transform in flattened
-        if !isempty(fused)
-            replacement = _fuse_pair(last(fused), transform)
-            if replacement !== nothing
-                fused[end] = replacement
-                continue
-            end
-        end
         push!(fused, transform)
+        # A replacement can fuse with its predecessor too, as in an affine followed by a linear polynomial pair.
+        while length(fused) > 1
+            replacement = _fuse_pair(fused[end - 1], fused[end])
+            replacement === nothing && break
+            pop!(fused)
+            fused[end] = replacement
+        end
     end
 
     length(fused) == 1 && return only(fused)
@@ -173,6 +173,15 @@ function _fuse_parallel_affine(transforms)
         output_offset += nout
     end
     return AffineTransform(SMatrix(matrix), SVector(offset))
+end
+
+# Python GWCS writes a 2D distortion as Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D; a linear one is an affine.
+function _fuse_pair(first::RemapAxes{2,4}, second::ParallelTransform{4,2,<:Tuple{Polynomial2D,Polynomial2D}})
+    first.mapping == (1, 2, 1, 2) || return nothing
+    x, y = second.transforms
+    max(degree(x), degree(y)) > 1 && return _Polynomial2DPair(x, y)
+    (xrow, xoffset), (yrow, yoffset) = _linear_form(x), _linear_form(y)
+    return AffineTransform(vcat(transpose(xrow), transpose(yrow)), SVector(xoffset, yoffset))
 end
 
 function parallel(@nospecialize(transforms::AbstractTransform...))

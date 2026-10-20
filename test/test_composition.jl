@@ -48,6 +48,36 @@ end
     @test allocated_jacobian(sky, coords) == 0
 end
 
+@testset "Polynomial pair fusion" begin
+    # Python GWCS's Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D distortion idiom becomes one leaf.
+    remap = RemapAxes{2}((1, 2, 1, 2))
+    px = Polynomial2D([0.1 0.2 0.3; 1.0 0.01 0.0; 0.02 0.0 0.0]; domain=((0.0, 10.0), (-5.0, 5.0)), window=((-1.0, 1.0), (-1.0, 1.0)))
+    py = Polynomial2D([0.5 1.1 0.03; -0.2 0.0 0.0; 0.04 0.0 0.0])
+    unfused = ComposedTransform((remap, ParallelTransform((px, py))))
+    fused = compose(remap, parallel(px, py))
+    coords = SVector(3.0, -2.0)
+    @test fused isa GWCS._Polynomial2DPair
+    @test @inferred(fused(coords)) == unfused(coords)
+    @test transform_jacobian(fused, coords) ≈ transform_jacobian(unfused, coords)
+    @test axis_correlation_matrix(fused) == axis_correlation_matrix(unfused)
+    @test !has_inverse(fused)
+    allocated_forward(transform, value) = @allocated transform(value)
+    allocated_forward(fused, coords)
+    @test allocated_forward(fused, coords) == 0
+    @test compose(RemapAxes{2}((2, 1, 2, 1)), parallel(px, py)) isa ComposedTransform
+    @test compose(remap, annotate_transform(parallel(px, py); name="distortion")) isa ComposedTransform
+
+    # A linear pair is an affine, which then fuses with the affines on both sides.
+    lx = Polynomial2D([0.1 0.2; 1.0 0.0]; domain=((0.0, 10.0), (-5.0, 5.0)), window=((-1.0, 1.0), (-1.0, 1.0)))
+    ly = Polynomial2D([0.5 1.1; -0.2 0.0])
+    before = AffineTransform(SMatrix{2,2}(2.0, 0.0, 0.0, 3.0), SVector(1.0, 1.0))
+    linear = compose(before, remap, parallel(lx, ly), Shift(1.0) & Shift(2.0))
+    @test linear isa AffineTransform{2,2}
+    @test linear(coords) ≈ ComposedTransform((before, remap, ParallelTransform((lx, ly)), Shift(1.0) & Shift(2.0)))(coords)
+    @test inverse_transform(linear)(linear(coords)) ≈ coords
+    @test compose(remap, parallel(Polynomial2D(fill(2.0, 1, 1)), ly)) == AffineTransform(SMatrix{2,2}(0.0, -0.2, 0.0, 1.1), SVector(2.0, 0.5))
+end
+
 @testset "Elementwise arithmetic composition" begin
     left = Shift(1.0)
     right = Scale(2.0)

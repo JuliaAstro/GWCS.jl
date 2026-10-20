@@ -151,6 +151,8 @@ correction(SVector(3.0)) # [24.0]
 
 `elementwise(operator, left, right)` is the function form. Arithmetic transforms recursively compile their operands, propagate axis dependencies and Jacobians, and remain allocation-free for scalar static-vector evaluation. They do not infer an analytical inverse because combining invertible operands does not generally produce a uniquely invertible function; square WCS pipelines can use numerical inversion or an explicit `WithInverse`.
 
+`compose` recognizes Python GWCS's distortion idiom `Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D`, written in Julia as `RemapAxes{2}((1, 2, 1, 2)) | (px & py)`, and builds one two-output polynomial leaf that serializes back to the same idiom. When both polynomials have degree at most one, the result is an `AffineTransform`, which fuses with neighboring affines and has an exact inverse when its matrix is nonsingular, whereas Python GWCS inverts such a composition numerically. Annotated idioms, as in Python-written files, are fused only in the compiled WCS kernel.
+
 Analytical and metadata-provided inverses are compiled into the WCS. Square pipelines without an inverse use a damped Newton solver with ForwardDiff Jacobians:
 
 ```julia
@@ -325,7 +327,7 @@ text = YAML.write(tree)
 reparsed = parse_wcs(tree)
 ```
 
-Serialization represents the compiled Julia object, not the exact source tree. Construction-time fusion may therefore replace a sequence with an equivalent affine transform, and output uses the latest exact schema versions supported by the writer. Projection trees preserve their direction and canonical numeric parameters. Unknown optional source properties and original tag versions are not preserved yet. Unsupported values such as callable closures, callable label mappers, nonstandard affine dimensions, and unregistered external transforms raise explicit errors instead of producing incomplete metadata.
+Serialization represents the compiled Julia object, not the exact source tree. A round trip preserves frames, annotations (names, inputs, and outputs), explicit inverses, bounding boxes, and the mathematical transform, with values changing at most by rounding; the tree itself may be canonicalized. `compose` and `parallel` fuse unannotated transforms, so a sequence or concatenation of shifts, scales, and affines may be written as one equivalent affine, and an affine larger than 2D is written back as a concatenation of its 1D and 2D diagonal blocks. Annotated nodes are never fused, so pipeline files that annotate their transforms keep their stored tree. Output uses the latest exact schema versions supported by the writer. Projection trees preserve their direction and canonical numeric parameters. Unknown optional source properties and original tag versions are not preserved yet. Unsupported values such as callable closures, callable label mappers, affines of more than two dimensions that are not block diagonal, and unregistered external transforms raise explicit errors instead of producing incomplete metadata.
 
 Loading ASDF.jl adds `write_asdf`. It converts canonical tagged nodes to ASDF.jl's container representation and delegates file and block handling to ASDF.jl:
 
@@ -401,7 +403,8 @@ julia --project=validation validation/compare_arithmetic.jl
 julia --project=validation validation/compare_bounding_boxes.jl
 julia --project=validation validation/validate_asdf_bounding_boxes.jl
 julia --project=validation validation/check_schema_versions.jl
+julia --project=validation validation/compare_written_asdf.jl
 julia --project=validation validation/compare_roman.jl FILE...
 ```
 
-The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. `check_schema_versions.jl` verifies that the built-in exact-version table matches the installed ASDF schema packages. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
+The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. `compare_written_asdf.jl` writes the canonical forms that `compose` and `parallel` build, loads them with Python GWCS, and compares the results. `check_schema_versions.jl` verifies that the built-in exact-version table matches the installed ASDF schema packages. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.

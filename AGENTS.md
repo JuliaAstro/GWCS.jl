@@ -82,6 +82,7 @@ Labels are dispatch metadata, not numeric coordinates. Keep `AbstractLabelMapper
 - GWCS.jl owns FITS WCS keyword interpretation (`src/fits.jl`); delegate FITS container I/O to FITSIO.jl or FITSFiles.jl and ASDF container I/O to ASDF.jl. Do not reimplement those container formats here.
 - When behavior is intended to match Python GWCS, Astropy, NumPy, FITSWCS.jl, or WCSLIB, verify the exact convention rather than substituting a similar Julia API.
 - For FITS WCS semantics, WCSLIB is the source of truth, settled from its source or a direct WCSLIB run. Always cross-check astropy as well, since it normalizes headers and implements SIP and Paper IV distortions itself; when the two disagree, state which one GWCS.jl matches and why.
+- A serialization round trip must reproduce the WCS mathematically, not the source tree. Preserve frames, annotations (names, inputs, outputs), explicit inverses, and bounding boxes, and change values at most by rounding. `compose` and `parallel` may canonicalize unannotated transforms, so every form a stored step can take needs a serializer that writes standard tags Python GWCS reads.
 - Keep rich units and high-level coordinate objects in optional extensions unless the numeric core requires them.
 
 ## Error handling
