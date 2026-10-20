@@ -85,22 +85,32 @@ function _inverse_jacobian(solve::AbstractTransform, estimate::StaticVector)
 end
 
 # The solvers return the raw solution; `_finish_inverse` applies validity and bounding-box handling.
-function _numerical_solve(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, max_backtracks=12)
+function _numerical_solve(wcs::WCS, world::StaticVector; quiet=false, kwargs...)
+    converged, solution, accuracy, iterations = _numerical_result(wcs, world; kwargs...)
+    (converged || quiet) && return solution
+    message = "numerical inverse failed to converge to the requested accuracy after $iterations iterations"
+    throw(NoConvergence(message, solution, accuracy, iterations))
+end
+
+# Returns `(converged, solution, accuracy, iterations)`, so callers that only need the outcome, like `in_image`,
+# avoid constructing a `NoConvergence` per point. A target without a preimage converges to NaN.
+function _numerical_result(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12)
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
     initial_guess === nothing || isempty(initial_guess) || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected 0"))
-    return SVector{0,_coordinate_float_type(eltype(world))}()
+    empty = SVector{0,_coordinate_float_type(eltype(world))}()
+    return (true, empty, empty, 0)
 end
 
-function _numerical_solve(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, quiet=false, max_backtracks=12) where {N}
+function _numerical_result(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12) where {N}
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
 
     T = _coordinate_float_type(eltype(world))
     target = SVector{N,T}(world)
-    undefined = SVector{N,T}(ntuple(_ -> T(NaN), N))
+    undefined = (true, SVector{N,T}(ntuple(_ -> T(NaN), N)), zero(SVector{N,T}), 0)
     all(isfinite, target) || return undefined
     # NaN from the analytically invertible tail proves that no pixel maps to the target.
     intermediate = wcs.inverse_split.tail_inverse(target)
@@ -112,14 +122,11 @@ function _numerical_solve(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5,
     # solve the full forward map in world coordinates, as Python GWCS does.
     if output_dimension(prefix) == N && !(wcs.inverse_split.tail_inverse isa IdentityTransform)
         estimate = _initial_guess(wcs, intermediate, T, initial_guess, prefix)
-        converged, solution, _, _ = _newton(prefix, intermediate, ntuple(_ -> false, N), estimate, tolerance, maxiter, max_backtracks)
-        converged && return solution
+        result = _newton(prefix, intermediate, ntuple(_ -> false, N), estimate, tolerance, maxiter, max_backtracks)
+        first(result) && return result
     end
     estimate = _initial_guess(wcs, intermediate, T, initial_guess, wcs.forward)
-    converged, solution, accuracy, iterations = _newton(wcs.forward, target, _longitude_axes(output_frame(wcs)), estimate, tolerance, maxiter, max_backtracks)
-    (converged || quiet) && return solution
-    message = "numerical inverse failed to converge to the requested accuracy after $iterations iterations"
-    throw(NoConvergence(message, solution, accuracy, iterations))
+    return _newton(wcs.forward, target, _longitude_axes(output_frame(wcs)), estimate, tolerance, maxiter, max_backtracks)
 end
 
 # Damped Newton for `solve(pixels) = goal`; returns the root when converged and the best estimate otherwise.
@@ -186,7 +193,7 @@ function _newton(solve::AbstractTransform{N,N}, goal::StaticVector{N,T}, longitu
     return (false, best_solution, accuracy, iterations)
 end
 
-function _numerical_solve(wcs::WCS{Nin,Nout}, world::StaticVector; kwargs...) where {Nin,Nout}
+function _numerical_result(wcs::WCS{Nin,Nout}, world::StaticVector; kwargs...) where {Nin,Nout}
     throw(ArgumentError("numerical inversion requires equal pixel and world dimensions, got $Nin and $Nout"))
 end
 

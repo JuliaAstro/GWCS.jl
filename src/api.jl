@@ -129,14 +129,21 @@ function world_to_pixel(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwargs...) w
 end
 
 @inline function _in_image(wcs::WCS{Nin,Nout}, world::StaticVector{Nout}; with_bounding_box=true, tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12) where {Nin,Nout}
-    pixels = try
-        _world_to_pixel(wcs, world; with_bounding_box=false, fill_value=NaN, strict=false, tolerance, maxiter, initial_guess, quiet=false, max_backtracks)
+    target = SVector{Nout,_coordinate_float_type(eltype(world))}(world)
+    converged, pixels = try
+        if wcs.backward isa NoInverse
+            # The convergence flag replaces a thrown NoConvergence, which would cost far more than the solve.
+            converged, pixels, _, _ = _numerical_result(wcs, target; tolerance, maxiter, initial_guess, max_backtracks)
+            (converged, pixels)
+        else
+            (true, wcs.backward(target))
+        end
     catch error
         # DomainError remains only for zero-dimensional inverses, which cannot carry NaN.
-        error isa NoConvergence || error isa DomainError || rethrow()
+        error isa DomainError || rethrow()
         return false
     end
-    return _in_domain(wcs, pixels; with_bounding_box)
+    return converged && _in_domain(wcs, pixels; with_bounding_box)
 end
 
 """

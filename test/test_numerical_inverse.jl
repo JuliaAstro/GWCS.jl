@@ -21,6 +21,10 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     best = world_to_pixel(wcs, transformed; tolerance=1e-15, maxiter=1, quiet=true)
     @test all(isfinite, best)
     @test !in_image(wcs, transformed; tolerance=1e-15, maxiter=1)
+    # in_image reads the solver's convergence status instead of catching a NoConvergence, which allocates.
+    allocated_in_image(wcs, value) = @allocated in_image(wcs, value; tolerance=1e-15, maxiter=1)
+    allocated_in_image(wcs, transformed)
+    @test allocated_in_image(wcs, transformed) == 0
     error = try
         world_to_pixel(wcs, transformed; tolerance=1e-15, maxiter=1)
         nothing

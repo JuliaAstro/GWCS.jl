@@ -89,7 +89,7 @@ Labels are dispatch metadata, not numeric coordinates. Keep `AbstractLabelMapper
 
 - Fail explicitly on invalid dimensions, ambiguous metadata, incompatible inverses, and unsupported operations.
 - Do not use broad catches, silent defaults, or success-shaped fallbacks. Returning `fill_value` for coordinates without a result is the deliberate APE 14-style default, not a fallback; fail explicitly on invalid inputs, parameters, and metadata.
-- Catch only errors that have defined public meaning. For example, `in_image` converts `NoConvergence` to `false`, and `CallableTransform` converts a `DomainError` from user code to `NaN`.
+- Catch only errors that have defined public meaning. For example, `in_image` converts the `DomainError` of a zero-dimensional inverse to `false` (it reads numerical non-convergence from the solver's status rather than catching `NoConvergence`), and `CallableTransform` converts a `DomainError` from user code to `NaN`.
 - Preserve useful diagnostic information in errors such as `NoConvergence`.
 
 ## Julia style and formatting
