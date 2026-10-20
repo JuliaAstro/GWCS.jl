@@ -79,6 +79,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 ## Coordinate frames, units, and high-level coordinates
 
+- [ ] **P1** Resolve the pixel-origin convention across input formats. FITS-parsed WCSs put the first pixel center at 1 (`CRPIX`), ASDF WCSs from Python GWCS put it at 0 without encoding that anywhere, and `ArrayLabelMapper` documents zero-origin pixel centers. Code mixing FITS and ASDF inputs is silently off by one pixel. Encode the origin explicitly at the parse boundary, as the "no implicit pixel offset" rule requires.
 - [x] **P0** Make `axes_order` operational during evaluation and inverse evaluation rather than storing it only as metadata.
 - [x] **P1** Add an `AxisType` representation for spatial, spectral, temporal, Stokes, pixel, undefined, and custom axes.
 - [x] **P1** Add `SpectralFrame` with wavelength, frequency, energy, and velocity physical-type inference.
