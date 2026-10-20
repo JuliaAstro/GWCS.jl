@@ -97,6 +97,17 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     allocated_inverse(sip, sip_world)
     @test allocated_inverse(sip, sip_world) == 0
 
+    # Invertible prefix leaves, such as a selector with an inverse label mapper, carry precomputed inverses for the
+    # initial guess, which would otherwise build an inverse selector on every solve.
+    paired = WithInverseLabelMapper(CallableLabelMapper{2,Int}((x, y) -> x < 5 ? 1 : 2), CallableLabelMapper{2,Int}((x, y) -> x < 6 ? 1 : 2))
+    regions = RegionSelector(paired, (1 => (Shift(1.0) & Shift(1.0)), 2 => (Shift(2.0) & Shift(2.0))))
+    selector_wcs = WCS(Step(pixels, regions | distortion), Step(world))
+    selector_world = pixel_to_world(selector_wcs, pixel)
+    @test selector_wcs.backward isa NoInverse
+    @test @inferred(world_to_pixel(selector_wcs, selector_world)) ≈ pixel atol=1e-9
+    allocated_inverse(selector_wcs, selector_world)
+    @test allocated_inverse(selector_wcs, selector_world) == 0
+
     # Callable transforms turn a DomainError from user code (here Base sqrt) into NaN, like GWCS transforms.
     @test all(isnan, CallableTransform{1,1}(x -> sqrt(x))(SVector(-1.0)))
     # The first Newton step from 1 lands at -0.8, outside sqrt's domain; it must backtrack rather than throw.
