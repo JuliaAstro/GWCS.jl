@@ -623,6 +623,23 @@ import FITSIO
     empty_tpv = parse_fits_wcs(filter(pair -> !startswith(pair.first, "PV"), tpv_header))
     @test pixel_to_world(empty_tpv, 513.0, 514.0) ≈ SVector(83.8221, -5.3911) atol=1e-12
     @test_throws "parameter numbers 0 through 39" parse_fits_wcs(merge(tpv_header, Dict("PV1_40" => 1.0)))
+
+    # TPVTransform builds the polynomial by hand: check it against the term-by-term TPV definition, with radial
+    # terms (indices 3 and 11), and against the transform that a TPV header produces.
+    xcoeff = (-0.02, 1.02, 0.03, 1e-4, 4e-4, -3e-4, 4e-4, 0.0, 2e-5, 0.0, 0.0, 1e-6)
+    ycoeff = (0.01, 0.98, -0.03, 0.0, 7e-4, -2e-4, 5e-4)
+    manual_tpv = TPVTransform(xcoeff, ycoeff)
+    tpv_reference(coefficients, x, y) = sum(coefficient * (radial ? hypot(x, y)^xpower : x^xpower * y^ypower) for (coefficient, (radial, xpower, ypower)) in zip(coefficients, GWCS._tpd_term_descriptor.(0:(length(coefficients) - 1))))
+    tpv_point = SVector(0.3, -0.2)
+    @test @inferred(manual_tpv(tpv_point)) ≈ SVector(tpv_reference(xcoeff, 0.3, -0.2), tpv_reference(ycoeff, -0.2, 0.3)) atol=1e-15
+    allocated_tpv(transform, value) = @allocated transform(value)
+    @test allocated_tpv(manual_tpv, tpv_point) == 0
+    tpv_pv = merge(Dict("PV1_$(i - 1)" => value for (i, value) in enumerate(xcoeff)), Dict("PV2_$(i - 1)" => value for (i, value) in enumerate(ycoeff)))
+    header_tpv = GWCS._FITSTPDTransform(GWCS._fits_tpv_models(GWCS._fits_header(merge(tan_header, Dict("CTYPE1" => "RA---TPV", "CTYPE2" => "DEC--TPV"), tpv_pv)), 2, "", 1, 2))
+    @test manual_tpv(tpv_point) == header_tpv(tpv_point)
+    @test transform_jacobian(manual_tpv, tpv_point) ≈ transform_jacobian(header_tpv, tpv_point) rtol=1e-14
+    @test TPVTransform((), ())(tpv_point) == SVector(0.0, 0.0)
+    @test_throws "coefficient indices 0 through 39" TPVTransform(zeros(41), ())
     @test_throws "Paper IV distortion function" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "RA---TPD", "CTYPE2" => "DEC--TPD")))
 
     # WCSLIB applies sequent TPV distortion after PC but before CDELT.

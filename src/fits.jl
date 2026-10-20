@@ -643,16 +643,6 @@ function _fits_tpv_coefficients(header, axis, suffix)
     end
 end
 
-function _fits_tpd_compiled_terms(coefficients, ::Val{M}; radial=true) where {M}
-    terms = Tuple{Float64,Bool,Int,Int}[]
-    for (position, coefficient) in enumerate(coefficients)
-        isradial, xpower, ypower = _tpd_term_descriptor(position - 1)
-        M == 1 && (isradial || !iszero(ypower)) && continue
-        (!radial && isradial) || iszero(coefficient) || push!(terms, (Float64(coefficient), isradial, xpower, ypower))
-    end
-    return Tuple(terms)
-end
-
 function _fits_tpd_coefficients(header, prefix, direction)
     pattern = Regex("^$(prefix)\\.TPD\\.$(direction)\\.([0-9]+)\$")
     found = Pair{Int,Float64}[]
