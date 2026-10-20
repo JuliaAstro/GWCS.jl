@@ -17,10 +17,13 @@ function _region_entries(selector, ::Val{Nin}, ::Val{Nout}) where {Nin,Nout}
 end
 
 """Discontinuous transform selected by a non-coordinate region label."""
-struct RegionSelector{Nin,Nout,L,M<:AbstractLabelMapper{Nin,L},Ts<:Tuple,D<:AbstractDict{L,Int},U<:Real} <: AbstractTransform{Nin,Nout}
+struct RegionSelector{Nin,Nout,L,M<:AbstractLabelMapper{Nin,L},Ts<:Tuple,D<:AbstractDict{L,Int},U<:Real,I<:Union{Nothing,Tuple}} <: AbstractTransform{Nin,Nout}
     label_mapper::M
     labels::Vector{L}
     transforms::Ts
+    # Branch inverses, kept only when the label mapper has no inverse: the selector then has none either, and they
+    # seed the numerical inverse. An invertible mapper gives an analytical inverse selector instead.
+    inverses::I
     lookup::D
     # Python GWCS's `undefined_transform_value`, kept only so ASDF round trips are exact. Evaluation always
     # returns NaN for a coordinate in no region, so the API treats it as having no result (`fill_value` or `strict`).
@@ -34,7 +37,8 @@ function RegionSelector(label_mapper::AbstractLabelMapper{Nin,L}, selector; unde
     Nout = output_dimension(first(entries).second)
     label_type_value, labels, transforms, lookup = _region_entries(entries, Val(Nin), Val(Nout))
     label_type_value == L || throw(ArgumentError("region labels have type $label_type_value, expected $L from the label mapper"))
-    return RegionSelector{Nin,Nout,L,typeof(label_mapper),typeof(transforms),typeof(lookup),typeof(undefined_value)}(label_mapper, labels, transforms, lookup, undefined_value)
+    inverses = _inverse_label_mapper_checked(label_mapper) isa NoInverse ? map(_inverse_transform_checked, transforms) : nothing
+    return RegionSelector{Nin,Nout,L,typeof(label_mapper),typeof(transforms),typeof(lookup),typeof(undefined_value),typeof(inverses)}(label_mapper, labels, transforms, inverses, lookup, undefined_value)
 end
 
 @inline function _undefined_region_output(::RegionSelector{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
@@ -72,6 +76,23 @@ function inverse_transform(transform::RegionSelector)
     selector = ntuple(index -> transform.labels[index] => inverses[index], length(inverses))
     # Like Python GWCS, the inverse selector does not inherit a custom undefined value.
     return RegionSelector(mapper, selector)
+end
+
+# Without an inverse label mapper, start Newton from the first branch inverse that lands back in its own region;
+# Newton then verifies the candidate against the forward selector.
+@inline _region_initialize(::Tuple{}, labels, mapper, coords, index) = (coords, false)
+
+@inline function _region_initialize(inverses::Tuple, labels, mapper, coords, index)
+    inverse = first(inverses)
+    if !(inverse isa NoInverse)
+        candidate = inverse(coords)
+        all(isfinite, candidate) && map_label(mapper, candidate) == labels[index] && return (candidate, true)
+    end
+    return _region_initialize(Base.tail(inverses), labels, mapper, coords, index + 1)
+end
+
+@inline function _inverse_initialize(transform::RegionSelector{N,N,L,M,Ts,D,U,<:Tuple}, coords::StaticVector{N}) where {N,L,M,Ts,D,U}
+    return _region_initialize(transform.inverses, transform.labels, transform.label_mapper, coords, 1)
 end
 
 function transform_jacobian(transform::RegionSelector{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}

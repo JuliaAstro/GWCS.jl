@@ -118,6 +118,9 @@ end
 
     no_branch_inverse = RegionSelector(paired_mapper, (1 => (Shift(1) & Shift(1)), 2 => CallableTransform{2,2}((x, y) -> (x + 2, y + 2))))
     @test inverse_transform(no_branch_inverse) isa NoInverse
+    # Branch inverses are stored only to seed the numerical inverse of a selector whose label mapper has no inverse.
+    @test reversible.inverses === nothing
+    @test selector.inverses isa Tuple
 
     @test_throws ArgumentError RegionSelector(mapper, ())
     @test_throws ArgumentError RegionSelector(mapper, (:left => left, :left => right))
@@ -165,4 +168,18 @@ end
     @test result[:, 1] == [1.0, 1.0]
     @test result[:, 2] == [3.0, 0.0]
     @test all(isnan, result[:, 3])
+
+    # Without an inverse label mapper the WCS inverts numerically. The default start (1, 1) is in no region, so
+    # Newton starts from the branch inverse that lands back in its own region instead.
+    unboxed = WCS(Step(detector, selector), Step(world))
+    @test unboxed.backward isa NoInverse
+    for pixel in (SVector(0.0, 1.0), SVector(1.0, 0.0), SVector(0.2, 0.9), SVector(0.9, -0.3))
+        @test world_to_pixel(unboxed, pixel_to_world(unboxed, pixel)) ≈ pixel atol=1e-12
+        @test in_image(unboxed, pixel_to_world(unboxed, pixel))
+    end
+    target = pixel_to_world(unboxed, 0.2, 0.9)
+    @test @inferred(world_to_pixel(unboxed, target)) ≈ SVector(0.2, 0.9) atol=1e-12
+    allocated_inverse(wcs, value) = @allocated world_to_pixel(wcs, value)
+    allocated_inverse(unboxed, target)
+    @test allocated_inverse(unboxed, target) == 0
 end
