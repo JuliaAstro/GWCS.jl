@@ -117,11 +117,19 @@ const GRISM_HEADER = Dict(
     "PV1_0" => 3.16e5, "PV1_1" => 1.0, "PV1_2" => 13.9
 )
 
+const CUBE_HEADER = Dict(
+    "NAXIS" => 4, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CTYPE3" => "FREQ", "CTYPE4" => "STOKES", "CUNIT3" => "Hz",
+    "CRPIX1" => 512.0, "CRPIX2" => 512.0, "CRPIX3" => 1.0, "CRPIX4" => 1.0,
+    "CRVAL1" => 83.8221, "CRVAL2" => -5.3911, "CRVAL3" => 1.4e9, "CRVAL4" => 1.0,
+    "CDELT1" => -2.7778e-4, "CDELT2" => 2.7778e-4, "CDELT3" => 1e6, "CDELT4" => 1.0
+)
+
 const FITS_LINEAR = FITSWCS.WCS(LINEAR_HEADER)
 const FITS_TAN = FITSWCS.WCS(TAN_HEADER)
 const FITS_SIP = FITSWCS.WCS(SIP_HEADER)
 const FITS_SPECTRAL = FITSWCS.WCS(SPECTRAL_HEADER)
 const FITS_GRISM = FITSWCS.WCS(GRISM_HEADER)
+const FITS_CUBE = FITSWCS.WCS(CUBE_HEADER)
 
 const GWCS_LINEAR = affine_wcs(FITS_LINEAR.crpix, FITS_LINEAR.crval, FITS_LINEAR.cd)
 const GWCS_TAN = tan_wcs(FITS_TAN)
@@ -136,6 +144,10 @@ const GWCS_SPECTRAL = parse_fits_wcs(SPECTRAL_HEADER)
 # Python GWCS's V2V3 -> sky idiom, which changes dimension inside the composition (2 -> 3 -> 3 -> 2).
 const SKY_ROTATION_WCS = GWCS.WCS(Step(PIXEL_FRAME, compose(parallel(Scale(1e-4), Scale(1e-4)), SphericalToCartesian(), Rotation3D([0.01, -0.02, 30.0, -5.4, 83.8], "zyxyz"), CartesianToSpherical())), Step(WORLD_FRAME))
 const GWCS_GRISM = parse_fits_wcs(GRISM_HEADER)
+const GWCS_CUBE = parse_fits_wcs(CUBE_HEADER)
+const FIXTURES = joinpath(@__DIR__, "..", "test", "fixtures")
+const ROMAN_TREE = GWCS._load_tagged_yaml(read(joinpath(FIXTURES, "roman_wcs.yaml"), String))
+const MIXED_TREE = GWCS._load_tagged_yaml(read(joinpath(FIXTURES, "mixed_frame_wcs.yaml"), String))
 const LOOKUP_TRANSFORM = BilinearLookupTable([0.0 0.1; -0.1 0.2])
 const TABULAR_TABLE = FITSTabularTable((1,), reshape([10.0, 20.0, 40.0], 1, 3), ([1.0, 2.0, 3.0],))
 const TABULAR_TRANSFORM = FITSTabularTransform(Val(1), (TABULAR_TABLE,), (1.0,))
@@ -213,6 +225,11 @@ const FITS_GRISM_WORLD = FITSWCS.pixel_to_world(FITS_GRISM, SPECTRAL_PIXEL)
 const GWCS_SPECTRAL_WORLD = GWCS.pixel_to_world(GWCS_SPECTRAL, SPECTRAL_PIXEL)
 const GWCS_GRISM_WORLD = GWCS.pixel_to_world(GWCS_GRISM, SPECTRAL_PIXEL)
 const SKY_ROTATION_WORLD = GWCS.pixel_to_world(SKY_ROTATION_WCS, PIXEL)
+const PIXEL_4D = SVector(400.0, 300.0, 3.0, 1.0)
+const FITS_CUBE_WORLD = FITSWCS.pixel_to_world(FITS_CUBE, PIXEL_4D)
+const GWCS_CUBE_WORLD = GWCS.pixel_to_world(GWCS_CUBE, PIXEL_4D)
+const BATCH_PIXELS = reduce(hcat, [PIXEL + SVector(200cos(k), 200sin(2k)) for k in 1:1000])
+const BATCH_WORLDS = GWCS.pixel_to_world(GWCS_SIP, BATCH_PIXELS)
 
 @assert GWCS_LINEAR_WORLD ≈ FITS_LINEAR_WORLD rtol=1e-12
 @assert GWCS_TAN_WORLD ≈ FITS_TAN_WORLD atol=1e-11
@@ -224,13 +241,15 @@ const SKY_ROTATION_WORLD = GWCS.pixel_to_world(SKY_ROTATION_WCS, PIXEL)
 @assert GWCS_GRISM_WORLD ≈ FITS_GRISM_WORLD rtol=1e-12
 @assert GWCS.world_to_pixel(GWCS_SPECTRAL, GWCS_SPECTRAL_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
 @assert GWCS.world_to_pixel(GWCS_GRISM, GWCS_GRISM_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
+@assert GWCS_CUBE_WORLD ≈ FITS_CUBE_WORLD atol=1e-9
+@assert GWCS.world_to_pixel(GWCS_CUBE, GWCS_CUBE_WORLD) ≈ PIXEL_4D atol=1e-8
 @assert GWCS_SIP_NUMERICAL.backward isa GWCS.NoInverse
 @assert GWCS.world_to_pixel(GWCS_SIP_NUMERICAL, GWCS_SIP_WORLD) ≈ PIXEL atol=1e-6
 @assert GWCS.world_to_pixel(SKY_ROTATION_WCS, SKY_ROTATION_WORLD) ≈ PIXEL atol=1e-6
 
 const SUITE = BenchmarkGroup()
 
-for operation in ("pixel_to_world", "world_to_pixel", "construction", "projections", "fits_transforms", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
+for operation in ("pixel_to_world", "world_to_pixel", "batch", "construction", "projections", "fits_transforms", "callable", "arithmetic", "fixed_inputs", "axis_order", "domains", "selectors")
     SUITE[operation] = BenchmarkGroup()
 end
 
@@ -255,6 +274,17 @@ for (name, fits, gwcs, fits_world, gwcs_world) in (
     SUITE["world_to_pixel"]["$name/GWCS"] = @benchmarkable GWCS.world_to_pixel($gwcs, $gwcs_world) evals=100
 end
 
+SUITE["pixel_to_world"]["RA-DEC-FREQ-STOKES/FITSWCS"] = @benchmarkable FITSWCS.pixel_to_world($FITS_CUBE, $PIXEL_4D) evals=100
+SUITE["pixel_to_world"]["RA-DEC-FREQ-STOKES/GWCS"] = @benchmarkable GWCS.pixel_to_world($GWCS_CUBE, $PIXEL_4D) evals=100
+SUITE["world_to_pixel"]["RA-DEC-FREQ-STOKES/FITSWCS"] = @benchmarkable FITSWCS.world_to_pixel($FITS_CUBE, $FITS_CUBE_WORLD) evals=100
+SUITE["world_to_pixel"]["RA-DEC-FREQ-STOKES/GWCS"] = @benchmarkable GWCS.world_to_pixel($GWCS_CUBE, $GWCS_CUBE_WORLD) evals=100
+
+# 1000 columns per call; divide by 1000 for the per-coordinate cost.
+SUITE["batch"]["TAN-SIP pixel_to_world"] = @benchmarkable GWCS.pixel_to_world($GWCS_SIP, $BATCH_PIXELS)
+SUITE["batch"]["TAN-SIP world_to_pixel"] = @benchmarkable GWCS.world_to_pixel($GWCS_SIP, $BATCH_WORLDS)
+SUITE["batch"]["TAN-SIP numerical world_to_pixel"] = @benchmarkable GWCS.world_to_pixel($GWCS_SIP_NUMERICAL, $BATCH_WORLDS)
+SUITE["batch"]["TAN-SIP numerical in_image"] = @benchmarkable GWCS.in_image($GWCS_SIP_NUMERICAL, $BATCH_WORLDS)
+
 SUITE["pixel_to_world"]["sky-rotation/GWCS"] = @benchmarkable GWCS.pixel_to_world($SKY_ROTATION_WCS, $PIXEL) evals=100
 SUITE["world_to_pixel"]["TAN-SIP numerical/GWCS"] = @benchmarkable GWCS.world_to_pixel($GWCS_SIP_NUMERICAL, $GWCS_SIP_WORLD) evals=100
 SUITE["world_to_pixel"]["sky-rotation/GWCS"] = @benchmarkable GWCS.world_to_pixel($SKY_ROTATION_WCS, $SKY_ROTATION_WORLD) evals=100
@@ -266,6 +296,10 @@ SUITE["construction"]["FREQ-LOG/FITSWCS"] = @benchmarkable FITSWCS.WCS($SPECTRAL
 SUITE["construction"]["FREQ-LOG/GWCS"] = @benchmarkable parse_fits_wcs($SPECTRAL_HEADER) evals=1
 SUITE["construction"]["WAVE-GRI/FITSWCS"] = @benchmarkable FITSWCS.WCS($GRISM_HEADER) evals=1
 SUITE["construction"]["WAVE-GRI/GWCS"] = @benchmarkable parse_fits_wcs($GRISM_HEADER) evals=1
+SUITE["construction"]["RA-DEC-FREQ-STOKES/FITSWCS"] = @benchmarkable FITSWCS.WCS($CUBE_HEADER) evals=1
+SUITE["construction"]["RA-DEC-FREQ-STOKES/GWCS"] = @benchmarkable parse_fits_wcs($CUBE_HEADER) evals=1
+SUITE["construction"]["ASDF Roman fixture/GWCS"] = @benchmarkable parse_wcs($ROMAN_TREE) evals=1
+SUITE["construction"]["ASDF mixed-frame fixture/GWCS"] = @benchmarkable parse_wcs($MIXED_TREE) evals=1
 SUITE["construction"]["editing/builder"] = @benchmarkable WCSBuilder($GWCS_LINEAR) evals=1
 SUITE["construction"]["editing/set_transform"] = @benchmarkable set_transform($GWCS_LINEAR, $PIXEL_FRAME, $LINEAR_FRAME, AffineTransform($(FITS_LINEAR.cd))) evals=1
 SUITE["construction"]["editing/insert_frame"] = @benchmarkable insert_frame($GWCS_LINEAR, $PIXEL_FRAME, IdentityTransform{2}(), $EDIT_FRAME) evals=1

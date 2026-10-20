@@ -126,7 +126,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Use the approximate inverse as an initial guess before falling back to the bounding-box center.
 - [ ] **P1** Allow a caller-supplied array of initial guesses for batch inversion.
 - [ ] **P2** Add a solver abstraction so alternative Julia root-finding methods can be selected without changing the WCS API.
-- [ ] **P2** Add optional Jacobian caching or analytical-Jacobian hooks for transforms that can provide them.
+- [ ] **P2** Add optional Jacobian caching or analytical-Jacobian hooks for transforms that can provide them. Low value for now: the prefix Jacobian is 4-6 ns of a 120-160 ns SIP inverse.
 - [x] **P1** Reject world coordinates that the analytically invertible tail of a numerically inverted pipeline cannot reach (for example the TAN antipode of a TAN-SIP WCS) before iterating, like an analytical inverse.
 
 ## Pipeline construction and mutation
@@ -234,17 +234,17 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 ## Performance, compilation, and extensibility
 
-- [ ] **P1** Preserve zero-allocation scalar evaluation as new transforms and frame features are added.
+- [ ] **P1** Preserve zero-allocation scalar evaluation as new transforms and frame features are added; `validation/audit_inference.jl` checks it.
 - [ ] **P1** Keep unit conversion, high-level coordinate construction, and metadata bookkeeping outside the compiled numeric kernel.
 - [x] **P1** Add benchmark coverage for selectors.
 - [x] **P1** Add benchmark coverage for the zenithal projection family.
 - [x] **P1** Add benchmark coverage for the remaining projection families.
 - [x] **P1** Add benchmark coverage for FITS lookup tables, tabular interpolation, nonlinear spectral algorithms, and grisms.
-- [ ] **P1** Add benchmark coverage for mixed-axis frames and batch inversion.
+- [x] **P1** Add benchmark coverage for mixed-axis frames and batch inversion.
 - [x] **P1** Add construction benchmarks for mutation/recompilation.
-- [ ] **P1** Add construction benchmarks for large metadata-defined pipelines.
+- [x] **P1** Add construction benchmarks for large metadata-defined pipelines, including first-call latency (`benchmark/latency.jl`).
 - [x] **P1** Define a stable interface for transforms to provide optimized compilation, inversion, Jacobian, and separability methods.
-- [ ] **P2** Add generated or tuple-recursive kernels for large static pipelines when normal compiler inference becomes insufficient.
+- [ ] **P2** Add generated or tuple-recursive kernels for large static pipelines when normal compiler inference becomes insufficient. Composition is unrolled; parallel and Jacobian helpers remain recursive (Julia 1.10 does not infer a nested cube Jacobian).
 - [ ] **P2** Investigate CPU-vectorized and threaded batch evaluation without changing scalar semantics.
 - [ ] **P2** Investigate GPU-compatible compiled transforms for array workloads where all leaf transforms support the target backend.
 

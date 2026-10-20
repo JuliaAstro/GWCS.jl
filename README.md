@@ -388,10 +388,11 @@ Run the package tests with:
 julia --project -e 'using Pkg; Pkg.test()'
 ```
 
-The benchmark suite compares equivalent affine, TAN, TAN-SIP, nonlinear spectral, grism, and spherical-projection scalar transforms against FITSWCS.jl. It also covers direct lookup-table and `-TAB` evaluation:
+The benchmark suite compares equivalent affine, TAN, TAN-SIP, nonlinear spectral, grism, mixed celestial/spectral/Stokes, and spherical-projection scalar transforms against FITSWCS.jl. It also covers direct lookup-table and `-TAB` evaluation, numerical inversion, 1000-column batch calls, and construction of FITS headers and the ASDF fixtures. `latency.jl` reports first-call construction and evaluation time, which is dominated by compilation; run it in a fresh process:
 
 ```sh
 julia --project=benchmark benchmark/benchmarks.jl
+julia --project=benchmark benchmark/latency.jl [FILE.yaml]
 ```
 
 External Roman validation requires the local ASDF.jl checkout configured in `validation/Project.toml`, Python GWCS in `~/.venvs/311_main`, and one or more Roman L2 ASDF files:
