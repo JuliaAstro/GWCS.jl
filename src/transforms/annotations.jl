@@ -21,7 +21,7 @@ function _axis_names(names, count, boundary)
     return values
 end
 
-function AnnotatedTransform(transform::AbstractTransform{Nin,Nout}; name=nothing, inputs=nothing, outputs=nothing) where {Nin,Nout}
+function AnnotatedTransform(@nospecialize(transform::AbstractTransform{Nin,Nout}); name=nothing, inputs=nothing, outputs=nothing) where {Nin,Nout}
     transform isa AnnotatedTransform && return annotate_transform(transform; name, inputs, outputs)
     transform_name_value = name === nothing ? nothing : String(name)
     transform_name_value === nothing || !isempty(transform_name_value) || throw(ArgumentError("transform name must not be empty"))
@@ -30,7 +30,7 @@ function AnnotatedTransform(transform::AbstractTransform{Nin,Nout}; name=nothing
     return AnnotatedTransform{Nin,Nout,typeof(transform),typeof(transform_name_value),typeof(input_name_values),typeof(output_name_values)}(transform, transform_name_value, input_name_values, output_name_values)
 end
 
-function annotate_transform(transform::AbstractTransform; name=transform_name(transform), inputs=input_names(transform), outputs=output_names(transform))
+function annotate_transform(@nospecialize(transform::AbstractTransform); name=transform_name(transform), inputs=input_names(transform), outputs=output_names(transform))
     parent = transform isa AnnotatedTransform ? transform.transform : transform
     return AnnotatedTransform(parent; name, inputs, outputs)
 end
