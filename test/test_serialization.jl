@@ -116,7 +116,17 @@ end
     @test inverse_transform(parsed_fixed)(fixed(SVector(2.0))) ≈ SVector(2.0)
     @test_throws "fixed-input atol cannot be represented" to_metadata(fix_inputs(Shift(1.0) & Scale(2.0), 2 => 5.0; atol=1.0))
 
-    @test_throws "no metadata serializer is registered" to_metadata(AffineTransform(Matrix{Float64}(I, 3, 3)))
+    # parallel() fuses these into block-diagonal affines, which astropy can only represent block by block.
+    _, shifts_node = test_transform_roundtrip(Shift(1.0) & Shift(2.0) & Shift(3.0), SVector(1.0, 2.0, 3.0))
+    @test shifts_node.tag == "tag:stsci.edu:asdf/transform/concatenate-1.4.0"
+    @test shifts_node["forward"][1].tag == "tag:stsci.edu:asdf/transform/shift-1.4.0"
+    test_transform_roundtrip(AffineTransform([1.0 0.2; -0.1 2.0], [3.0, 4.0]) & Scale(2.0), SVector(1.0, 2.0, 3.0))
+    test_transform_roundtrip(AffineTransform(Matrix{Float64}(I, 3, 3)), SVector(1.0, 2.0, 3.0))
+    @test_throws "block diagonal with 1- and 2-dimensional blocks" to_metadata(AffineTransform([1.0 0.0 1.0; 0.0 1.0 0.0; 0.0 0.0 1.0]))
+    pair = compose(RemapAxes{2}((1, 2, 1, 2)), parallel(Polynomial2D([0.1 0.2 0.3; 1.0 0.01 0.0; 0.02 0.0 0.0]), Polynomial2D([0.5 1.1 0.03; -0.2 0.0 0.0; 0.04 0.0 0.0])))
+    parsed_pair, pair_node = test_transform_roundtrip(pair, SVector(0.25, 0.5))
+    @test pair_node.tag == "tag:stsci.edu:asdf/transform/compose-1.4.0"
+    @test GWCS._numeric_transform(parsed_pair) == pair
     @test_throws "no metadata serializer is registered" to_metadata(ConstantTransform(1.0; n_inputs=3))
 end
 
@@ -201,6 +211,10 @@ end
         end
         reparsed = parse_wcs(loaded["wcs"])
         @test pixel_to_world(reparsed, 11.0, 22.0) ≈ pixel_to_world(original, 11.0, 22.0) atol=1e-12
+        # Annotated pipeline files keep their stored tree; only the compiled kernel fuses the linear distortion polynomials into affines.
+        @test typeof(reparsed) == typeof(original)
+        @test occursin("Polynomial2D", string(typeof(original.steps)))
+        @test !occursin("Polynomial2D", string(typeof(original.forward)))
 
         document_filename = joinpath(directory, "document.asdf")
         write_asdf(document_filename, Dict("model" => Dict("wcs" => original), "name" => "canonical"))

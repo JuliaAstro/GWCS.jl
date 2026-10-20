@@ -108,10 +108,36 @@ end
 function _to_metadata(transform::AffineTransform{1,1}, path, registry)
     factor = transform.matrix[1, 1]
     offset = transform.offset[1]
+    isone(factor) && !iszero(offset) && return _to_metadata(Shift(offset), path, registry)
     transforms = Any[_to_metadata(Scale(factor), "$path/forward/1", registry)]
     iszero(offset) || push!(transforms, _to_metadata(Shift(offset), "$path/forward/2", registry))
     length(transforms) == 1 && return only(transforms)
     return _tagged_metadata("$_ASDF_TRANSFORM_TAG/compose", v"1.4.0", Dict("forward" => transforms))
+end
+
+# parallel() fuses Shift, Scale, and 2D affine branches into one block-diagonal affine; astropy has no N-D affine, so write the blocks back as a concatenate.
+function _to_metadata(transform::AffineTransform{N,N}, path, registry) where {N}
+    N == 2 && return invoke(_to_metadata, Tuple{AbstractTransform,Any,Any}, transform, path, registry)
+    blocks = _affine_blocks(transform.matrix)
+    blocks === nothing && _metadata_error(path, "a $N-dimensional affine transform can be serialized only when it is block diagonal with 1- and 2-dimensional blocks")
+    return _to_metadata(ParallelTransform(Tuple(AffineTransform(transform.matrix[block, block], transform.offset[block]) for block in blocks)), path, registry)
+end
+
+function _affine_blocks(matrix::StaticMatrix{N,N}) where {N}
+    blocks = UnitRange{Int}[]
+    start = 1
+    while start <= N
+        size = findfirst(k -> start + k - 1 <= N && all(iszero, matrix[start:(start + k - 1), (start + k):N]) && all(iszero, matrix[(start + k):N, start:(start + k - 1)]), 1:2)
+        size === nothing && return nothing
+        push!(blocks, start:(start + size - 1))
+        start += size
+    end
+    return blocks
+end
+
+# compose() fuses this idiom into one leaf; write it back in the form Python GWCS reads.
+function _to_metadata(transform::_Polynomial2DPair, path, registry)
+    return _to_metadata(ComposedTransform((RemapAxes{2}((1, 2, 1, 2)), ParallelTransform((transform.x, transform.y)))), path, registry)
 end
 
 function _to_metadata(transform::ArithmeticTransform, path, registry)

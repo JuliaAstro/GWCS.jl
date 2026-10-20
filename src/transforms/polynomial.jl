@@ -81,6 +81,27 @@ degree(::Polynomial2D{N}) where {N} = N - 1
     return SVector(result)
 end
 
+# Python GWCS's `Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D` idiom as one leaf, which `compose` builds.
+struct _Polynomial2DPair{X<:Polynomial2D,Y<:Polynomial2D} <: AbstractTransform{2,2}
+    x::X
+    y::Y
+end
+
+@inline (transform::_Polynomial2DPair)(coords::StaticVector{2}) = SVector(only(transform.x(coords)), only(transform.y(coords)))
+
+# astropy's `poly_map_domain` written as x -> scale * x + offset.
+_domain_affine(domain::Nothing, window) = (1, 0)
+_domain_affine(domain, window) = ((window[2] - window[1]) / (domain[2] - domain[1]), (window[1] * domain[2] - window[2] * domain[1]) / (domain[2] - domain[1]))
+
+# The gradient row and constant of a polynomial of degree at most one.
+function _linear_form(transform::Polynomial2D{N}) where {N}
+    c = transform.coefficients
+    cx, cy = N > 1 ? (c[2, 1], c[1, 2]) : (zero(c[1, 1]), zero(c[1, 1]))
+    sx, ox = _domain_affine(transform.domain === nothing ? nothing : transform.domain[1], transform.window === nothing ? nothing : transform.window[1])
+    sy, oy = _domain_affine(transform.domain === nothing ? nothing : transform.domain[2], transform.window === nothing ? nothing : transform.window[2])
+    return SVector(cx * sx, cy * sy), c[1, 1] + cx * ox + cy * oy
+end
+
 """A two-dimensional SIP correction `(u, v) -> (u + A(u,v), v + B(u,v))`."""
 struct SIPTransform{A<:Polynomial2D,B<:Polynomial2D} <: AbstractTransform{2,2}
     a::A

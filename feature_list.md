@@ -20,7 +20,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P1** Preserve transform names and input/output axis names through metadata parsing, composition, inversion, and compilation.
 - [x] **P1** Add per-transform dependency or separability metadata and compute an axis-correlation matrix for a compiled pipeline.
 - [x] **P2** Add a stable canonical tagged transform-tree inspection API for debugging and serialization.
-- [ ] **P2** Add simplification passes beyond affine fusion, such as identity removal across nested transforms, constant folding, remap fusion, and polynomial/linear fusion where numerically safe.
+- [x] **P2** Fuse Python GWCS's `Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D` distortion idiom into one leaf, and linear pairs into affines.
+- [ ] **P2** Add simplification passes beyond affine and polynomial-pair fusion, such as identity removal across nested transforms, constant folding, and general remap fusion.
 
 ## Celestial projections and rotations
 

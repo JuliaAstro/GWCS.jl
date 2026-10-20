@@ -365,6 +365,8 @@ function _asdf_parallel_names(transforms, accessor)
     return Tuple(name * string(branch - 1) for (branch, names) in enumerate(branch_names) for name in names)
 end
 
+_asdf_output_names(transform::_Polynomial2DPair) = _asdf_parallel_names((transform.x, transform.y), _asdf_output_names)
+
 _asdf_input_names(transform::ParallelTransform) = _asdf_parallel_names(transform.transforms, _asdf_input_names)
 _asdf_output_names(transform::ParallelTransform) = _asdf_parallel_names(transform.transforms, _asdf_output_names)
 

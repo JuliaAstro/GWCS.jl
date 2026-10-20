@@ -27,6 +27,8 @@ function transform_dependencies(transform::Polynomial2D{N}) where {N}
     return SMatrix{1,2,Bool}(depends_x, depends_y)
 end
 
+transform_dependencies(transform::_Polynomial2DPair) = vcat(transform_dependencies(transform.x), transform_dependencies(transform.y))
+
 transform_dependencies(::SphericalToCartesian) = SMatrix{3,2,Bool}(true, true, false, true, true, true)
 transform_dependencies(::CartesianToSpherical) = SMatrix{2,3,Bool}(true, true, true, true, false, true)
 transform_dependencies(::IntermediateToNative) = _dense_dependencies(Val(2), Val(2))
