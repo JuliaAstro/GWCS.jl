@@ -69,16 +69,21 @@ degree(::Polynomial2D{N}) where {N} = N - 1
     T = _evaluation_type(eltype(coords))
     x = _map_domain(T(coords[1]), transform.domain === nothing ? nothing : transform.domain[1], transform.window === nothing ? nothing : transform.window[1])
     y = _map_domain(T(coords[2]), transform.domain === nothing ? nothing : transform.domain[2], transform.window === nothing ? nothing : transform.window[2])
-    result = zero(x + y + T(transform.coefficients[1, 1]))
+    return SVector(_polynomial2d_value(transform.coefficients, x, y))
+end
+
+# Horner's rule over a triangular coefficient matrix whose element `[i + 1, j + 1]` multiplies `x^i * y^j`.
+@inline function _polynomial2d_value(coefficients::SMatrix{N,N}, x::T, y::T) where {N,T}
+    result = zero(x + y + T(coefficients[1, 1]))
     @inbounds for j in (N - 1):-1:0
         max_i = N - 1 - j
-        xpoly = T(transform.coefficients[max_i + 1, j + 1])
+        xpoly = T(coefficients[max_i + 1, j + 1])
         for i in (max_i - 1):-1:0
-            xpoly = muladd(xpoly, x, T(transform.coefficients[i + 1, j + 1]))
+            xpoly = muladd(xpoly, x, T(coefficients[i + 1, j + 1]))
         end
         result = muladd(result, y, xpoly)
     end
-    return SVector(result)
+    return result
 end
 
 # Python GWCS's `Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D` idiom as one leaf, which `compose` builds.
@@ -125,51 +130,80 @@ function _tpd_term_descriptor(index)
     end
 end
 
-"""A TPV plane polynomial using FITS sequent-polynomial term ordering."""
-struct TPVTransform{NX,NY,T,TX,TY} <: AbstractTransform{2,2}
-    xcoeff::NTuple{NX,T}
-    ycoeff::NTuple{NY,T}
-    xterms::TX
-    yterms::TY
+# Sequent TPD coefficients (FITS order, index 0 first) as `(coefficient, radial, xpower, ypower)` terms, skipping zeros.
+function _fits_tpd_compiled_terms(coefficients, ::Val{M}; radial=true) where {M}
+    terms = Tuple{Float64,Bool,Int,Int}[]
+    for (position, coefficient) in enumerate(coefficients)
+        isradial, xpower, ypower = _tpd_term_descriptor(position - 1)
+        M == 1 && (isradial || !iszero(ypower)) && continue
+        (!radial && isradial) || iszero(coefficient) || push!(terms, (Float64(coefficient), isradial, xpower, ypower))
+    end
+    return Tuple(terms)
+end
+
+# Like WCSLIB's tpd1-tpd9, evaluate every coefficient up to the degree by Horner's rule rather than each term by
+# integer powers: `coefficients[i + 1, j + 1]` multiplies u^i v^j and `radial[k]` multiplies r^(2k - 1).
+function _tpd_polynomial(terms)
+    degree = maximum((xpower + ypower for (_, radial, xpower, ypower) in terms if !radial); init=0)
+    radial_count = maximum(((xpower + 1) ÷ 2 for (_, radial, xpower, _) in terms if radial); init=0)
+    coefficients = zeros(degree + 1, degree + 1)
+    radial = zeros(radial_count)
+    for (coefficient, isradial, xpower, ypower) in terms
+        isradial ? (radial[(xpower + 1) ÷ 2] += coefficient) : (coefficients[xpower + 1, ypower + 1] += coefficient)
+    end
+    return (SMatrix{degree + 1,degree + 1}(coefficients), Tuple(radial))
+end
+
+@inline function _tpd_polynomial_value(polynomial, u, v)
+    coefficients, radial = polynomial
+    result = _polynomial2d_value(coefficients, u, v)
+    isempty(radial) && return result
+    s = muladd(u, u, v * v)
+    return muladd(sqrt(s), evalpoly(s, radial), result)
+end
+
+"""
+    TPVTransform(xcoeff, ycoeff)
+
+TPV plane polynomial in FITS sequent order, including radial terms: `xcoeff` holds `PV1_0`, `PV1_1`, ... and gives
+ξ(x, y); `ycoeff` holds `PV2_*` and gives η(y, x).
+"""
+struct TPVTransform{X,Y} <: AbstractTransform{2,2}
+    x::X
+    y::Y
+    # An inner constructor suppresses the default outer one, which would take the place of the coefficient constructor.
+    TPVTransform{X,Y}(x, y) where {X,Y} = new{X,Y}(x, y)
 end
 
 function TPVTransform(xcoeff, ycoeff)
-    xvalues, yvalues = Tuple(float.(xcoeff)), Tuple(float.(ycoeff))
-    length(xvalues) <= 40 && length(yvalues) <= 40 || throw(ArgumentError("TPV supports coefficient indices 0 through 39"))
-    T = isempty(xvalues) && isempty(yvalues) ? Float64 : promote_type(map(typeof, (xvalues..., yvalues...))...)
-    xterms = ntuple(index -> _tpd_term_descriptor(index - 1), length(xvalues))
-    yterms = ntuple(index -> _tpd_term_descriptor(index - 1), length(yvalues))
-    return TPVTransform{length(xvalues),length(yvalues),T,typeof(xterms),typeof(yterms)}(T.(xvalues), T.(yvalues), xterms, yterms)
-end
-
-@inline function _tpd_evaluate(coefficients, terms, x, y)
-    radius = hypot(x, y)
-    result = zero(x + y)
-    for index in eachindex(coefficients)
-        radial, xpower, ypower = terms[index]
-        value = radial ? radius^xpower : x^xpower * y^ypower
-        result = muladd(typeof(result)(coefficients[index]), value, result)
-    end
-    return result
+    length(xcoeff) <= 40 && length(ycoeff) <= 40 || throw(ArgumentError("TPV supports coefficient indices 0 through 39"))
+    x, y = _tpd_polynomial(_fits_tpd_compiled_terms(xcoeff, Val(2))), _tpd_polynomial(_fits_tpd_compiled_terms(ycoeff, Val(2)))
+    return TPVTransform{typeof(x),typeof(y)}(x, y)
 end
 
 @inline function (transform::TPVTransform)(coords::StaticVector{2})
-    x, y = coords
-    return SVector(_tpd_evaluate(transform.xcoeff, transform.xterms, x, y), _tpd_evaluate(transform.ycoeff, transform.yterms, y, x))
+    T = _evaluation_type(eltype(coords))
+    x, y = T(coords[1]), T(coords[2])
+    return SVector(_tpd_polynomial_value(transform.x, x, y), _tpd_polynomial_value(transform.y, y, x))
 end
 
-struct _FITSTPDAxis{M,O,S,A,T,R}
+struct _FITSTPDAxis{M,O,S,A,P,R}
     axes::NTuple{M,Int}
     offset::O
     scale::S
     auxiliary::A
-    terms::T
-    reverse_terms::R
+    polynomial::P
+    reverse::R
     docorr::Bool
+    # An inner constructor suppresses the default outer one, which would bypass the term conversion below.
+    _FITSTPDAxis{M,O,S,A,P,R}(axes, offset, scale, auxiliary, polynomial, reverse, docorr) where {M,O,S,A,P,R} = new{M,O,S,A,P,R}(axes, offset, scale, auxiliary, polynomial, reverse, docorr)
 end
 
+# Terms are `(coefficient, radial, xpower, ypower)` tuples; the reverse polynomial is `nothing` when there are none.
 function _FITSTPDAxis(axes::NTuple{M,Int}, offset, scale, auxiliary, terms, reverse_terms, docorr) where {M}
-    return _FITSTPDAxis{M,typeof(offset),typeof(scale),typeof(auxiliary),typeof(terms),typeof(reverse_terms)}(axes, offset, scale, auxiliary, terms, reverse_terms, docorr)
+    polynomial = _tpd_polynomial(terms)
+    reverse = isempty(reverse_terms) ? nothing : _tpd_polynomial(reverse_terms)
+    return _FITSTPDAxis{M,typeof(offset),typeof(scale),typeof(auxiliary),typeof(polynomial),typeof(reverse)}(axes, offset, scale, auxiliary, polynomial, reverse, docorr)
 end
 
 _FITSTPDAxis(axes, offset, scale, auxiliary, terms, docorr) = _FITSTPDAxis(axes, offset, scale, auxiliary, terms, (), docorr)
@@ -182,7 +216,7 @@ function _FITSTPDTransform(models::NTuple{N,Any}) where {N}
     return _FITSTPDTransform{N,typeof(models)}(models)
 end
 
-@inline function _fits_tpd_value(model::_FITSTPDAxis{M}, coords::StaticVector) where {M}
+@inline function _fits_tpd_value(model::_FITSTPDAxis{M}, polynomial, coords::StaticVector) where {M}
     T = _evaluation_type(eltype(coords))
     variables = SVector{M,T}(ntuple(Val(M)) do index
         (T(coords[model.axes[index]]) - T(model.offset[index])) * T(model.scale[index])
@@ -193,19 +227,13 @@ end
         transformed = SMatrix{2,3,T}(model.auxiliary) * SVector(one(T), u, v)
         u, v = transformed
     end
-    radius = hypot(u, v)
-    result = zero(T)
-    for (coefficient, radial, xpower, ypower) in model.terms
-        value = radial ? radius^xpower : u^xpower * v^ypower
-        result = muladd(T(coefficient), value, result)
-    end
-    return result
+    return _tpd_polynomial_value(polynomial, u, v)
 end
 
 @inline _fits_tpd_output(::Nothing, coords, axis) = coords[axis]
 
 @inline function _fits_tpd_output(model::_FITSTPDAxis, coords, axis)
-    value = _fits_tpd_value(model, coords)
+    value = _fits_tpd_value(model, model.polynomial, coords)
     return model.docorr ? coords[axis] + value : value
 end
 
@@ -225,9 +253,9 @@ end
 @inline _fits_tpd_reverse_output(::Nothing, coords, axis) = (coords[axis], false)
 
 @inline function _fits_tpd_reverse_output(model::_FITSTPDAxis, coords, axis)
-    isempty(model.reverse_terms) && return (coords[axis], false)
-    reverse_model = _FITSTPDAxis(model.axes, model.offset, model.scale, model.auxiliary, model.reverse_terms, (), model.docorr)
-    return (_fits_tpd_output(reverse_model, coords, axis), true)
+    model.reverse === nothing && return (coords[axis], false)
+    value = _fits_tpd_value(model, model.reverse, coords)
+    return (model.docorr ? coords[axis] + value : value, true)
 end
 
 @inline _fits_tpd_reverse_outputs(::Tuple{}, coords, axis, ::Type{T}) where {T} = ((), false)
