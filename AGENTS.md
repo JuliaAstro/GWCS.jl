@@ -40,7 +40,7 @@ Pipeline construction may perform extra validation, normalization, fusion, preco
   - `input_names`
   - `output_names`
 - Return `NoInverse()` when no analytical or explicit inverse exists. Do not invent an inverse merely because each component appears invertible.
-- Use `DomainError` when an analytical inverse is mathematically undefined or an output does not belong to a constrained slice.
+- Return `NaN` in every output component where a coordinate has no image (an undefined analytical inverse, a point off a projection, an output outside a constrained slice); do not throw `DomainError` from transform evaluation. The evaluation API turns finite input that yields `NaN` into `fill_value`, or into a diagnosed `DomainError` with `strict=true`. Zero-dimensional results, which cannot carry `NaN`, are the only exception.
 - Outer constructors should compute type parameters and delegate inward so all call forms apply the same conversions.
 - Parametric inner constructors must accept unconstrained values and let field declarations or `new` perform conversion. Do not require arguments to already have the field type.
 - Preserve existing public APIs unless the requested feature explicitly changes them.
@@ -85,8 +85,8 @@ Labels are dispatch metadata, not numeric coordinates. Keep `AbstractLabelMapper
 ## Error handling
 
 - Fail explicitly on invalid dimensions, ambiguous metadata, incompatible inverses, and unsupported operations.
-- Do not use broad catches, silent defaults, or success-shaped fallbacks.
-- Catch only errors that have defined public meaning. For example, `in_image` converts checked inversion failure and mathematical inverse-domain rejection to `false`.
+- Do not use broad catches, silent defaults, or success-shaped fallbacks. Returning `fill_value` for coordinates without a result is the deliberate APE 14-style default, not a fallback; fail explicitly on invalid inputs, parameters, and metadata.
+- Catch only errors that have defined public meaning. For example, `in_image` converts `NoConvergence` to `false`, and `CallableTransform` converts a `DomainError` from user code to `NaN`.
 - Preserve useful diagnostic information in errors such as `NoConvergence`.
 
 ## Julia style and formatting

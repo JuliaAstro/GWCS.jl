@@ -16,7 +16,7 @@
     @test input_names(inverse) == ("u", "v")
     @test output_names(inverse) == ("x",)
     @test transform_jacobian(inverse, fixed(SVector(3.0))) ≈ SMatrix{1,2}(0.5, 0.5)
-    @test_throws DomainError inverse(SVector(10.0, 10.0))
+    @test all(isnan, inverse(SVector(10.0, 10.0)))
 
     by_index = fix_inputs(affine, 1 => 2.0)
     @test by_index(SVector(3.0)) == affine(SVector(2.0, 3.0))

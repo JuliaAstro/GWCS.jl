@@ -161,18 +161,18 @@ end
 function _tabular_fractional_index(index, value)
     T = promote_type(eltype(index), typeof(float(value)))
     if length(index) == 1
-        abs(value - only(index)) <= T(0.5) || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
+        abs(value - only(index)) <= T(0.5) || return T(NaN)
         return one(T)
     end
     increasing = index[end] > index[1]
     if increasing
-        index[1] - (index[2] - index[1]) / 2 <= value <= index[end] + (index[end] - index[end - 1]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
+        index[1] - (index[2] - index[1]) / 2 <= value <= index[end] + (index[end] - index[end - 1]) / 2 || return T(NaN)
         position = value < index[1] ? 1 : value > index[end] ? length(index) - 1 : _tabular_interval(index, value, Base.Order.Forward)
     else
-        index[end] - (index[end - 1] - index[end]) / 2 <= value <= index[1] + (index[1] - index[2]) / 2 || throw(DomainError(value, "TAB coordinate is outside index-vector bounds"))
+        index[end] - (index[end - 1] - index[end]) / 2 <= value <= index[1] + (index[1] - index[2]) / 2 || return T(NaN)
         position = value > index[1] ? 1 : value < index[end] ? length(index) - 1 : _tabular_interval(index, value, Base.Order.Reverse)
     end
-    1 <= position < length(index) || throw(DomainError(value, "TAB coordinate does not lie in a nondegenerate index-vector interval"))
+    1 <= position < length(index) || return T(NaN)
     first, second = T(index[position]), T(index[position + 1])
     return T(position) + (value - first) / (second - first)
 end
@@ -180,7 +180,8 @@ end
 @inline function _tabular_cell(coordinate, length)
     length == 1 && return 1, 1, zero(coordinate)
     T = typeof(coordinate)
-    T(0.5) <= coordinate <= T(length) + T(0.5) || throw(DomainError(coordinate, "TAB fractional index is outside interpolation bounds"))
+    # Outside the table (or NaN) gives a NaN weight, so the interpolated value is NaN.
+    T(0.5) <= coordinate <= T(length) + T(0.5) || return 1, 2, T(NaN)
     lower = floor(Int, coordinate)
     fraction = coordinate - lower
     lower == 0 && return 1, 2, fraction - 1

@@ -22,13 +22,14 @@ world_to_pixel(wcs, 1.12, 2.38)
 
 Coordinates use each boundary frame's native order. `axes_order[i]` gives the one-based transform position of native frame axis `i`; GWCS compiles static boundary remaps when this order is not the identity. Transform kernels and stored pipeline steps remain in transform order. GWCS.jl does not apply an implicit zero- or one-based pixel offset, so a FITS-equivalent pipeline must encode the FITS reference-pixel convention explicitly.
 
-`pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. Bounding boxes are enforced by default when present; pass `with_bounding_box=false` to evaluate outside the box or set `fill_value` to change the default `NaN`. Coordinates the transforms cannot map, such as the corners of an all-sky projection, raise `DomainError` by default; pass `fill_invalid=true` to return `fill_value` for them instead. This is useful for evaluating whole image grids, for example FITS all-sky maps, which have no bounding box:
+`pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. A coordinate without a result returns `fill_value` (default `NaN`) in every output component. That covers coordinates outside the bounding box, which is enforced by default when present (pass `with_bounding_box=false` to evaluate outside it), and coordinates the transforms cannot map, such as the corners of an all-sky projection, the far side of a TAN projection, or a detector pixel between IFU slices. Like APE 14 WCS objects in Python, whole image grids can therefore be evaluated directly, and invalid points cost no more than valid ones:
 
 ```julia
-world = pixel_to_world(wcs, pixel_matrix; fill_invalid=true)
+world = pixel_to_world(wcs, pixel_matrix)          # NaN columns where there is no sky coordinate
+world = pixel_to_world(wcs, pixel; strict=true)    # throw instead, e.g. while debugging
 ```
 
-Only `DomainError` is converted. Other errors, including `NoConvergence` from the numerical inverse (controlled by `quiet`), still propagate.
+With `strict=true`, any coordinate without a result throws `DomainError`. For an undefined coordinate the message names the coordinate, the pipeline step, and the transform that is undefined there, for example `pixel (1.0, 1.0) has no world coordinate: IntermediateToNative(HammerAitoffProjection) in the step from frame "intermediate" to "world" is undefined at (180.0, -90.0)`. Non-finite input propagates as `NaN` in both modes, and `NoConvergence` from the numerical inverse (controlled by `quiet`) always propagates. Internally every transform returns `NaN` where a coordinate has no image rather than throwing, so the default and strict modes share one compiled pipeline; the step-by-step diagnosis runs only when a strict error is reported.
 
 ### Editing a pipeline
 
@@ -128,7 +129,7 @@ pix2sky = IntermediateToNative(projection)
 sky2pix = inverse_transform(pix2sky)
 ```
 
-Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches raise `DomainError`. Non-finite coordinates propagate as `NaN`. `TangentPlaneToNative` and `NativeToTangentPlane` remain as aliases for the gnomonic `IntermediateToNative` and `NativeToIntermediate` types. The projection types are also shared by native FITS parsing, so an algorithm has one numeric implementation regardless of its metadata source.
+Parameterized projections use the ASDF parameter names corresponding to the FITS projection codes. Invalid parameters raise `ArgumentError`; coordinates on singular, overlapping, or non-visible projection branches, and non-finite coordinates, give `NaN` in both outputs. The projection types are also shared by native FITS parsing, so an algorithm has one numeric implementation regardless of its metadata source.
 
 `celestial_transform` combines a projection with the Paper II native-to-celestial rotation derived from a reference longitude and latitude. It computes the default `LONPOLE` when omitted and uses `LATPOLE` to disambiguate general pole solutions:
 
@@ -156,7 +157,7 @@ Analytical and metadata-provided inverses are compiled into the WCS. Square pipe
 world_to_pixel(wcs, world_coordinate; tolerance=1e-8, maxiter=50, initial_guess=(10.0, 20.0), quiet=true)
 ```
 
-By default (`quiet=false`), nonconvergence throws `NoConvergence`, which records the best solution, accuracy, and iteration count. `quiet=true` returns the best solution instead. Before iterating, the target is mapped through the inverse of the pipeline's longest analytically invertible tail (for example the TAN projection and celestial rotation of a TAN-SIP WCS), so a world coordinate that no pixel can reach raises `DomainError` exactly as with an analytical inverse, regardless of `quiet`. Non-finite world coordinates return `NaN`. Numerical inversion is not available for pipelines with different pixel and world dimensions.
+By default (`quiet=false`), nonconvergence throws `NoConvergence`, which records the best solution, accuracy, and iteration count. `quiet=true` returns the best solution instead. Before iterating, the target is mapped through the inverse of the pipeline's longest analytically invertible tail (for example the TAN projection and celestial rotation of a TAN-SIP WCS), so a world coordinate that no pixel can reach is treated exactly as with an analytical inverse (`fill_value`, or `DomainError` with `strict=true`), regardless of `quiet`. Non-finite world coordinates return `NaN`. Numerical inversion is not available for pipelines with different pixel and world dimensions.
 
 ### Callable transforms
 
@@ -174,7 +175,7 @@ transform = CallableTransform{2,2}(forward; inverse=backward, jacobian, dependen
 wcs = WCS(Step(detector, transform), Step(world))
 ```
 
-A one-output function may return a scalar. Multi-output functions return a tuple or vector of the declared length, and Jacobians return an output-by-input matrix. Optional `dependencies` and `inverse_dependencies` matrices declare structural axis correlations; omitted declarations conservatively assume every output depends on every input. The callable, inverse, Jacobian, and dependency declarations are stored in concrete type parameters, so named functions and type-stable closures can remain inferred and allocation-free. Supplied Jacobians are propagated through composed and parallel transforms and used by numerical inversion; otherwise GWCS.jl uses ForwardDiff.
+A one-output function may return a scalar. Multi-output functions return a tuple or vector of the declared length, and Jacobians return an output-by-input matrix. Optional `dependencies` and `inverse_dependencies` matrices declare structural axis correlations; omitted declarations conservatively assume every output depends on every input. The callable, inverse, Jacobian, and dependency declarations are stored in concrete type parameters, so named functions and type-stable closures can remain inferred and allocation-free. Supplied Jacobians are propagated through composed and parallel transforms and used by numerical inversion; otherwise GWCS.jl uses ForwardDiff. Like built-in transforms, a callable transform returns `NaN` where it is undefined: a `DomainError` thrown by the user function (for example Base `sqrt` of a negative number during a numerical-inverse step) is converted to `NaN`, while other errors propagate.
 
 Use `CallableTransform` for local functions, prototypes, and closures over calibration values. Define a dedicated `AbstractTransform` subtype when a transform needs stable metadata tags, serialization, specialized compilation, parameter introspection, or a reusable package API. Arbitrary functions are not automatically serializable, and allocations or type instability inside user callables remain visible during evaluation.
 
@@ -198,7 +199,7 @@ Array lookup follows the GWCS pixel convention: `(x, y)` coordinates are zero-or
 
 GWCS.jl represents no match as `nothing`, so numeric zero and the empty string remain available as ordinary labels. A missing label or a label without a registered branch returns `undefined_value` in every output, defaulting to `NaN`. `selected_transform(regions, label)` retrieves one branch explicitly.
 
-`WithInverseLabelMapper` pairs forward- and world-side label mappers. A `RegionSelector` has an analytical inverse only when the paired inverse mapper and every selected transform are invertible. Dependencies conservatively include both branch calculations and inputs used to choose the branch; Jacobians use the selected branch and raise `DomainError` where no branch applies.
+`WithInverseLabelMapper` pairs forward- and world-side label mappers. A `RegionSelector` has an analytical inverse only when the paired inverse mapper and every selected transform are invertible. Dependencies conservatively include both branch calculations and inputs used to choose the branch; Jacobians use the selected branch and are `NaN` where no branch applies.
 
 Region selection and compound bounding boxes remain separate. The compound box determines whether an input is in the declared WCS domain, while the label mapper determines which transform applies there. This allows `in_domain` to report domain membership independently of whether a region transform is defined.
 
@@ -223,7 +224,7 @@ input_names(transform)
 output_names(transform)
 ```
 
-When the original transform has an inverse, the fixed-input inverse verifies both the recovered fixed coordinates and the complete forward round trip. It throws `DomainError` for an output outside the fixed slice instead of returning a misleading coordinate. `atol` and `rtol` keywords on `fix_inputs` control this validation.
+When the original transform has an inverse, the fixed-input inverse verifies both the recovered fixed coordinates and the complete forward round trip. It returns `NaN` for an output outside the fixed slice instead of a misleading coordinate; when no inputs remain free, the zero-dimensional result cannot carry `NaN`, so it throws `DomainError`. `atol` and `rtol` keywords on `fix_inputs` control this validation.
 
 `fix_inputs(wcs, ...)` also projects the input frame, bounding box, and pixel shape. Fixing every input produces a zero-dimensional WCS evaluated with `pixel_to_world(wcs)`:
 

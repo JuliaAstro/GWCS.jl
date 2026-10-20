@@ -46,20 +46,22 @@ function in_domain(wcs::WCS{N}, pixels::AbstractMatrix) where {N}
     return result
 end
 
-@inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN, fill_invalid=false) where {Nin,Nout}
+# `strict=false` returns `fill_value` for coordinates without a result (outside the bounding box or
+# undefined under the transforms); `strict=true` throws for them instead. NaN input propagates as NaN.
+@inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN, strict=false) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     pixels = SVector{Nin,T}(coords)
-    if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)
+    finite = all(isfinite, pixels)
+    if with_bounding_box && wcs.bounding_box !== nothing && finite && !(pixels in wcs.bounding_box)
+        strict && _throw_outside_box(pixels)
         return _filled_coordinate(Val(Nout), T, fill_value)
     end
-    fill_invalid || return wcs.forward(pixels)
-    # A DomainError means the pixel has no world coordinate; any other error is a real failure.
-    try
-        return wcs.forward(pixels)
-    catch error
-        error isa DomainError || rethrow()
-        return _filled_coordinate(Val(Nout), T, fill_value)
-    end
+    world = wcs.forward(pixels)
+    # Transforms return NaN where a coordinate has no image; finite input that yields NaN is undefined.
+    any(isnan, world) || return world
+    strict || return _filled_coordinate(Val(Nout), T, fill_value)
+    finite || return world
+    _throw_undefined(wcs, pixels)
 end
 
 function pixel_to_world(wcs::WCS{Nin}, coords::AbstractVector; kwargs...) where {Nin}
@@ -84,21 +86,22 @@ function pixel_to_world(wcs::WCS{Nin,Nout}, pixels::AbstractMatrix; kwargs...) w
     return result
 end
 
-@inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, fill_invalid=false, kwargs...) where {Nin,Nout}
+@inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, strict=false, kwargs...) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     world = SVector{Nout,T}(coords)
-    if fill_invalid
-        # A DomainError means the world coordinate has no pixel; any other error, including NoConvergence, propagates.
-        try
-            return _world_to_pixel(wcs, world; with_bounding_box, fill_value, kwargs...)
-        catch error
-            error isa DomainError || rethrow()
-            return _filled_coordinate(Val(Nin), T, fill_value)
-        end
+    pixels = wcs.backward isa NoInverse ? _numerical_solve(wcs, world; kwargs...) : wcs.backward(world)
+    return _finish_inverse(wcs, world, pixels; with_bounding_box, fill_value, strict)
+end
+
+# Shared by the analytical and numerical inverses: undefined results are thrown or filled before the bounding box applies.
+@inline function _finish_inverse(wcs::WCS{Nin}, world, pixels; with_bounding_box, fill_value, strict) where {Nin}
+    if any(isnan, pixels)
+        strict || return _filled_coordinate(Val(Nin), eltype(pixels), fill_value)
+        all(isfinite, world) && _throw_undefined_inverse(wcs, world)
+        return pixels
     end
-    wcs.backward isa NoInverse && return _numerical_inverse(wcs, world; with_bounding_box, fill_value, kwargs...)
-    pixels = wcs.backward(world)
     if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)
+        strict && _throw_outside_box_inverse(world, pixels)
         return _filled_coordinate(Val(Nin), eltype(pixels), fill_value)
     end
     return pixels
@@ -127,12 +130,11 @@ end
 
 @inline function _in_image(wcs::WCS{Nin,Nout}, world::StaticVector{Nout}; with_bounding_box=true, tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12) where {Nin,Nout}
     pixels = try
-        _world_to_pixel(wcs, world; with_bounding_box=false, tolerance, maxiter, initial_guess, quiet=false, max_backtracks)
+        _world_to_pixel(wcs, world; with_bounding_box=false, fill_value=NaN, strict=false, tolerance, maxiter, initial_guess, quiet=false, max_backtracks)
     catch error
-        if error isa NoConvergence || error isa DomainError
-            return false
-        end
-        rethrow()
+        # DomainError remains only for zero-dimensional inverses, which cannot carry NaN.
+        error isa NoConvergence || error isa DomainError || rethrow()
+        return false
     end
     return _in_domain(wcs, pixels; with_bounding_box)
 end
@@ -161,4 +163,72 @@ function in_image(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwargs...) where {
         result[index] = _in_image(wcs, SVector{Nout,T}(view(worlds, :, column)); kwargs...)
     end
     return result
+end
+
+@noinline _throw_outside_box(pixels) = throw(DomainError(Tuple(pixels), "pixel $(Tuple(pixels)) is outside the WCS bounding box"))
+@noinline _throw_outside_box_inverse(world, pixels) = throw(DomainError(Tuple(world), "world coordinate $(Tuple(world)) maps to pixel $(Tuple(pixels)), outside the WCS bounding box"))
+
+# Error path only: re-evaluate one coordinate step by step to report which transform is undefined there.
+_describe_transform(transform) = string(nameof(typeof(transform)))
+_describe_transform(transform::Union{IntermediateToNative,NativeToIntermediate}) = "$(nameof(typeof(transform)))($(nameof(typeof(transform.projection))))"
+
+_undefined_leaf(transform, coords) = (transform, coords)
+_undefined_leaf(transform::AnnotatedTransform, coords) = _undefined_leaf(transform.transform, coords)
+_undefined_leaf(transform::WithInverse, coords) = _undefined_leaf(transform.forward, coords)
+
+function _undefined_leaf(transform::ComposedTransform, coords)
+    for child in transform.transforms
+        next = child(coords)
+        any(isnan, next) && return _undefined_leaf(child, coords)
+        coords = next
+    end
+    return (transform, coords)
+end
+
+function _undefined_leaf(transform::ParallelTransform, coords)
+    offset = 0
+    for child in transform.transforms
+        count = input_dimension(child)
+        part = SVector{count}(ntuple(i -> coords[offset + i], count))
+        any(isnan, child(part)) && return _undefined_leaf(child, part)
+        offset += count
+    end
+    return (transform, coords)
+end
+
+function _undefined_message(subject, step_description, transform, coords)
+    leaf, leaf_coords = _undefined_leaf(transform, coords)
+    return "$subject: $(_describe_transform(leaf)) in $step_description is undefined at $(Tuple(leaf_coords))"
+end
+
+@noinline function _throw_undefined(wcs::WCS, pixels)
+    subject = "pixel $(Tuple(pixels)) has no world coordinate"
+    coords = _frame_to_transform(first(wcs.steps).frame)(pixels)
+    for index in 1:(length(wcs.steps) - 1)
+        step = wcs.steps[index]
+        next = step.transform(coords)
+        if any(isnan, next)
+            description = "the step from frame \"$(step.frame.name)\" to \"$(wcs.steps[index + 1].frame.name)\""
+            throw(DomainError(Tuple(pixels), _undefined_message(subject, description, step.transform, coords)))
+        end
+        coords = next
+    end
+    throw(DomainError(Tuple(pixels), subject))
+end
+
+@noinline function _throw_undefined_inverse(wcs::WCS, world)
+    subject = "world coordinate $(Tuple(world)) has no pixel coordinate"
+    coords = _frame_to_transform(last(wcs.steps).frame)(world)
+    for index in (length(wcs.steps) - 1):-1:1
+        inverse = _inverse_transform_checked(wcs.steps[index].transform)
+        # The numerical inverse only proves undefinedness through analytically invertible steps.
+        inverse isa NoInverse && break
+        next = inverse(coords)
+        if any(isnan, next)
+            description = "the inverse of the step from frame \"$(wcs.steps[index].frame.name)\" to \"$(wcs.steps[index + 1].frame.name)\""
+            throw(DomainError(Tuple(world), _undefined_message(subject, description, inverse, coords)))
+        end
+        coords = next
+    end
+    throw(DomainError(Tuple(world), subject))
 end

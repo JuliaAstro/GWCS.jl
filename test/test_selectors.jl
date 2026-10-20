@@ -95,7 +95,7 @@ end
     @test_throws KeyError selected_transform(selector, :missing)
     @test transform_jacobian(selector, SVector(-2.0, 4.0)) == SMatrix{2,2}(1, 0, 0, 1)
     @test transform_jacobian(selector, SVector(2.0, 4.0)) == SMatrix{2,2}(2, 0, 0, 3)
-    @test_throws DomainError transform_jacobian(selector, SVector(11.0, 4.0))
+    @test all(isnan, transform_jacobian(selector, SVector(11.0, 4.0)))
     @test transform_dependencies(selector) == SMatrix{2,2,Bool}(true, true, false, true)
     @test compile_transform(selector) isa RegionSelector
     @test inverse_transform(selector) isa NoInverse
@@ -150,6 +150,9 @@ end
     @test pixel_to_world(wcs, 1, 0) == SVector(3.0, 0.0)
     @test all(isnan, pixel_to_world(wcs, 0, 0))
     @test all(isnan, pixel_to_world(wcs, 2, 0))
+    # A pixel in no region is undefined; strict mode reports it, and the bounding-box miss separately.
+    @test_throws "RegionSelector in the step from frame \"detector\" to \"world\" is undefined" pixel_to_world(wcs, 0, 0; strict=true)
+    @test_throws "outside the WCS bounding box" pixel_to_world(wcs, 2, 0; strict=true)
     @test in_domain(wcs, 0, 0)
     @test !in_domain(wcs, 2, 0)
 

@@ -129,7 +129,8 @@ import FITSIO
     generic_log_world = log_reference * exp(log_offset / log_reference)
     @test pixel_to_world(generic_log, 2.0) ≈ SVector(generic_log_world)
     @test world_to_pixel(generic_log, generic_log_world) ≈ SVector(2.0)
-    @test_throws DomainError world_to_pixel(generic_log, 0.0)
+    @test all(isnan, world_to_pixel(generic_log, 0.0))
+    @test_throws DomainError world_to_pixel(generic_log, 0.0; strict=true)
     @test_throws "reference value must be finite and positive" parse_fits_wcs(merge(generic_log_header, Dict("CRVAL1" => 0.0)))
     linear_negative = parse_fits_wcs(merge(generic_log_header, Dict("CTYPE1" => "X", "CRVAL1" => -10.0)))
     @test pixel_to_world(linear_negative, 1.0) == SVector(-10.0)
@@ -568,7 +569,8 @@ import FITSIO
     @test world_to_pixel(tab_wcs, 3.0e10) == SVector(2.5)
     @test pixel_to_world(tab_wcs, 0.5) == SVector(5.0e9)
     @test world_to_pixel(tab_wcs, 5.0e9) == SVector(0.5)
-    @test_throws DomainError pixel_to_world(tab_wcs, 0.49)
+    @test all(isnan, pixel_to_world(tab_wcs, 0.49))
+    @test_throws DomainError pixel_to_world(tab_wcs, 0.49; strict=true)
     @test pixel_to_world(GWCS._parse_fits_wcs(GWCS._fits_header(tab_header); preserve_units=true, tabular_data=(tabular,)), 2.5) == SVector(30.0)
     pixel_to_world(tab_wcs, SVector(2.5))
     world_to_pixel(tab_wcs, SVector(3.0e10))
@@ -770,7 +772,8 @@ import FITSIO
         @test pixel_to_world(quadratic_zpn, pixel) ≈ world atol=1e-11 rtol=5e-14
         @test world_to_pixel(quadratic_zpn, world) ≈ pixel atol=5e-11 rtol=5e-13
     end
-    @test_throws DomainError pixel_to_world(quadratic_zpn, 72.0, 0.0)
+    @test all(isnan, pixel_to_world(quadratic_zpn, 72.0, 0.0))
+    @test_throws DomainError pixel_to_world(quadratic_zpn, 72.0, 0.0; strict=true)
     # WCSLIB defaults ZPN coefficients to zero and rejects these degenerate polynomials.
     bare_zpn_header = filter(pair -> !startswith(pair.first, "PV2_"), quadratic_zpn_header)
     @test_throws "must have a nonzero coefficient" parse_fits_wcs(bare_zpn_header)
@@ -917,7 +920,8 @@ import FITSIO
     # Points beyond the projection boundary have no sky coordinates (WCSLIB status 1), not wrapped duplicates.
     for (code, parameters, pixel) in (("CAR", Dict(), (-189.0, 0.0)), ("MOL", Dict(), (170.0, 60.0)), ("SFL", Dict(), (170.0, 60.0)),
             ("HPX", Dict(), (-170.0, 80.0)), ("XPH", Dict(), (99.0, -138.0)), ("COD", Dict("PV2_1" => 45.0, "PV2_2" => 25.0), (195.0, -156.0)))
-        @test_throws DomainError pixel_to_world(parse_fits_wcs(unit_projection_header(code, (0.0, 0.0), parameters)), pixel...)
+        @test all(isnan, pixel_to_world(parse_fits_wcs(unit_projection_header(code, (0.0, 0.0), parameters)), pixel...))
+        @test_throws DomainError pixel_to_world(parse_fits_wcs(unit_projection_header(code, (0.0, 0.0), parameters)), pixel...; strict=true)
     end
     # Polyconic intermediate y exceeds 90 degrees away from the central meridian.
     @test pixel_to_world(parse_fits_wcs(unit_projection_header("PCO", (0.0, 0.0))), 67.0, -132.0) ≈ SVector(172.10045640795752, -39.05258488360962) atol=1e-11
