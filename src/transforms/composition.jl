@@ -3,7 +3,7 @@ struct ComposedTransform{Nin,Nout,Ts<:Tuple} <: AbstractTransform{Nin,Nout}
     transforms::Ts
 end
 
-function ComposedTransform(transforms::Tuple)
+function ComposedTransform(@nospecialize(transforms::Tuple))
     isempty(transforms) && throw(ArgumentError("a composition requires at least one transform"))
     all(transform -> transform isa AbstractTransform, transforms) || throw(ArgumentError("all composed values must be transforms"))
     for i in 1:(length(transforms) - 1)
@@ -45,7 +45,7 @@ end
 
 _fuse_pair(first, second) = nothing
 
-function compose(transforms::AbstractTransform...)
+function compose(@nospecialize(transforms::AbstractTransform...))
     isempty(transforms) && throw(ArgumentError("a composition requires at least one transform"))
     flattened = Any[]
     foreach(transform -> _append_composed!(flattened, transform), transforms)
@@ -122,7 +122,7 @@ struct ParallelTransform{Nin,Nout,Ts<:Tuple} <: AbstractTransform{Nin,Nout}
     transforms::Ts
 end
 
-function ParallelTransform(transforms::Tuple)
+function ParallelTransform(@nospecialize(transforms::Tuple))
     isempty(transforms) && throw(ArgumentError("a parallel transform requires at least one transform"))
     all(transform -> transform isa AbstractTransform, transforms) || throw(ArgumentError("all parallel values must be transforms"))
     Nin = sum(input_dimension, transforms)
@@ -179,7 +179,7 @@ function _fuse_parallel_affine(transforms)
     return AffineTransform(SMatrix(matrix), SVector(offset))
 end
 
-function parallel(transforms::AbstractTransform...)
+function parallel(@nospecialize(transforms::AbstractTransform...))
     flattened = Any[]
     foreach(transform -> _append_parallel!(flattened, transform), transforms)
     isempty(flattened) && throw(ArgumentError("a parallel transform requires at least one transform"))

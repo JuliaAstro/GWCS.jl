@@ -240,18 +240,13 @@ end
 function _parse_compose(node, context)
     values = required_metadata(node, "forward", context)
     path = metadata_path(context)
-    transforms = map(enumerate(values)) do (index, value)
-        parse_transform(value; path="$path/forward/$index", registry=context.registry)
-    end
-    return compose(transforms...)
+    return compose((parse_transform(value; path="$path/forward/$index", registry=context.registry) for (index, value) in enumerate(values))...)
 end
 
 function _parse_concatenate(node, context)
     values = required_metadata(node, "forward", context)
     path = metadata_path(context)
-    transforms = map(enumerate(values)) do (index, value)
-        parse_transform(value; path="$path/forward/$index", registry=context.registry)
-    end
+    transforms = Any[parse_transform(value; path="$path/forward/$index", registry=context.registry) for (index, value) in enumerate(values)]
     inputs = _asdf_parallel_names(transforms, _asdf_input_names)
     outputs = _asdf_parallel_names(transforms, _asdf_output_names)
     return AnnotatedTransform(parallel(transforms...); inputs, outputs)
@@ -620,7 +615,7 @@ function _parse_spherical_cartesian(node, context)
     _metadata_error(metadata_path(context), "unsupported spherical/cartesian transform type $transform_type")
 end
 
-function _parse_transform_annotation(transform, node, context)
+function _parse_transform_annotation(@nospecialize(transform), node, context)
     has_annotation = haskey(node, "name") || haskey(node, "inputs") || haskey(node, "outputs")
     has_annotation || return transform
     name = if haskey(node, "name")
@@ -950,9 +945,7 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     node, context = _prepare_metadata(node, "wcs", registry)
     metadata_tag(context) == "$_GWCS_TAG/wcs" || _metadata_error("wcs", "expected a GWCS WCS metadata node")
     raw_steps = _required(node, "steps", "wcs")
-    steps = map(enumerate(raw_steps)) do (index, value)
-        _parse_step(value, "wcs/steps/$index", registry)
-    end
+    steps = Any[_parse_step(value, "wcs/steps/$index", registry) for (index, value) in enumerate(raw_steps)]
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
     parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, first(steps).transform, "wcs/steps/1/transform/bounding_box", registry)

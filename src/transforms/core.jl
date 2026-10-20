@@ -90,7 +90,7 @@ construction-oriented transform with an optimized `AbstractTransform`.
 compile_transform(transform::AbstractTransform) = transform
 _numeric_transform(transform::AbstractTransform) = transform
 
-function _compile_transform_checked(transform::AbstractTransform)
+function _compile_transform_checked(@nospecialize(transform::AbstractTransform))
     compiled = compile_transform(transform)
     compiled isa AbstractTransform || throw(ArgumentError("compile_transform(::$(typeof(transform))) returned $(typeof(compiled)), expected AbstractTransform"))
     input_dimension(compiled) == input_dimension(transform) && output_dimension(compiled) == output_dimension(transform) || throw(DimensionMismatch("compiled form of $(typeof(transform)) has dimensions $(input_dimension(compiled)) -> $(output_dimension(compiled)), expected $(input_dimension(transform)) -> $(output_dimension(transform))"))
