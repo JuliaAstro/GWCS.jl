@@ -22,6 +22,8 @@ struct RegionSelector{Nin,Nout,L,M<:AbstractLabelMapper{Nin,L},Ts<:Tuple,D<:Abst
     labels::Vector{L}
     transforms::Ts
     lookup::D
+    # Python GWCS's `undefined_transform_value`, kept only so ASDF round trips are exact. Evaluation always
+    # returns NaN for a coordinate in no region, so the API treats it as having no result (`fill_value` or `strict`).
     undefined_value::U
 end
 
@@ -35,9 +37,9 @@ function RegionSelector(label_mapper::AbstractLabelMapper{Nin,L}, selector; unde
     return RegionSelector{Nin,Nout,L,typeof(label_mapper),typeof(transforms),typeof(lookup),typeof(undefined_value)}(label_mapper, labels, transforms, lookup, undefined_value)
 end
 
-@inline function _undefined_region_output(transform::RegionSelector{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
+@inline function _undefined_region_output(::RegionSelector{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}
     T = _evaluation_type(eltype(coords))
-    return SVector{Nout,T}(ntuple(_ -> T(transform.undefined_value), Nout))
+    return SVector{Nout,T}(ntuple(_ -> T(NaN), Nout))
 end
 
 @inline function (transform::RegionSelector{Nin,Nout})(coords::StaticVector{Nin}) where {Nin,Nout}
@@ -68,7 +70,8 @@ function inverse_transform(transform::RegionSelector)
     any(inverse -> inverse isa NoInverse, inverses) && return NoInverse()
     input_dimension(mapper) == output_dimension(transform) || throw(DimensionMismatch("inverse label mapper has input dimension $(input_dimension(mapper)), expected $(output_dimension(transform))"))
     selector = ntuple(index -> transform.labels[index] => inverses[index], length(inverses))
-    return RegionSelector(mapper, selector; undefined_value=transform.undefined_value)
+    # Like Python GWCS, the inverse selector does not inherit a custom undefined value.
+    return RegionSelector(mapper, selector)
 end
 
 function transform_jacobian(transform::RegionSelector{Nin,Nout}, coords::StaticVector{Nin}) where {Nin,Nout}

@@ -223,9 +223,10 @@ end
     @test output_names(array) == ("u", "v")
     @test array(SVector(0.0, 1.0)) == SVector(1.0, 1.0)
     @test array(SVector(1.0, 0.0)) == SVector(3.0, 0.0)
-    @test array(SVector(0.0, 0.0)) == SVector(-100.0, -100.0)
+    # `undefined_transform_value: -100` is retained but not returned: a region miss evaluates to NaN.
+    @test all(isnan, array(SVector(0.0, 0.0)))
     ignored_array_sentinel = parse_transform(GWCS._load_tagged_yaml(replace(metadata, "no_label: 0" => "no_label: 99"))["array"])
-    @test ignored_array_sentinel(SVector(0.0, 0.0)) == SVector(-100.0, -100.0)
+    @test all(isnan, ignored_array_sentinel(SVector(0.0, 0.0)))
 
     dictionary = parse_transform(fixture["dictionary"])
     @test dictionary(SVector(-2.0005, 8.0)) == SVector(10.0)
