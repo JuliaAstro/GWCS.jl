@@ -32,7 +32,7 @@ end
 
 # Splits a forward pipeline without an inverse into a non-invertible prefix and the inverse of its
 # longest analytically invertible tail, such as pixels -> SIP -> linear and linear -> TAN -> rotation.
-function _numerical_inverse_split(forward::AbstractTransform)
+function _numerical_inverse_split(forward::AbstractTransform, bounding_box, pixel_shape)
     transforms = forward isa ComposedTransform ? forward.transforms : (forward,)
     first_invertible = length(transforms) + 1
     while first_invertible > 1 && !(_inverse_transform_checked(transforms[first_invertible - 1]) isa NoInverse)
@@ -42,8 +42,66 @@ function _numerical_inverse_split(forward::AbstractTransform)
     # Newton evaluates `prefix`; only the initial guess uses `initializer`, where the WithInverse leaves would cost
     # the solve itself a little.
     initializer = _with_initializer_inverses(prefix)
-    first_invertible > length(transforms) && return (prefix=prefix, initializer=initializer, tail_inverse=IdentityTransform{output_dimension(forward)}())
-    return (prefix=prefix, initializer=initializer, tail_inverse=_inverse_transform_checked(compose(transforms[first_invertible:end]...)))
+    tail_inverse = first_invertible > length(transforms) ? IdentityTransform{output_dimension(forward)}() : _inverse_transform_checked(compose(transforms[first_invertible:end]...))
+    return (; prefix, initializer, tail_inverse, approximate=_approximate_inverse(prefix, initializer, bounding_box, pixel_shape))
+end
+
+# Like Python GWCS's approximate inverse, a polynomial fit of pixels as a function of the prefix output, sampled over
+# the image, gives Newton a starting point inside it. Fitting the prefix output needs no projection, unlike Python's
+# fit in a TAN plane, and the fit must reach 0.01 px rather than Python's 5 px: coarser guesses save no iterations.
+_approximate_inverse(prefix, initializer, bounding_box, pixel_shape) = nothing
+
+function _approximate_inverse(@nospecialize(prefix::AbstractTransform{2,2}), @nospecialize(initializer), bounding_box, pixel_shape)
+    domain = ntuple(axis -> _approximate_inverse_interval(bounding_box, pixel_shape, axis), 2)
+    any(isnothing, domain) && return nothing
+    low, high = SVector{2,Float64}(first.(domain)), SVector{2,Float64}(last.(domain))
+    all(isfinite, low) && all(isfinite, high) && all(low .< high) || return nothing
+    # An explicit approximate reverse, such as SIP AP/BP, already starts Newton near the root.
+    last(_inverse_initialize(initializer, prefix((low + high) / 2))) && return nothing
+    fit = _fit_approximate_inverse(_approximate_inverse_samples(prefix, low, high, 16, false)..., _approximate_inverse_samples(prefix, low, high, 16, true)...)
+    return fit === nothing ? nothing : (; fit, low, high)
+end
+
+function _approximate_inverse_interval(bounding_box, pixel_shape, axis)
+    interval = bounding_box isa BoundingBox ? bounds(bounding_box, axis) : nothing
+    interval !== nothing && return Float64.(interval)
+    (pixel_shape === nothing || pixel_shape[axis] === nothing) && return nothing
+    # The padding covers both the zero-based GWCS and the one-based FITS pixel centers.
+    return (-1.5, pixel_shape[axis] + 0.5)
+end
+
+# An `n` x `n` lattice spanning the domain, or with `stagger`, the `n - 1` x `n - 1` lattice of its cell centers.
+function _approximate_inverse_samples(@nospecialize(prefix), low, high, n, stagger)
+    step = (high - low) / (n - 1)
+    start, stop, m = stagger ? (low + step / 2, high - step / 2, n - 1) : (low, high, n)
+    pixels = [SVector(x, y) for y in range(start[2], stop[2]; length=m) for x in range(start[1], stop[1]; length=m)]
+    return pixels, map(pixel -> SVector{2,Float64}(prefix(pixel)), pixels)
+end
+
+# Least squares in monomials of the normalized prefix output at odd degrees 3 to 9, which reduce the error far more
+# than even ones, keeping the first fit whose largest error on the staggered lattice is within 0.01 px. A 16 x 16
+# lattice tracks a dense check to within a factor of 1.3; divergent or folded samples never pass.
+function _fit_approximate_inverse(pixels, intermediate, check_pixels, check_intermediate; tolerance=0.01, degrees=3:2:9)
+    all(point -> all(isfinite, point), intermediate) && all(point -> all(isfinite, point), check_intermediate) || return nothing
+    domain = (extrema(first, intermediate), extrema(last, intermediate))
+    all(interval -> interval[1] < interval[2], domain) || return nothing
+    normalize(point, axis) = (point[axis] - sum(domain[axis]) / 2) * 2 / (domain[axis][2] - domain[axis][1])
+    targets, check_targets = permutedims(reduce(hcat, pixels)), permutedims(reduce(hcat, check_pixels))
+    design(points, degree) = [normalize(point, 1)^i * normalize(point, 2)^j for point in points, (i, j) in [(i, j) for i in 0:degree for j in 0:(degree - i)]]
+    for degree in degrees
+        coefficients = design(intermediate, degree) \ targets
+        maximum(abs, design(check_intermediate, degree) * coefficients - check_targets) <= tolerance || continue
+        polynomials = map(1:2) do axis
+            matrix = zeros(degree + 1, degree + 1)
+            index = 0
+            for i in 0:degree, j in 0:(degree - i)
+                matrix[i + 1, j + 1] = coefficients[index += 1, axis]
+            end
+            Polynomial2D(matrix; domain, window=((-1.0, 1.0), (-1.0, 1.0)))
+        end
+        return _Polynomial2DPair(polynomials...)
+    end
+    return nothing
 end
 
 # The initial guess inverts each invertible prefix leaf on every solve; storing those inverses as WithInverse
@@ -62,6 +120,12 @@ function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, init
     if initial_guess !== nothing
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
         return SVector{N,T}(initial_guess) .- offset
+    end
+    approximate = wcs.inverse_split.approximate
+    if approximate !== nothing
+        # Outside the fitted image the polynomial extrapolates, so the usual guesses apply there.
+        guess = SVector{N,T}(approximate.fit(intermediate))
+        all(approximate.low .<= guess .<= approximate.high) && return guess
     end
     initialized, used = _inverse_initialize(wcs.inverse_split.initializer, intermediate)
     usable = initialized !== nothing && all(isfinite, initialized)

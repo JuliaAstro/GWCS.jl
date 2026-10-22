@@ -97,6 +97,24 @@ struct ZeroTransform <: AbstractTransform{0,0} end
     allocated_inverse(sip, sip_world)
     @test allocated_inverse(sip, sip_world) == 0
 
+    # With an image shape, construction fits pixels as a polynomial of the prefix output, which starts Newton within
+    # 0.01 px of an in-image root; without one, or with an AP/BP reverse, there is no fit.
+    @test sip.inverse_split.approximate === nothing
+    shaped = parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024)))
+    @test shaped.inverse_split.approximate !== nothing
+    shaped_intermediate = shaped.inverse_split.tail_inverse(sip_world)
+    @test maximum(abs, GWCS._initial_guess(shaped, shaped_intermediate, Float64, nothing, shaped.inverse_split.prefix) - SVector(100.0, 900.0)) < 0.01
+    @test GWCS._numerical_result(shaped, sip_world)[4] == 1
+    @test @inferred(world_to_pixel(shaped, sip_world)) ≈ SVector(100.0, 900.0) atol=1e-9
+    allocated_inverse(shaped, sip_world)
+    @test allocated_inverse(shaped, sip_world) == 0
+    @test parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024, "AP_ORDER" => 2, "AP_2_0" => -5e-6, "BP_ORDER" => 2, "BP_0_2" => -2e-6))).inverse_split.approximate === nothing
+    # Outside the image the fit would extrapolate, so the usual guess applies.
+    far_world = pixel_to_world(sip, SVector(6000.0, -4000.0))
+    far_intermediate = shaped.inverse_split.tail_inverse(far_world)
+    @test GWCS._initial_guess(shaped, far_intermediate, Float64, nothing, shaped.inverse_split.prefix) == GWCS._initial_guess(sip, far_intermediate, Float64, nothing, sip.inverse_split.prefix)
+    @test world_to_pixel(shaped, far_world; with_bounding_box=false) ≈ world_to_pixel(sip, far_world; with_bounding_box=false) atol=1e-9
+
     # Invertible prefix leaves, such as a selector with an inverse label mapper, carry precomputed inverses for the
     # initial guess, which would otherwise build an inverse selector on every solve.
     paired = WithInverseLabelMapper(CallableLabelMapper{2,Int}((x, y) -> x < 5 ? 1 : 2), CallableLabelMapper{2,Int}((x, y) -> x < 6 ? 1 : 2))
