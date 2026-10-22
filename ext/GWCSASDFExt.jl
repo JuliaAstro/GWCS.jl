@@ -2,6 +2,7 @@ module GWCSASDFExt
 
 using ASDF
 using GWCS
+using PrecompileTools: @compile_workload
 
 GWCS._tag(node::ASDF.TaggedMapping) = node.tag
 GWCS._tag(node::ASDF.TaggedSequence) = node.tag
@@ -28,6 +29,18 @@ end
 
 function GWCS.write_asdf(filename, document::AbstractDict)
     return ASDF.write_file(filename, _asdf_metadata(document))
+end
+
+# Parses the main workload's pipeline as the OrderedDict-backed nodes `ASDF.load_file` builds, so the cached
+# adapter and parser specializations match loaded files.
+_ordered(value::ASDF.TaggedMapping) = ASDF.TaggedMapping(value.tag, ASDF.OrderedDict{Any,Any}(_ordered(k) => _ordered(v) for (k, v) in value.value))
+_ordered(value::ASDF.TaggedSequence) = ASDF.TaggedSequence(value.tag, map(_ordered, value.value))
+_ordered(value::AbstractDict) = ASDF.OrderedDict{Any,Any}(_ordered(k) => _ordered(v) for (k, v) in value)
+_ordered(value::AbstractArray) = map(_ordered, value)
+_ordered(value) = value
+@compile_workload begin
+    wcs = GWCS.parse_wcs(_ordered(_asdf_metadata(GWCS._load_tagged_yaml(GWCS._WORKLOAD_ASDF))))
+    GWCS.world_to_pixel(wcs, GWCS.pixel_to_world(wcs, 100.0, 200.0))
 end
 
 end
