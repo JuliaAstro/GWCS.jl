@@ -123,7 +123,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Add adaptive iteration that stops updating points that have already converged.
 - [ ] **P1** Add explicit divergence detection and preserve the best pre-divergence solution.
 - [ ] **P1** Fit and cache an approximate inverse transform for expensive distortion models when a bounding box is available.
-- [ ] **P1** Use the approximate inverse as an initial guess before falling back to the bounding-box center.
+- [ ] **P1** Use the approximate inverse as an initial guess before falling back to the bounding-box center. Implemented on branch `approx-inverse-cache` (ae947a8) for 2D WCSs with a bounding box or pixel shape; deferred until precompile workloads exist, since it adds about 0.7 s to the first parse in a session for a 10-35% faster in-image inverse. The commit message has the measurements.
 - [ ] **P1** Allow a caller-supplied array of initial guesses for batch inversion.
 - [ ] **P2** Add a solver abstraction so alternative Julia root-finding methods can be selected without changing the WCS API.
 - [ ] **P2** Add optional Jacobian caching or analytical-Jacobian hooks for transforms that can provide them. Low value for now: the prefix Jacobian is 4-6 ns of a 120-160 ns SIP inverse.
