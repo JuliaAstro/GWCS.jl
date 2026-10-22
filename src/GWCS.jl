@@ -7,6 +7,7 @@ module GWCS
 
 using ForwardDiff
 using LinearAlgebra: Diagonal, I, det, inv
+using PrecompileTools: @compile_workload, @setup_workload
 using StaticArrays: MMatrix, MVector, SMatrix, SVector, StaticMatrix, StaticVector
 using YAML
 
@@ -35,6 +36,7 @@ include("api.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 include("serialization.jl")
+include("precompile.jl")
 
 export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, ArrayLabelMapper, CallableLabelMapper, CallableTransform, CartesianToSpherical,
        AbstractConicProjection, AbstractSphericalProjection, AbstractZenithalProjection, AiryProjection, BonneProjection, COBESphericalCube, ConicEqualArea, ConicEquidistant, ConicOrthomorphic, ConicPerspective, CylindricalEqualArea, CylindricalPerspective,
