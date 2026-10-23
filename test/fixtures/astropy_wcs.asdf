@@ -1,0 +1,143 @@
+#ASDF 1.0.0
+#ASDF_STANDARD 1.6.0
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+--- !core/asdf-1.1.0
+asdf_library: !core/software-1.0.0 {author: The ASDF Developers, homepage: 'http://github.com/asdf-format/asdf',
+  name: asdf, version: 5.3.1}
+history:
+  extensions:
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/core/extensions/core-1.6.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf, version: 5.3.1}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://astropy.org/astropy/extensions/astropy-1.6.0
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+alternate: !<tag:astropy.org:astropy/wcs/wcs-1.0.0>
+  attrs: {naxis: 2, pixel_bounds: null, pixel_shape: null}
+  hdulist: !<tag:astropy.org:astropy/fits/fits-1.2.0>
+  - header:
+    - [SIMPLE, true, conforms to FITS standard]
+    - [BITPIX, 8, array data type]
+    - [NAXIS, 0, number of array dimensions]
+    - [WCSAXESA, 2, Number of coordinate axes]
+    - [CRPIX1A, 1.0, Pixel coordinate of reference point]
+    - [CRPIX2A, 1.0, Pixel coordinate of reference point]
+    - [CDELT1A, 0.5, '[mm] Coordinate increment at reference point']
+    - [CDELT2A, 0.5, '[mm] Coordinate increment at reference point']
+    - [CUNIT1A, mm, Units of coordinate increment and value]
+    - [CUNIT2A, mm, Units of coordinate increment and value]
+    - [CTYPE1A, XLIN, Coordinate type code]
+    - [CTYPE2A, YLIN, Coordinate type code]
+    - [CRVAL1A, 0.0, '[mm] Coordinate value at reference point']
+    - [CRVAL2A, 0.0, '[mm] Coordinate value at reference point']
+    - [LATPOLEA, 90.0, '[deg] Native latitude of celestial pole']
+    - [WCSNAMEA, FOCAL, Coordinate system title]
+    - [MJDREF, 0.0, '[d] MJD of fiducial time']
+alternate_pixels: !core/ndarray-1.1.0
+  data:
+  - [0.0, 0.0]
+  - [9.0, 19.0]
+  datatype: float64
+  shape: [2, 2]
+alternate_world: !core/ndarray-1.1.0
+  data:
+  - [0.0, 0.0]
+  - [4.5, 9.5]
+  datatype: float64
+  shape: [2, 2]
+bounded: !<tag:astropy.org:astropy/wcs/wcs-1.0.0>
+  attrs:
+    naxis: 2
+    pixel_bounds:
+    - [-0.5, 199.5]
+    - [-0.5, 99.5]
+    pixel_shape: null
+  hdulist: !<tag:astropy.org:astropy/fits/fits-1.2.0>
+  - header:
+    - [SIMPLE, true, conforms to FITS standard]
+    - [BITPIX, 8, array data type]
+    - [NAXIS, 0, number of array dimensions]
+    - [WCSAXES, 2, Number of coordinate axes]
+    - [CRPIX1, 100.5, Pixel coordinate of reference point]
+    - [CRPIX2, 50.5, Pixel coordinate of reference point]
+    - [CDELT1, -0.05, '[deg] Coordinate increment at reference point']
+    - [CDELT2, 0.05, '[deg] Coordinate increment at reference point']
+    - [CUNIT1, deg, Units of coordinate increment and value]
+    - [CUNIT2, deg, Units of coordinate increment and value]
+    - [CTYPE1, GLON-CAR, 'Galactic longitude, plate caree projection']
+    - [CTYPE2, GLAT-CAR, 'Galactic latitude, plate caree projection']
+    - [CRVAL1, 30.0, '[deg] Coordinate value at reference point']
+    - [CRVAL2, 0.0, '[deg] Coordinate value at reference point']
+    - [LONPOLE, 0.0, '[deg] Native longitude of celestial pole']
+    - [LATPOLE, 90.0, '[deg] Native latitude of celestial pole']
+    - [MJDREF, 0.0, '[d] MJD of fiducial time']
+bounded_pixels: !core/ndarray-1.1.0
+  data:
+  - [0.0, 0.0]
+  - [99.5, 49.5]
+  - [199.0, 99.0]
+  datatype: float64
+  shape: [3, 2]
+bounded_world: !core/ndarray-1.1.0
+  data:
+  - [34.975, -2.475]
+  - [30.0, 0.0]
+  - [25.025, 2.475]
+  datatype: float64
+  shape: [3, 2]
+sip: !<tag:astropy.org:astropy/wcs/wcs-1.0.0>
+  attrs:
+    naxis: 2
+    pixel_bounds: null
+    pixel_shape: [1024, 1024]
+  hdulist: !<tag:astropy.org:astropy/fits/fits-1.2.0>
+  - header:
+    - [SIMPLE, true, conforms to FITS standard]
+    - [BITPIX, 8, array data type]
+    - [NAXIS, 0, number of array dimensions]
+    - [WCSAXES, 2, Number of coordinate axes]
+    - [CRPIX1, 512.0, Pixel coordinate of reference point]
+    - [CRPIX2, 512.0, Pixel coordinate of reference point]
+    - [PC1_1, -0.00027778, Coordinate transformation matrix element]
+    - [PC1_2, 1.0e-06, Coordinate transformation matrix element]
+    - [PC2_1, 2.0e-06, Coordinate transformation matrix element]
+    - [PC2_2, 0.00027778, Coordinate transformation matrix element]
+    - [CDELT1, 1.0, '[deg] Coordinate increment at reference point']
+    - [CDELT2, 1.0, '[deg] Coordinate increment at reference point']
+    - [CUNIT1, deg, Units of coordinate increment and value]
+    - [CUNIT2, deg, Units of coordinate increment and value]
+    - [CTYPE1, RA---TAN-SIP, TAN (gnomonic) projection + SIP distortions]
+    - [CTYPE2, DEC--TAN-SIP, TAN (gnomonic) projection + SIP distortions]
+    - [CRVAL1, 83.8, '[deg] Coordinate value at reference point']
+    - [CRVAL2, -5.4, '[deg] Coordinate value at reference point']
+    - [LONPOLE, 180.0, '[deg] Native longitude of celestial pole']
+    - [LATPOLE, -5.4, '[deg] Native latitude of celestial pole']
+    - [MJDREF, 0.0, '[d] MJD of fiducial time']
+    - [RADESYS, ICRS, Equatorial coordinate system]
+    - [A_ORDER, 2, 'SIP polynomial order, axis 0, detector to sky']
+    - [A_1_1, -2.0e-06, SIP distortion coefficient]
+    - [A_2_0, 5.0e-06, SIP distortion coefficient]
+    - [B_ORDER, 2, 'SIP polynomial order, axis 1, detector to sky']
+    - [B_0_2, 2.0e-06, SIP distortion coefficient]
+    - [B_2_0, 1.0e-06, SIP distortion coefficient]
+sip_pixels: !core/ndarray-1.1.0
+  data:
+  - [0.0, 0.0]
+  - [99.0, 899.0]
+  - [511.0, 511.0]
+  - [1023.0, 1023.0]
+  datatype: float64
+  shape: [4, 2]
+sip_world: !core/ndarray-1.1.0
+  data:
+  - [83.94188040829948, -5.542731227212984]
+  - [83.9149992533729, -5.292901759389972]
+  - [83.8, -5.400000000000006]
+  - [83.65747230712229, -5.2565167391887275]
+  datatype: float64
+  shape: [4, 2]
+...

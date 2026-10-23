@@ -313,6 +313,7 @@ Singular linear transformation matrices are rejected. As in WCSLIB, the conic (C
 - array-, dictionary-, range-, and transform-backed label mappers and region selectors
 - TAN, AZP, SZP, STG, SIN, ARC, ZEA, and AIR projections, native/celestial rotations, Cartesian and spherical rotation sequences, and spherical/cartesian conversions
 - serialized explicit inverses
+- astropy FITS WCSs (`tag:astropy.org:astropy/wcs/wcs`), which asdf-astropy writes for an `astropy.wcs.WCS` as its FITS header. The header is parsed with `parse_fits_wcs`, the stored `pixel_shape` is kept, and `pixel_bounds` becomes the bounding box.
 
 ASDF.jl is an optional dependency. Loading ASDF activates the package extension that adapts tagged nodes and lazy coefficient arrays:
 

@@ -70,6 +70,13 @@ registered_icrs = registry.schemas["tag:astropy.org:astropy/coordinates/frames/i
 available_icrs = available_versions(coordinate_root, "icrs")
 registered_icrs == available_icrs || error("ICRS versions differ: GWCS.jl has $registered_icrs, schema package has $available_icrs")
 
+astropy_root = joinpath(resource_path("asdf_astropy.resources"), "schemas")
+for family in ("wcs", "fits")
+    registered = registry.schemas["tag:astropy.org:astropy/$family/$family"].versions
+    available = available_versions(joinpath(astropy_root, family), family)
+    registered == available || error("astropy $family versions differ: GWCS.jl has $registered, schema package has $available")
+end
+
 asdf_root = resource_path("asdf_standard.resources")
 ndarray_roots = (joinpath(asdf_root, "stable", "schemas", "stsci.edu", "asdf", "core"), joinpath(asdf_root, "unstable", "schemas", "stsci.edu", "asdf", "core"))
 registered_ndarray = registry.schemas["tag:stsci.edu:asdf/core/ndarray"].versions
