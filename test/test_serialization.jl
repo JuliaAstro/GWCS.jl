@@ -225,3 +225,40 @@ end
         @test pixel_to_world(parse_wcs(document["model"]["wcs"]), 11.0, 22.0) ≈ pixel_to_world(original, 11.0, 22.0) atol=1e-12
     end
 end
+
+@testset "Step frames given as names" begin
+    # validation/generate_named_frames_fixture.py: Python GWCS writes these step frames as bare names (its EmptyFrame).
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "named_frames.asdf"); extensions=true)
+    end
+    celestial, named = parse_wcs(fixture["celestial"]), parse_wcs(fixture["named"])
+    @test input_frame(celestial) isa EmptyFrame{2} && input_frame(celestial).name == "detector"
+    @test output_frame(celestial) isa CelestialFrame
+    @test input_frame(named) isa EmptyFrame{2} && output_frame(named) isa EmptyFrame{2} && output_frame(named).name == "focal"
+    @test axis_names(input_frame(named)) == ("", "")
+    @test maximum(abs, pixel_to_world(celestial, fixture["celestial_inputs"][]) - fixture["celestial_outputs"][]) < 1e-12
+    @test pixel_to_world(named, fixture["named_inputs"][]) == fixture["named_outputs"][]
+
+    # Written back as bare names, so a GWCS.jl round trip reproduces the frames and Python reads EmptyFrames again.
+    @test to_metadata(named)["steps"][1]["frame"] == "detector"
+    @test to_metadata(named)["steps"][2]["frame"] == "focal"
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "named.asdf")
+        write_asdf(filename, Dict("celestial" => celestial, "named" => named))
+        loaded = with_logger(NullLogger()) do
+            ASDF.load(filename; extensions=true)
+        end
+        for (original, reparsed) in ((celestial, parse_wcs(loaded["celestial"])), (named, parse_wcs(loaded["named"])))
+            @test typeof(reparsed) == typeof(original)
+            @test map(step -> step.frame, reparsed.steps) == map(step -> step.frame, original.steps)
+            @test pixel_to_world(reparsed, 10.0, -20.0) == pixel_to_world(original, 10.0, -20.0)
+        end
+    end
+    @test rename_frame(named, "detector", "pixels") |> input_frame == EmptyFrame{2}("pixels")
+    @test_throws "a frame given only by name needs a transform to set its dimension" parse_wcs("""
+    !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ""
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0> {frame: detector}
+    """)
+end

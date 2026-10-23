@@ -122,6 +122,8 @@ time = TemporalFrame(name="time", axes_order=3, unit="s", reference_epoch=246000
 world = CompositeFrame((sky, wave, time); name="world")
 ```
 
+`EmptyFrame{N}(name)` is a frame known only by its name, with no axis metadata. Python GWCS writes such a step frame as a bare string, and GWCS.jl reads and writes it the same way.
+
 Constituent `axes_order` values are global transform positions and must form a complete permutation across the composite. Frame metadata and public WCS values remain in frame-native order. Use `axis_names`, `axis_physical_types`, `axis_units`, and `axis_types` for frame metadata, or the corresponding `pixel_axis_*` and `world_axis_*` WCS accessors.
 
 `SpectralFrame` infers common wavelength, frequency, energy, and velocity physical types from unit strings. `TemporalFrame` preserves reference epoch, scale, format, and location metadata. `offset_to_time` and `time_to_offset` handle numeric JD/MJD origins for common time units and delegate ordinary arithmetic to compatible external time values; other numeric time formats require an optional time integration. Rich units, celestial coordinates, and astronomy time objects remain optional extension concerns.
@@ -306,7 +308,7 @@ Singular linear transformation matrices are rejected. As in WCSLIB, the conic (C
 
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports:
 
-- GWCS WCS, step, simple and compound bounding boxes, generic, 2D, celestial, spectral, temporal, Stokes, and composite frames
+- GWCS WCS, step, simple and compound bounding boxes, generic, 2D, celestial, spectral, temporal, Stokes, composite, and name-only frames
 - ICRS, structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
 - compose, concatenate, elementwise arithmetic, identity, shift, scale, affine, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names

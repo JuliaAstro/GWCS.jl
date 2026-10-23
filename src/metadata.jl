@@ -809,12 +809,22 @@ function _parse_frame(node, path; validate_order=true, registry=default_transfor
     end
 end
 
-function _parse_step(node, path, registry)
+# A frame written as a bare string is an EmptyFrame, sized by the step's transform or, for the last step, by the
+# previous step's outputs (`previous`).
+function _parse_step(node, path, registry, previous=nothing)
     node, context = _prepare_metadata(node, path, registry)
     metadata_tag(context) == "$_GWCS_TAG/step" || _metadata_error(path, "expected a GWCS step")
-    frame = _parse_frame(_required(node, "frame", path), "$path/frame"; registry)
+    frame_node = _unwrap(_required(node, "frame", path))
     transform_node = get(node, "transform", nothing)
-    return transform_node === nothing ? Step(frame) : Step(frame, parse_transform(transform_node; path="$path/transform", registry))
+    transform = transform_node === nothing ? nothing : parse_transform(transform_node; path="$path/transform", registry)
+    if frame_node isa AbstractString
+        sizing = transform === nothing ? previous : transform
+        sizing === nothing && _metadata_error("$path/frame", "a frame given only by name needs a transform to set its dimension")
+        frame = EmptyFrame{transform === nothing ? output_dimension(sizing) : input_dimension(sizing)}(frame_node)
+    else
+        frame = _parse_frame(frame_node, "$path/frame"; registry)
+    end
+    return transform === nothing ? Step(frame) : Step(frame, transform)
 end
 
 function _bounding_box_order(node, path)
@@ -948,7 +958,10 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     metadata_tag(context) == _ASTROPY_WCS_TAG && return _parse_astropy_wcs(node, registry)
     metadata_tag(context) == "$_GWCS_TAG/wcs" || _metadata_error("wcs", "expected a GWCS WCS or astropy FITS WCS metadata node")
     raw_steps = _required(node, "steps", "wcs")
-    steps = Any[_parse_step(value, "wcs/steps/$index", registry) for (index, value) in enumerate(raw_steps)]
+    steps = Any[]
+    for (index, value) in enumerate(raw_steps)
+        push!(steps, _parse_step(value, "wcs/steps/$index", registry, isempty(steps) ? nothing : last(steps).transform))
+    end
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
     parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, first(steps).transform, "wcs/steps/1/transform/bounding_box", registry)
