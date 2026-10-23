@@ -73,6 +73,72 @@ Base.getindex(matrix::OffsetColumnMatrix, row::Int, column::Int) = matrix.parent
     @test !in_image(constant_wcs, 7.0, 11.0)
 end
 
+@testset "One-based pixels with origin=1" begin
+    affine = AffineTransform(SMatrix{2,2}(2.0, 0.0, 0.0, 3.0), SVector(1.0, -1.0))
+    wcs = WCS(Step(Frame2D(name="pixels"), affine), Step(CoordinateFrame{2}(name="world")); bounding_box=BoundingBox(((-0.5, 9.5), (-0.5, 19.5))))
+    # Every pixel axis shifts by one; world coordinates and fill_value never do.
+    @test pixel_to_world(wcs, 3.0, 5.0; origin=1) == pixel_to_world(wcs, 2.0, 4.0)
+    @test pixel_to_world(wcs, [3.0 4.0; 5.0 6.0]; origin=1) == pixel_to_world(wcs, [2.0 3.0; 4.0 5.0])
+    @test world_to_pixel(wcs, 5.0, 11.0; origin=1) ≈ SVector(3.0, 5.0)
+    @test world_to_pixel(wcs, [5.0 7.0; 11.0 14.0]; origin=1) ≈ [3.0 4.0; 5.0 6.0]
+    @test eltype(world_to_pixel(wcs, SVector(5.0f0, 11.0f0); origin=1)) === Float32
+    # Pixel 10 is outside the zero-based box (-0.5, 9.5) but is its last pixel one-based.
+    @test pixel_to_world(wcs, 10.0, 1.0; origin=1) == pixel_to_world(wcs, 9.0, 0.0)
+    @test all(isnan, pixel_to_world(wcs, 0.0, 1.0; origin=1))
+    @test pixel_to_world(wcs, 0.0, 1.0; origin=1, fill_value=-1.0) == SVector(-1.0, -1.0)
+    @test world_to_pixel(wcs, 41.0, 11.0; origin=1, fill_value=-1.0) == SVector(-1.0, -1.0)
+    @test in_domain(wcs, 10.0, 20.0; origin=1) && !in_domain(wcs, 10.0, 20.0)
+    @test !in_domain(wcs, 0.0, 1.0; origin=1)
+    @test in_domain(wcs, [10.0 0.0; 20.0 1.0]; origin=1) == Bool[true, false]
+    @test grid_from_bounding_box(wcs; origin=1) == grid_from_bounding_box(wcs) .+ 1
+    @test grid_from_bounding_box(wcs; fixed=(2 => 5.0), origin=1) == grid_from_bounding_box(wcs; fixed=(2 => 4.0)) .+ 1
+    # Errors report the caller's pixel.
+    @test_throws "pixel (11.0, 1.0) is outside the WCS bounding box" pixel_to_world(wcs, 11.0, 1.0; origin=1, strict=true)
+    @test_throws "maps to pixel (21.0, 5.0), outside the WCS bounding box" world_to_pixel(wcs, 41.0, 11.0; origin=1, strict=true)
+    @test_throws "origin must be 0 or 1, got 2" pixel_to_world(wcs, 1.0, 1.0; origin=2)
+    @test_throws "origin must be 0 or 1, got 2" world_to_pixel(wcs, 1.0, 1.0; origin=2)
+    @test_throws "origin must be 0 or 1, got 2" in_domain(wcs, 1.0, 1.0; origin=2)
+    @test_throws "origin must be 0 or 1, got 2" grid_from_bounding_box(wcs; origin=2)
+
+    # The numerical inverse also takes initial_guess one-based and reports a one-based NoConvergence solution.
+    distortion = parallel(Polynomial1D([0.0, 1.0, 1e-3]), Polynomial1D([0.0, 1.0, -5e-4]))
+    numerical = WCS(Step(Frame2D(name="pixels"), distortion), Step(CoordinateFrame{2}(name="world")); bounding_box=BoundingBox(((-10.0, 10.0), (-10.0, 10.0))))
+    target = pixel_to_world(numerical, 2.5, -3.5)
+    @test world_to_pixel(numerical, target; origin=1, tolerance=1e-12) ≈ SVector(3.5, -2.5) atol=1e-10
+    @test numerical_inverse(numerical, target; origin=1, tolerance=1e-12) ≈ SVector(3.5, -2.5) atol=1e-10
+    # One Newton step from the same physical pixel lands at the same physical pixel.
+    one_step(origin, guess) = world_to_pixel(numerical, target; origin, initial_guess=guess, maxiter=1, quiet=true)
+    @test one_step(1, (1.0, 1.0)) ≈ one_step(0, (0.0, 0.0)) .+ 1 rtol=1e-14
+    @test one_step(1, (1.0, 1.0)) != one_step(0, (1.0, 1.0)) .+ 1
+    @test in_image(numerical, target; origin=1, initial_guess=(3.5, -2.5))
+    unconverged(origin, guess) = try
+        world_to_pixel(numerical, target; origin, initial_guess=guess, tolerance=1e-30, maxiter=2)
+    catch error
+        error
+    end
+    @test unconverged(1, (1.0, 1.0)) isa NoConvergence
+    @test unconverged(1, (1.0, 1.0)).best_solution ≈ unconverged(0, (0.0, 0.0)).best_solution .+ 1 rtol=1e-14
+
+    # Strict undefined-pixel messages name the caller's pixel too.
+    ait = parse_fits_wcs(Dict("NAXIS" => 2, "CTYPE1" => "RA---AIT", "CTYPE2" => "DEC--AIT", "CRPIX1" => 181.0, "CRPIX2" => 91.0, "CRVAL1" => 0.0, "CRVAL2" => 0.0, "CDELT1" => -1.0, "CDELT2" => 1.0))
+    @test pixel_to_world(ait, 181.0, 91.0; origin=1) ≈ SVector(0.0, 0.0) atol=1e-12
+    @test_throws r"pixel \(1\.0, 1\.0\) has no world coordinate" pixel_to_world(ait, 1.0, 1.0; origin=1, strict=true)
+
+    coords = SVector(3.0, 5.0)
+    allocated_pixel_to_world(wcs, coords) = @allocated pixel_to_world(wcs, coords; origin=1)
+    allocated_world_to_pixel(wcs, coords) = @allocated world_to_pixel(wcs, coords; origin=1)
+    allocated_in_domain(wcs, coords) = @allocated in_domain(wcs, coords; origin=1)
+    allocated_pixel_to_world(wcs, coords); allocated_world_to_pixel(wcs, SVector(5.0, 11.0)); allocated_in_domain(wcs, coords)
+    @test @inferred(pixel_to_world(wcs, coords; origin=1)) == SVector(5.0, 11.0)
+    @test @inferred(world_to_pixel(wcs, SVector(5.0, 11.0); origin=1)) ≈ coords
+    @test allocated_pixel_to_world(wcs, coords) == 0
+    @test allocated_world_to_pixel(wcs, SVector(5.0, 11.0)) == 0
+    @test allocated_in_domain(wcs, coords) == 0
+    allocated_numerical(wcs, coords) = @allocated world_to_pixel(wcs, coords; origin=1)
+    allocated_numerical(numerical, target)
+    @test allocated_numerical(numerical, target) == 0
+end
+
 @testset "Coordinates without a result and strict evaluation" begin
     sky_header(code) = Dict("NAXIS" => 2, "CTYPE1" => "RA---$code", "CTYPE2" => "DEC--$code", "CRPIX1" => 181.0, "CRPIX2" => 91.0,
         "CRVAL1" => 0.0, "CRVAL2" => 0.0, "CDELT1" => -1.0, "CDELT2" => 1.0)

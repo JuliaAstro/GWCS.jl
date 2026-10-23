@@ -58,10 +58,10 @@ function _with_initializer_inverses(transform::AbstractTransform)
     return inverse isa NoInverse ? transform : WithInverse(transform, inverse)
 end
 
-function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, initial_guess, solve) where {N,T}
+function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, initial_guess, solve, offset=false) where {N,T}
     if initial_guess !== nothing
         length(initial_guess) == N || throw(DimensionMismatch("initial guess has length $(length(initial_guess)), expected $N"))
-        return SVector{N,T}(initial_guess)
+        return SVector{N,T}(initial_guess) .- offset
     end
     initialized, used = _inverse_initialize(wcs.inverse_split.initializer, intermediate)
     usable = initialized !== nothing && all(isfinite, initialized)
@@ -100,16 +100,16 @@ function _inverse_jacobian(solve::AbstractTransform, estimate::StaticVector)
 end
 
 # The solvers return the raw solution; `_finish_inverse` applies validity and bounding-box handling.
-function _numerical_solve(wcs::WCS, world::StaticVector; quiet=false, kwargs...)
-    converged, solution, accuracy, iterations = _numerical_result(wcs, world; kwargs...)
+function _numerical_solve(wcs::WCS, world::StaticVector; quiet=false, offset=false, kwargs...)
+    converged, solution, accuracy, iterations = _numerical_result(wcs, world; offset, kwargs...)
     (converged || quiet) && return solution
     message = "numerical inverse failed to converge to the requested accuracy after $iterations iterations"
-    throw(NoConvergence(message, solution, accuracy, iterations))
+    throw(NoConvergence(message, solution .+ offset, accuracy, iterations))
 end
 
 # Returns `(converged, solution, accuracy, iterations)`, so callers that only need the outcome, like `in_image`,
 # avoid constructing a `NoConvergence` per point. A target without a preimage converges to NaN.
-function _numerical_result(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12)
+function _numerical_result(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12, offset=false)
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
@@ -118,7 +118,7 @@ function _numerical_result(wcs::WCS{0,0}, world::StaticVector{0}; tolerance=1e-5
     return (true, empty, empty, 0)
 end
 
-function _numerical_result(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12) where {N}
+function _numerical_result(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12, offset=false) where {N}
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     max_backtracks >= 0 || throw(ArgumentError("max_backtracks must be non-negative"))
@@ -136,11 +136,11 @@ function _numerical_result(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5
     # periodicity, so a longitude formed before the tail can sit 360 degrees from its goal; when this solve fails,
     # solve the full forward map in world coordinates, as Python GWCS does.
     if output_dimension(prefix) == N && !(wcs.inverse_split.tail_inverse isa IdentityTransform)
-        estimate = _initial_guess(wcs, intermediate, T, initial_guess, prefix)
+        estimate = _initial_guess(wcs, intermediate, T, initial_guess, prefix, offset)
         result = _newton(prefix, intermediate, ntuple(_ -> false, N), estimate, tolerance, maxiter, max_backtracks)
         first(result) && return result
     end
-    estimate = _initial_guess(wcs, intermediate, T, initial_guess, wcs.forward)
+    estimate = _initial_guess(wcs, intermediate, T, initial_guess, wcs.forward, offset)
     return _newton(wcs.forward, target, _longitude_axes(output_frame(wcs)), estimate, tolerance, maxiter, max_backtracks)
 end
 
@@ -212,8 +212,9 @@ function _numerical_result(wcs::WCS{Nin,Nout}, world::StaticVector; kwargs...) w
     throw(ArgumentError("numerical inversion requires equal pixel and world dimensions, got $Nin and $Nout"))
 end
 
-function _numerical_inverse(wcs::WCS, world::StaticVector; with_bounding_box=true, fill_value=NaN, strict=false, kwargs...)
-    return _finish_inverse(wcs, world, _numerical_solve(wcs, world; kwargs...); with_bounding_box, fill_value, strict)
+function _numerical_inverse(wcs::WCS, world::StaticVector; with_bounding_box=true, fill_value=NaN, strict=false, origin=0, kwargs...)
+    offset = _origin_offset(origin)
+    return _finish_inverse(wcs, world, _numerical_solve(wcs, world; offset, kwargs...); with_bounding_box, fill_value, strict, offset)
 end
 
 function numerical_inverse(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}

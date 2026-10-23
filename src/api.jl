@@ -15,45 +15,53 @@ function _filled_coordinate(::Val{N}, ::Type{T}, fill_value) where {N,T}
     return SVector{N,T}(ntuple(i -> T(fill_value), N))
 end
 
-@inline function _in_domain(wcs::WCS{N}, pixels::StaticVector{N}; with_bounding_box=true) where {N}
+# `origin=1` numbers the first pixel center 1 (FITS, Julia arrays), like the `origin` argument of astropy.wcs: every pixel
+# axis shifts and world coordinates never do. A Bool offset adds a strong zero for `origin=0`, keeping -0.0 and the input type.
+@inline _origin_offset(origin) = origin == 0 ? false : origin == 1 ? true : _throw_origin(origin)
+@noinline _throw_origin(origin) = throw(ArgumentError("origin must be 0 or 1, got $origin"))
+
+@inline function _in_domain(wcs::WCS{N}, pixels::StaticVector{N}; with_bounding_box=true, origin=0) where {N}
+    pixels = pixels .- _origin_offset(origin)
     all(isfinite, pixels) || return false
     return !with_bounding_box || wcs.bounding_box === nothing || pixels in wcs.bounding_box
 end
 
 """
-    in_domain(wcs, pixels...) -> Bool
-    in_domain(wcs, pixels::AbstractMatrix) -> BitVector
+    in_domain(wcs, pixels...; origin=0) -> Bool
+    in_domain(wcs, pixels::AbstractMatrix; origin=0) -> BitVector
 
-Test whether finite pixel coordinates belong to the WCS input domain. Matrix columns are coordinates.
+Test whether finite pixel coordinates belong to the WCS input domain. Matrix columns are coordinates. Pixels are
+zero-based; `origin=1` takes them one-based instead, on every input axis.
 """
-function in_domain(wcs::WCS{N}, coords::AbstractVector) where {N}
+function in_domain(wcs::WCS{N}, coords::AbstractVector; origin=0) where {N}
     length(coords) == N || throw(DimensionMismatch("pixel has length $(length(coords)), expected $N"))
     T = _coordinate_float_type(eltype(coords))
-    return _in_domain(wcs, SVector{N,T}(coords))
+    return _in_domain(wcs, SVector{N,T}(coords); origin)
 end
 
-in_domain(wcs::WCS, coords::Tuple{Vararg{Real}}) = _in_domain(wcs, _coordinate_vector(coords))
-in_domain(wcs::WCS, coords::Real...) = in_domain(wcs, coords)
-in_domain(wcs::WCS{0}) = _in_domain(wcs, SVector{0,Float64}())
+in_domain(wcs::WCS, coords::Tuple{Vararg{Real}}; origin=0) = _in_domain(wcs, _coordinate_vector(coords); origin)
+in_domain(wcs::WCS, coords::Real...; origin=0) = in_domain(wcs, coords; origin)
+in_domain(wcs::WCS{0}; origin=0) = _in_domain(wcs, SVector{0,Float64}(); origin)
 
-function in_domain(wcs::WCS{N}, pixels::AbstractMatrix) where {N}
+function in_domain(wcs::WCS{N}, pixels::AbstractMatrix; origin=0) where {N}
     size(pixels, 1) == N || throw(DimensionMismatch("pixel matrix has $(size(pixels, 1)) rows, expected $N"))
     T = _coordinate_float_type(eltype(pixels))
     result = BitVector(undef, size(pixels, 2))
     @inbounds for (index, column) in enumerate(axes(pixels, 2))
-        result[index] = _in_domain(wcs, SVector{N,T}(view(pixels, :, column)))
+        result[index] = _in_domain(wcs, SVector{N,T}(view(pixels, :, column)); origin)
     end
     return result
 end
 
 # `strict=false` returns `fill_value` for coordinates without a result (outside the bounding box or
 # undefined under the transforms); `strict=true` throws for them instead. NaN input propagates as NaN.
-@inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN, strict=false) where {Nin,Nout}
+@inline function _pixel_to_world(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; with_bounding_box=true, fill_value=NaN, strict=false, origin=0) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
-    pixels = SVector{Nin,T}(coords)
+    given = SVector{Nin,T}(coords)
+    pixels = given .- _origin_offset(origin)
     finite = all(isfinite, pixels)
     if with_bounding_box && wcs.bounding_box !== nothing && finite && !(pixels in wcs.bounding_box)
-        strict && _throw_outside_box(pixels)
+        strict && _throw_outside_box(given)
         return _filled_coordinate(Val(Nout), T, fill_value)
     end
     world = wcs.forward(pixels)
@@ -61,7 +69,7 @@ end
     any(isnan, world) || return world
     strict || return _filled_coordinate(Val(Nout), T, fill_value)
     finite || return world
-    _throw_undefined(wcs, pixels)
+    _throw_undefined(wcs, pixels, given)
 end
 
 function pixel_to_world(wcs::WCS{Nin}, coords::AbstractVector; kwargs...) where {Nin}
@@ -86,25 +94,27 @@ function pixel_to_world(wcs::WCS{Nin,Nout}, pixels::AbstractMatrix; kwargs...) w
     return result
 end
 
-@inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, strict=false, kwargs...) where {Nin,Nout}
+@inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, strict=false, origin=0, kwargs...) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     world = SVector{Nout,T}(coords)
-    pixels = wcs.backward isa NoInverse ? _numerical_solve(wcs, world; kwargs...) : wcs.backward(world)
-    return _finish_inverse(wcs, world, pixels; with_bounding_box, fill_value, strict)
+    offset = _origin_offset(origin)
+    pixels = wcs.backward isa NoInverse ? _numerical_solve(wcs, world; offset, kwargs...) : wcs.backward(world)
+    return _finish_inverse(wcs, world, pixels; with_bounding_box, fill_value, strict, offset)
 end
 
 # Shared by the analytical and numerical inverses: undefined results are thrown or filled before the bounding box applies.
-@inline function _finish_inverse(wcs::WCS{Nin}, world, pixels; with_bounding_box, fill_value, strict) where {Nin}
+# `pixels` are zero-based; `offset` shifts only a returned pixel, never `fill_value`.
+@inline function _finish_inverse(wcs::WCS{Nin}, world, pixels; with_bounding_box, fill_value, strict, offset=false) where {Nin}
     if any(isnan, pixels)
         strict || return _filled_coordinate(Val(Nin), eltype(pixels), fill_value)
         all(isfinite, world) && _throw_undefined_inverse(wcs, world)
         return pixels
     end
     if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)
-        strict && _throw_outside_box_inverse(world, pixels)
+        strict && _throw_outside_box_inverse(world, pixels .+ offset)
         return _filled_coordinate(Val(Nin), eltype(pixels), fill_value)
     end
-    return pixels
+    return pixels .+ offset
 end
 
 function world_to_pixel(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
@@ -128,12 +138,12 @@ function world_to_pixel(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwargs...) w
     return result
 end
 
-@inline function _in_image(wcs::WCS{Nin,Nout}, world::StaticVector{Nout}; with_bounding_box=true, tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12) where {Nin,Nout}
+@inline function _in_image(wcs::WCS{Nin,Nout}, world::StaticVector{Nout}; with_bounding_box=true, tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12, origin=0) where {Nin,Nout}
     target = SVector{Nout,_coordinate_float_type(eltype(world))}(world)
     converged, pixels = try
         if wcs.backward isa NoInverse
             # The convergence flag replaces a thrown NoConvergence, which would cost far more than the solve.
-            converged, pixels, _, _ = _numerical_result(wcs, target; tolerance, maxiter, initial_guess, max_backtracks)
+            converged, pixels, _, _ = _numerical_result(wcs, target; tolerance, maxiter, initial_guess, max_backtracks, offset=_origin_offset(origin))
             (converged, pixels)
         else
             (true, wcs.backward(target))
@@ -151,6 +161,7 @@ end
     in_image(wcs, worlds::AbstractMatrix; with_bounding_box=true, kwargs...) -> BitVector
 
 Test whether world coordinates invert successfully to finite pixels in the WCS input domain. Matrix columns are coordinates.
+`origin=1` takes `initial_guess` as one-based pixels.
 """
 function in_image(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
     length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))
@@ -208,19 +219,20 @@ function _undefined_message(subject, step_description, transform, coords)
     return "$subject: $(_describe_transform(leaf)) in $step_description is undefined at $(Tuple(leaf_coords))"
 end
 
-@noinline function _throw_undefined(wcs::WCS, pixels)
-    subject = "pixel $(Tuple(pixels)) has no world coordinate"
+# `given` is the caller's pixel, which differs from the zero-based `pixels` when `origin=1`.
+@noinline function _throw_undefined(wcs::WCS, pixels, given=pixels)
+    subject = "pixel $(Tuple(given)) has no world coordinate"
     coords = _frame_to_transform(first(wcs.steps).frame)(pixels)
     for index in 1:(length(wcs.steps) - 1)
         step = wcs.steps[index]
         next = step.transform(coords)
         if any(isnan, next)
             description = "the step from frame \"$(step.frame.name)\" to \"$(wcs.steps[index + 1].frame.name)\""
-            throw(DomainError(Tuple(pixels), _undefined_message(subject, description, step.transform, coords)))
+            throw(DomainError(Tuple(given), _undefined_message(subject, description, step.transform, coords)))
         end
         coords = next
     end
-    throw(DomainError(Tuple(pixels), subject))
+    throw(DomainError(Tuple(given), subject))
 end
 
 @noinline function _throw_undefined_inverse(wcs::WCS, world)
