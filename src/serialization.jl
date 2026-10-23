@@ -433,6 +433,8 @@ function _to_metadata(frame::CoordinateFrame, path, registry)
     return _tagged_metadata("$_GWCS_TAG/frame", v"1.2.0", properties)
 end
 
+_to_metadata(frame::EmptyFrame, path, registry) = frame.name
+
 function _to_metadata(frame::CelestialFrame, path, registry)
     return _tagged_metadata("$_GWCS_TAG/celestial_frame", v"1.2.0", _frame_properties(frame, path, registry))
 end

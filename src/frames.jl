@@ -82,6 +82,22 @@ function CoordinateFrame{N}(; name, axes_names=ntuple(i -> "x$(i - 1)", N), axes
     return CoordinateFrame{N,typeof(reference_frame)}(String(name), names, _axes_order(axes_order, N), types, physical_types, units, reference_frame)
 end
 
+"""
+    EmptyFrame{N}(name)
+
+A frame with `N` axes known only by its name, like Python GWCS's `EmptyFrame`, which a step frame written as a bare
+string becomes. It has no axis names, physical types, units, or types, and is written back as its name.
+"""
+struct EmptyFrame{N} <: AbstractCoordinateFrame{N}
+    name::String
+    axes_names::NTuple{N,String}
+    axes_order::NTuple{N,Int}
+    axis_types::NTuple{N,AxisType}
+    axis_physical_types::NTuple{N,String}
+    unit::NTuple{N,String}
+    EmptyFrame{N}(name) where {N} = new{N}(name, ntuple(_ -> "", N), ntuple(identity, N), ntuple(_ -> UNDEFINED, N), ntuple(_ -> "", N), ntuple(_ -> "", N))
+end
+
 function Frame2D(; name, axes_names=("x", "y"), axes_order=(1, 2), axis_types=nothing, axis_physical_types=nothing, unit=("", ""), reference_frame=nothing)
     types = axis_types === nothing ? (SPATIAL, SPATIAL) : axis_types
     return CoordinateFrame{2}(; name, axes_names, axes_order, axis_types=types, axis_physical_types, unit, reference_frame)
@@ -284,6 +300,7 @@ function _rename_frame(frame::StokesFrame, name)
 end
 
 _rename_frame(frame::CompositeFrame, name) = CompositeFrame(frame.frames; name)
+_rename_frame(::EmptyFrame{N}, name) where {N} = EmptyFrame{N}(name)
 _rename_frame(frame::AbstractCoordinateFrame, name) = throw(ArgumentError("renaming frame type $(typeof(frame)) is not supported"))
 
 _identity_axes_order(order) = all(index -> order[index] == index, eachindex(order))
@@ -311,6 +328,8 @@ function _subset_frame(frame::CoordinateFrame, indices::NTuple{N,Int}, axes_orde
         axis_types=map(index -> frame.axis_types[index], indices), axis_physical_types=map(index -> frame.axis_physical_types[index], indices),
         unit=map(index -> frame.unit[index], indices), reference_frame=frame.reference_frame)
 end
+
+_subset_frame(frame::EmptyFrame, indices::NTuple{N,Int}, axes_order=indices) where {N} = EmptyFrame{N}(frame.name)
 
 function _subset_frame(frame::CelestialFrame, indices::NTuple{N,Int}, axes_order=_subset_axes_order(frame.axes_order, indices)) where {N}
     return CelestialFrame{N}(; name=frame.name, axes_names=map(index -> frame.axes_names[index], indices), axes_order,

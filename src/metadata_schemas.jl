@@ -242,7 +242,8 @@ end
 function _validate_step_schema(node, context)
     path = metadata_path(context)
     _schema_mapping(node, path)
-    _schema_mapping(_schema_property(node, "frame", context; required=true), "$path/frame")
+    frame = _schema_property(node, "frame", context; required=true)
+    frame isa AbstractString || _schema_mapping(frame, "$path/frame")
     haskey(node, "transform") && metadata_value(node["transform"]) !== nothing && _schema_mapping(node["transform"], "$path/transform")
     return nothing
 end

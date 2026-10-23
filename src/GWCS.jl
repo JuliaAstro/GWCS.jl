@@ -40,7 +40,7 @@ include("precompile.jl")
 
 export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, ArrayLabelMapper, CallableLabelMapper, CallableTransform, CartesianToSpherical,
        AbstractConicProjection, AbstractSphericalProjection, AbstractZenithalProjection, AiryProjection, BonneProjection, COBESphericalCube, ConicEqualArea, ConicEquidistant, ConicOrthomorphic, ConicPerspective, CylindricalEqualArea, CylindricalPerspective,
-       AbstractBoundingBox, AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompoundBoundingBox, CompositeFrame,
+       AbstractBoundingBox, AbstractCoordinateFrame, AxisType, BoundingBox, CelestialFrame, CompoundBoundingBox, CompositeFrame, EmptyFrame,
        CelestialToNative,
        ComposedTransform, ConstantTransform, CoordinateFrame, DictionaryLabelMapper, FixedInputsTransform,
        BilinearLookupTable, FITSGrismTransform, FITSLogTransform, FITSLookupDistortion, FITSSpectralTransform, FITSTabularTable, FITSTabularTransform, Frame2D, GnomonicProjection, HammerAitoffProjection, IdentityTransform, IntermediateToNative,
