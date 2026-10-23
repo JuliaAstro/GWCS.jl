@@ -80,7 +80,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 ## Coordinate frames, units, and high-level coordinates
 
-- [ ] **P1** Resolve the pixel-origin convention across input formats. FITS-parsed WCSs put the first pixel center at 1 (`CRPIX`), ASDF WCSs from Python GWCS put it at 0 without encoding that anywhere, and `ArrayLabelMapper` documents zero-origin pixel centers. Code mixing FITS and ASDF inputs is silently off by one pixel. Encode the origin explicitly at the parse boundary, as the "no implicit pixel offset" rule requires.
+- [x] **P1** Resolve the pixel-origin convention across input formats. Pixel coordinates are zero-based everywhere, like Python GWCS and astropy's APE 14 interface; `parse_fits_wcs` shifts FITS one-based pixels at the boundary.
 - [x] **P0** Make `axes_order` operational during evaluation and inverse evaluation rather than storing it only as metadata.
 - [x] **P1** Add an `AxisType` representation for spatial, spectral, temporal, Stokes, pixel, undefined, and custom axes.
 - [x] **P1** Add `SpectralFrame` with wavelength, frequency, energy, and velocity physical-type inference.
@@ -201,7 +201,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Add `to_fits_tab` for non-celestial and multidimensional WCS approximations.
 - [ ] **P1** Add a combined `to_fits` path that chooses linear, SIP, and `-TAB` representations by separable axis group.
 - [ ] **P1** Return approximation diagnostics and verify the generated FITS representation over the requested bounding box.
-- [x] **P1** Preserve FITS 1-based pixel-origin conventions explicitly in the parsed affine stage.
+- [x] **P1** Encode the FITS one-based pixel origin explicitly at the parse boundary, ahead of the `CRPIX`, SIP, lookup, and prior-distortion stages.
 - [x] **P2** Add optional FITSIO.jl and FITSFiles.jl adapters for detached headers, linked HDUs, and construction-time lookup-image resolution without making either package a core dependency.
 - [x] **P2** Parse direct Paper IV SIP distortion records (`CPDISja='SIP'` with repeated `DPja` fields such as `SIP.FWD.p_q` and `SIP.REV.p_q`), normalizing them to the existing SIP forward and approximate-reverse representation.
 - [x] **P2** Use `SIP.REV` and `TPD.REV` as inverse initializers, then refine against the forward distortion.

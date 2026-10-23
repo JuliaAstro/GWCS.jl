@@ -89,12 +89,13 @@ function cases(files)
     interleaved = merge(cube, Dict("NAXIS" => 3, "CTYPE1" => "FREQ", "CUNIT1" => "Hz", "CTYPE3" => "RA---TAN", "CUNIT3" => "deg", "CRPIX1" => 1.0, "CRPIX3" => 10.0, "CRVAL1" => 1.4e9, "CRVAL3" => 30.0, "CDELT1" => 1e6, "CDELT3" => -0.1))
     foreach(key -> delete!(interleaved, key), ("CTYPE4", "CRPIX4", "CRVAL4", "CDELT4"))
     push!(list, "FITS FREQ/DEC/RA interleaved" => (fits(interleaved), SVector(2.0, 22.0, 11.0)))
+    # Table probes sit inside the tables, at zero-based pixels.
     tab = Dict("NAXIS" => 1, "CTYPE1" => "FREQ-TAB", "CUNIT1" => "GHz", "CRPIX1" => 1.0, "CRVAL1" => 1.0, "CDELT1" => 1.0, "PS1_0" => "WCS-TABLE", "PS1_1" => "COORD")
-    push!(list, "FITS FREQ-TAB" => (GWCS._parse_fits_wcs(GWCS._fits_header(tab); tabular_data=(FITSTabularTable((1,), reshape([10.0, 20.0, 40.0], 1, 3), ([1.0, 2.0, 3.0],)),)), SVector(2.5)))
+    push!(list, "FITS FREQ-TAB" => (GWCS._parse_fits_wcs(GWCS._fits_header(tab); tabular_data=(FITSTabularTable((1,), reshape([10.0, 20.0, 40.0], 1, 3), ([1.0, 2.0, 3.0],)),)), SVector(1.5)))
     coupled = Dict("NAXIS" => 2, "CTYPE1" => "RA---TAB", "CTYPE2" => "DEC--TAB", "CRPIX1" => 1.0, "CRPIX2" => 1.0, "CRVAL1" => 1.0, "CRVAL2" => 1.0, "CDELT1" => 1.0, "CDELT2" => 1.0,
         "PS1_0" => "WCS-TABLE", "PS2_0" => "WCS-TABLE", "PS1_1" => "COORD", "PS2_1" => "COORD", "PV1_3" => 1, "PV2_3" => 2)
     coordinates = [axis == 1 ? 10i + j : i + 10j for axis in 1:2, i in 1:2, j in 1:2]
-    push!(list, "FITS RA/DEC-TAB" => (GWCS._parse_fits_wcs(GWCS._fits_header(coupled); tabular_data=(FITSTabularTable((1, 2), Float64.(coordinates), ([1.0, 2.0], [1.0, 2.0])),)), SVector(1.5, 1.5)))
+    push!(list, "FITS RA/DEC-TAB" => (GWCS._parse_fits_wcs(GWCS._fits_header(coupled); tabular_data=(FITSTabularTable((1, 2), Float64.(coordinates), ([1.0, 2.0], [1.0, 2.0])),)), SVector(0.5, 0.5)))
 
     push!(list, "ASDF roman_wcs.yaml" => (parse_wcs(read(joinpath(FIXTURES, "roman_wcs.yaml"), String)), SVector(11.0, 22.0)))
     push!(list, "ASDF asdf_parser_wcs.yaml" => (parse_wcs(read(joinpath(FIXTURES, "asdf_parser_wcs.yaml"), String)), SVector(11.0, 22.0)))
