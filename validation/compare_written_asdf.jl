@@ -11,6 +11,7 @@ function main()
     linear = (Polynomial2D([0.1 0.2; 1.0 0.0]; domain=((0.0, 10.0), (-5.0, 5.0)), window=((-1.0, 1.0), (-1.0, 1.0))), Polynomial2D([0.5 1.1; -0.2 0.0]))
     transforms = Dict(
         "three_shifts" => Shift(1.0) & Shift(2.0) & Shift(3.0),
+        "rotation_chain" => Shift(1.0) & Shift(2.0) | Rotation2D(-75.0) | Scale(2.0) & Scale(0.5),
         "affine_blocks" => AffineTransform([1.0 0.2; -0.1 2.0], [3.0, 4.0]) & Scale(2.0),
         "polynomial_pair" => compose(RemapAxes{2}((1, 2, 1, 2)), parallel(distortion...)),
         "linear_pair" => compose(AffineTransform([2.0 0.0; 0.0 3.0], [1.0, 1.0]), RemapAxes{2}((1, 2, 1, 2)), parallel(linear...), Shift(1.0) & Shift(2.0))

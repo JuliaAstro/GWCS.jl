@@ -45,7 +45,7 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransfo
        ComposedTransform, ConstantTransform, CoordinateFrame, DictionaryLabelMapper, FixedInputsTransform,
        BilinearLookupTable, FITSGrismTransform, FITSLogTransform, FITSLookupDistortion, FITSSpectralTransform, FITSTabularTable, FITSTabularTransform, Frame2D, GnomonicProjection, HammerAitoffProjection, IdentityTransform, IntermediateToNative,
        NativeToCelestial, NativeToIntermediate, NoInverse,
-       HEALPixPolarProjection, HEALPixProjection, MercatorProjection, MollweideProjection, ParabolicProjection, ParallelTransform, PlateCarreeProjection, PolyconicProjection, Polynomial1D, Polynomial2D, QuadrilateralizedSphericalCube, RangeLabelMapper, RegionSelector, RemapAxes, Rotation3D,
+       HEALPixPolarProjection, HEALPixProjection, MercatorProjection, MollweideProjection, ParabolicProjection, ParallelTransform, PlateCarreeProjection, PolyconicProjection, Polynomial1D, Polynomial2D, QuadrilateralizedSphericalCube, RangeLabelMapper, RegionSelector, RemapAxes, Rotation2D, Rotation3D,
        PIXEL, SPATIAL, SPECTRAL, STOKES, TIME, UNDEFINED,
        SansonFlamsteedProjection, Scale, Shift, SIPTransform, SlantOrthographic, SlantZenithalPerspective, SpectralFrame, SphericalToCartesian, StereographicProjection, Step, StokesFrame, TangentialSphericalCube,
        TemporalFrame, TPVTransform, WCS, WCSBuilder, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective, ZenithalPolynomial,

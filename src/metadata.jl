@@ -275,6 +275,7 @@ _parse_power(node, context) = _parse_arithmetic(node, context, ^)
 
 _parse_shift(node, context) = Shift(metadata_value(required_metadata(node, "offset", context)))
 _parse_scale(node, context) = Scale(metadata_value(required_metadata(node, "factor", context)))
+_parse_rotate2d(node, context) = Rotation2D(metadata_value(required_metadata(node, "angle", context)))
 
 function _parse_identity(node, context)
     dimensions = _metadata_integer(node, "n_dims", context; default=1)
@@ -660,6 +661,7 @@ function _register_builtin_transform_parsers!()
     end
     register_transform!("$asdf_transform/shift", _parse_shift; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "offset"))
     register_transform!("$asdf_transform/scale", _parse_scale; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "factor"))
+    register_transform!("$asdf_transform/rotate2d", _parse_rotate2d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_numeric_transform(node, context, "angle"))
     register_transform!("$asdf_transform/identity", _parse_identity; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_identity_schema)
     register_transform!("$asdf_transform/affine", _parse_affine; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_affine_schema)
     register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)

@@ -262,3 +262,36 @@ end
     - !<tag:stsci.edu:gwcs/step-1.3.0> {frame: detector}
     """)
 end
+
+@testset "Rotation2D" begin
+    # References from astropy's Rotation2D.
+    rotation = Rotation2D(30.0)
+    @test rotation(SVector(1.5, -2.0)) ≈ SVector(2.299038105676658, -0.9820508075688775) atol=1e-15
+    @test inverse_transform(rotation)(rotation(SVector(1.5, -2.0))) ≈ SVector(1.5, -2.0) atol=1e-15
+    @test transform_jacobian(rotation, SVector(1.5, -2.0)) == rotation.matrix
+    @test transform_dependencies(Rotation2D(90.0)) == SMatrix{2,2,Bool}(false, true, true, false)
+    @test Rotation2D(30).angle === 30.0
+
+    # The stored step keeps the rotation, so it is written back as rotate2d; the compiled kernel fuses it into one affine.
+    chain = Shift(1.0) & Shift(2.0) | Rotation2D(-75.0) | Scale(2.0) & Scale(0.5)
+    wcs = WCS(Step(Frame2D(name="detector"), chain), Step(Frame2D(name="focal")))
+    @test occursin("Rotation2D", string(typeof(wcs.steps[1].transform)))
+    @test wcs.forward isa AffineTransform{2,2}
+    @test pixel_to_world(wcs, 3.0, 4.0) ≈ SVector(13.661662276288986, -1.1553945172705744) atol=1e-13
+    @test world_to_pixel(wcs, pixel_to_world(wcs, 3.0, 4.0)) ≈ SVector(3.0, 4.0) atol=1e-13
+    allocated_rotation(wcs, coords) = @allocated pixel_to_world(wcs, coords)
+    allocated_rotation(wcs, SVector(3.0, 4.0))
+    @test allocated_rotation(wcs, SVector(3.0, 4.0)) == 0
+
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "rotation.asdf")
+        write_asdf(filename, wcs)
+        @test occursin("!transform/rotate2d-1.5.0", read(filename, String))
+    end
+    reparsed = parse_wcs(to_metadata(wcs))
+    @test typeof(reparsed) == typeof(wcs)
+    @test pixel_to_world(reparsed, 3.0, 4.0) == pixel_to_world(wcs, 3.0, 4.0)
+    parsed = parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/rotate2d-1.0.0> {angle: 30.0}"))
+    @test parsed isa Rotation2D && parsed.angle == 30.0
+    @test_throws "unsupported transform tag version tag:stsci.edu:asdf/transform/rotate2d-1.6.0" parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/rotate2d-1.6.0> {angle: 30.0}"))
+end

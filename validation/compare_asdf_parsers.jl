@@ -12,6 +12,7 @@ function parser_transforms()
         matrix: [[1.0, 0.2], [-0.1, 2.0]]
         translation: [3.0, 4.0]
         """,
+        rotate2d="!<tag:stsci.edu:asdf/transform/rotate2d-1.5.0> {angle: 30.0}",
         gnomonic="!<tag:stsci.edu:asdf/transform/gnomonic-1.4.0> {direction: pix2sky}",
         native2celestial="!<tag:stsci.edu:asdf/transform/rotate3d-1.5.0> {phi: 10.0, theta: 20.0, psi: 180.0, direction: native2celestial}",
         celestial2native="!<tag:stsci.edu:asdf/transform/rotate3d-1.5.0> {phi: 10.0, theta: 20.0, psi: 180.0, direction: celestial2native}",

@@ -37,6 +37,8 @@ transform_dependencies(::NativeToIntermediate) = _dense_dependencies(Val(2), Val
 transform_dependencies(::NativeToCelestial) = _dense_dependencies(Val(2), Val(2))
 transform_dependencies(::CelestialToNative) = _dense_dependencies(Val(2), Val(2))
 
+transform_dependencies(transform::Rotation2D) = SMatrix{2,2,Bool}(map(!iszero, transform.matrix))
+
 function transform_dependencies(transform::Rotation3D)
     return SMatrix{3,3,Bool}(map(!iszero, transform.matrix))
 end
