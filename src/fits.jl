@@ -1291,14 +1291,17 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
     end
     name = String(get(header, "WCSNAME$suffix", ""))
     _fits_report_repairs(repairs, key, legacy)
-    return WCS(Step(detector, pixel_to_intermediate), Step(intermediate, intermediate_to_world), Step(world); name, pixel_shape=_fits_pixel_shape(header, count))
+    # GWCS pixel coordinates are zero-based, like Python GWCS and astropy's APE 14 API, while FITS numbers the first
+    # pixel center 1. Shifting at the boundary keeps CRPIX, SIP, and the lookup and prior distortions in FITS pixels.
+    fits_pixels = AffineTransform(Matrix{Float64}(I, count, count), ones(count))
+    return WCS(Step(detector, fits_pixels | pixel_to_intermediate), Step(intermediate, intermediate_to_world), Step(world); name, pixel_shape=_fits_pixel_shape(header, count))
 end
 
 """
     parse_fits_wcs(source; key=' ', preserve_units=false, minerr=0.0, legacy=:warn)
 
 Parse one primary or alternate FITS image-header WCS into a compiled `WCS` pipeline.
-Pixel coordinates use the FITS 1-based convention encoded by `CRPIX`.
+Pixel coordinates are zero-based, as everywhere in GWCS.jl: the center of the first pixel, FITS pixel 1, is pixel 0.
 
 Legacy conventions accepted by WCSLIB and astropy (for example NCP, AIPS spectral types,
 `EPOCH`, and zero-padded keyword indices) are repaired with one warning per parse when

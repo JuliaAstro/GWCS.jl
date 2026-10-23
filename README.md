@@ -2,6 +2,13 @@
 
 GWCS.jl implements composable generalized world coordinate systems in Julia. Pipelines are normalized and compiled during construction so scalar evaluation uses concrete, statically sized transforms without runtime graph traversal.
 
+> [!IMPORTANT]
+> **Pixel coordinates are zero-based for every WCS, whatever format it was read from: the center of the first pixel is pixel `0`.** This matches Python GWCS and astropy's `pixel_to_world`/`world_to_pixel` (APE 14). It does **not** match Julia array indices, the FITS standard, WCSLIB, or FITSWCS.jl, which number the first pixel center `1`.
+>
+> - Julia array index `(i, j)`, with `i` along the first pixel axis, is GWCS pixel `(i - 1, j - 1)`. A GWCS pixel `p` falls in array index `round.(Int, p) .+ 1`.
+> - A FITS pixel `p` (WCSLIB, FITSWCS.jl, DS9, SourceExtractor `X_IMAGE`) is GWCS pixel `p .- 1`. `parse_fits_wcs` applies this shift itself, so `CRPIX` needs no adjustment.
+> - Pixels from Python GWCS, astropy's APE 14 interface, and photutils are already zero-based.
+
 ## Constructing a WCS
 
 Transforms compose left to right with `|`. Independent transforms combine with `&`.
@@ -20,7 +27,7 @@ pixel_to_world(wcs, 11.0, 22.0)
 world_to_pixel(wcs, 1.12, 2.38)
 ```
 
-Coordinates use each boundary frame's native order. `axes_order[i]` gives the one-based transform position of native frame axis `i`; GWCS compiles static boundary remaps when this order is not the identity. Transform kernels and stored pipeline steps remain in transform order. GWCS.jl does not apply an implicit zero- or one-based pixel offset, so a FITS-equivalent pipeline must encode the FITS reference-pixel convention explicitly.
+Coordinates use each boundary frame's native order. `axes_order[i]` gives the one-based transform position of native frame axis `i`; GWCS compiles static boundary remaps when this order is not the identity. Transform kernels and stored pipeline steps remain in transform order. Pixel coordinates are zero-based (see the note above): parsers encode each format's pixel origin explicitly at the boundary, and a pipeline built by hand is evaluated exactly as written, with no implicit offset.
 
 `pixel_to_world` and `world_to_pixel` accept scalar varargs, tuples, vectors, and matrices whose columns are coordinates. A coordinate without a result returns `fill_value` (default `NaN`) in every output component. That covers coordinates outside the bounding box, which is enforced by default when present (pass `with_bounding_box=false` to evaluate outside it), and coordinates the transforms cannot map, such as the corners of an all-sky projection, the far side of a TAN projection, or a detector pixel between IFU slices. Like APE 14 WCS objects in Python, whole image grids can therefore be evaluated directly, and invalid points cost no more than valid ones:
 
@@ -29,7 +36,7 @@ world = pixel_to_world(wcs, pixel_matrix)          # NaN columns where there is 
 world = pixel_to_world(wcs, pixel; strict=true)    # throw instead, e.g. while debugging
 ```
 
-With `strict=true`, any coordinate without a result throws `DomainError`. For an undefined coordinate the message names the coordinate, the pipeline step, and the transform that is undefined there, for example `pixel (1.0, 1.0) has no world coordinate: IntermediateToNative(HammerAitoffProjection) in the step from frame "intermediate" to "world" is undefined at (180.0, -90.0)`. Non-finite input propagates as `NaN` in both modes, and `NoConvergence` from the numerical inverse (controlled by `quiet`) always propagates. Internally every transform returns `NaN` where a coordinate has no image rather than throwing, so the default and strict modes share one compiled pipeline; the step-by-step diagnosis runs only when a strict error is reported.
+With `strict=true`, any coordinate without a result throws `DomainError`. For an undefined coordinate the message names the coordinate, the pipeline step, and the transform that is undefined there, for example `pixel (0.0, 0.0) has no world coordinate: IntermediateToNative(HammerAitoffProjection) in the step from frame "intermediate" to "world" is undefined at (180.0, -90.0)`. Non-finite input propagates as `NaN` in both modes, and `NoConvergence` from the numerical inverse (controlled by `quiet`) always propagates. Internally every transform returns `NaN` where a coordinate has no image rather than throwing, so the default and strict modes share one compiled pipeline; the step-by-step diagnosis runs only when a strict error is reported.
 
 ### Editing a pipeline
 
@@ -261,10 +268,10 @@ header = Dict(
     "CDELT1" => -2.7778e-4, "CDELT2" => 2.7778e-4,
 )
 wcs = parse_fits_wcs(header)
-pixel_to_world(wcs, 512.0, 512.0)
+pixel_to_world(wcs, 511.0, 511.0)    # FITS pixel CRPIX = (512, 512) is GWCS pixel (511, 511)
 ```
 
-FITS 1-based pixel coordinates are represented explicitly by the `CRPIX` affine stage; no origin offset is applied elsewhere. Public outputs retain FITS axis order, including interleaved celestial, spectral, time, Stokes, and linear axes. Canonical outputs use degrees for celestial axes, SI units for supported linear spectral axes, and seconds for time axes. Set `preserve_units=true` to retain supported `CUNIT` values at the output boundary. Time axes are normalized deliberately: values given in `CUNITi`, or in `TIMEUNIT` when `CUNITi` is absent, are converted to seconds relative to the header's reference epoch, so downstream code never needs to interpret `TIMEUNIT`; WCSLIB and astropy instead return time values in the header's unit. Supported time units are `s`, `min`, `h`, `d`, `a` or `yr` (Julian year, 365.25 d), `cy` (Julian century), `ms`, `us`, and `ns`; the single letters `S`, `H`, and `D` are rejected because FITS reads them as siemens, henry, and debye. Incomplete image shapes use `nothing` for WCS axes without a corresponding `NAXISn`.
+**FITS numbers the first pixel center 1, and GWCS.jl numbers it 0.** The parser adds one to pixel coordinates before the FITS stages (`CRPIX`, SIP, lookup tables, and prior distortions), so FITS pixel `p` is GWCS pixel `p .- 1`. Results at the same physical pixel match WCSLIB, and results at the same pixel coordinates match astropy's `pixel_to_world_values`. Public outputs retain FITS axis order, including interleaved celestial, spectral, time, Stokes, and linear axes. Canonical outputs use degrees for celestial axes, SI units for supported linear spectral axes, and seconds for time axes. Set `preserve_units=true` to retain supported `CUNIT` values at the output boundary. Time axes are normalized deliberately: values given in `CUNITi`, or in `TIMEUNIT` when `CUNITi` is absent, are converted to seconds relative to the header's reference epoch, so downstream code never needs to interpret `TIMEUNIT`; WCSLIB and astropy instead return time values in the header's unit. Supported time units are `s`, `min`, `h`, `d`, `a` or `yr` (Julian year, 365.25 d), `cy` (Julian century), `ms`, `us`, and `ns`; the single letters `S`, `H`, and `D` are rejected because FITS reads them as siemens, henry, and debye. Incomplete image shapes use `nothing` for WCS axes without a corresponding `NAXISn`.
 
 The parser supports PC, CD, and legacy CROTA linear forms (as in WCSLIB, CROTA applies only to a celestial axis pair), all 28 FITS spherical projections and their PV parameters, pole parameters, SIP, TPV, pre-2012 SCAMP TAN-plus-PV headers, Paper IV prior and sequent TPD polynomials, legacy DSS and WAT-encoded TNX/ZPX polynomials normalized to TPD at construction, Paper IV D2IM/CPDIS lookup arrays, multilinear `-TAB` coordinate arrays, Paper III spectral algorithms, and GRI/GRA grism models. SIP AP/BP and Paper IV TPD.REV coefficients are approximate reverse initializers only: `world_to_pixel` seeds the whole-WCS numerical inverse with them and always refines against the forward WCS. Without them, the numerical inverse starts, like WCSLIB, from the solution with distortions treated as identity. CSC (COBE quadrilateralized spherical cube) is evaluated in double precision, whereas WCSLIB uses single precision, so the two differ by up to about 2e-5 degrees. FITSIO and FITSFiles are weak dependencies that add detached-header and HDU adapters; linked HDU inputs copy referenced images and table columns into backend-neutral transforms during construction. Separable monotonic 1D tables have direct inverses, while coupled tables use the checked WCS numerical inverse. RESTFRQ/RESTWAV and spectral reference-system metadata are retained on spectral frames, and time reference metadata is retained on temporal frames.
 
@@ -410,3 +417,7 @@ julia --project=validation validation/compare_roman.jl FILE...
 ```
 
 The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. `audit_inference.jl` checks that scalar `pixel_to_world`, `world_to_pixel`, Jacobian, `in_domain`, and `in_image` calls are inferred and allocation-free, and that matrix calls do not allocate per column, across every FITS projection, the supported distortions, spectral, time, tabular, and mixed-axis headers, the ASDF fixtures, and programmatic pipelines; ASDF files passed on the command line, such as Roman L2 products, are audited as well, with and without their explicit inverses. `compare_written_asdf.jl` writes the canonical forms that `compose` and `parallel` build, loads them with Python GWCS, and compares the results. `check_schema_versions.jl` verifies that the built-in exact-version table matches the installed ASDF schema packages. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
+
+## Breaking changes
+
+- FITS-parsed WCSs now use zero-based pixel coordinates, like every other WCS in GWCS.jl. Earlier they used the FITS one-based convention, so the same pixel is now one less.

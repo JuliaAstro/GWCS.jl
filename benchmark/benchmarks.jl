@@ -50,8 +50,9 @@ function affine_wcs(crpix, crval, matrix)
     return GWCS.WCS(Step(PIXEL_FRAME, transform), Step(LINEAR_FRAME))
 end
 
+# GWCS.jl pixels are zero-based, so the hand-built pipelines use FITSWCS.jl's one-based CRPIX minus one.
 function tan_wcs(fits)
-    linear = AffineTransform(fits.cd, -(fits.cd * fits.crpix))
+    linear = AffineTransform(fits.cd, -(fits.cd * (fits.crpix .- 1)))
     transform = compose(linear, IntermediateToNative(GnomonicProjection()), NativeToCelestial(fits.alpha_p, fits.delta_p, fits.lonpole))
     return GWCS.WCS(Step(PIXEL_FRAME, transform), Step(WORLD_FRAME))
 end
@@ -71,8 +72,8 @@ function sip_distortion(crpix, a, b, ap, bp)
 end
 
 function tan_sip_wcs(fits, a, b, ap, bp)
-    distortion = sip_distortion(fits.crpix, a, b, ap, bp)
-    linear = AffineTransform(fits.cd, -(fits.cd * fits.crpix))
+    distortion = sip_distortion(fits.crpix .- 1, a, b, ap, bp)
+    linear = AffineTransform(fits.cd, -(fits.cd * (fits.crpix .- 1)))
     transform = compose(distortion, linear, IntermediateToNative(GnomonicProjection()), NativeToCelestial(fits.alpha_p, fits.delta_p, fits.lonpole))
     return GWCS.WCS(Step(PIXEL_FRAME, transform), Step(WORLD_FRAME))
 end
@@ -131,7 +132,7 @@ const FITS_SPECTRAL = FITSWCS.WCS(SPECTRAL_HEADER)
 const FITS_GRISM = FITSWCS.WCS(GRISM_HEADER)
 const FITS_CUBE = FITSWCS.WCS(CUBE_HEADER)
 
-const GWCS_LINEAR = affine_wcs(FITS_LINEAR.crpix, FITS_LINEAR.crval, FITS_LINEAR.cd)
+const GWCS_LINEAR = affine_wcs(FITS_LINEAR.crpix .- 1, FITS_LINEAR.crval, FITS_LINEAR.cd)
 const GWCS_TAN = tan_wcs(FITS_TAN)
 const SIP_A = FITS_SIP.pipeline.sip.a
 const SIP_B = FITS_SIP.pipeline.sip.b
@@ -217,34 +218,35 @@ const PERMUTED_WORLD_3D = GWCS.pixel_to_world(PERMUTED_3D_WCS, PIXEL_3D)
 const FITS_LINEAR_WORLD = FITSWCS.pixel_to_world(FITS_LINEAR, PIXEL)
 const FITS_TAN_WORLD = FITSWCS.pixel_to_world(FITS_TAN, PIXEL)
 const FITS_SIP_WORLD = FITSWCS.pixel_to_world(FITS_SIP, PIXEL)
-const GWCS_LINEAR_WORLD = GWCS.pixel_to_world(GWCS_LINEAR, PIXEL)
-const GWCS_TAN_WORLD = GWCS.pixel_to_world(GWCS_TAN, PIXEL)
-const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL)
+# FITSWCS.jl pixels are one-based and GWCS.jl pixels zero-based, so the same pixel is one less in GWCS.jl.
+const GWCS_LINEAR_WORLD = GWCS.pixel_to_world(GWCS_LINEAR, PIXEL .- 1)
+const GWCS_TAN_WORLD = GWCS.pixel_to_world(GWCS_TAN, PIXEL .- 1)
+const GWCS_SIP_WORLD = GWCS.pixel_to_world(GWCS_SIP, PIXEL .- 1)
 const FITS_SPECTRAL_WORLD = FITSWCS.pixel_to_world(FITS_SPECTRAL, SPECTRAL_PIXEL)
 const FITS_GRISM_WORLD = FITSWCS.pixel_to_world(FITS_GRISM, SPECTRAL_PIXEL)
-const GWCS_SPECTRAL_WORLD = GWCS.pixel_to_world(GWCS_SPECTRAL, SPECTRAL_PIXEL)
-const GWCS_GRISM_WORLD = GWCS.pixel_to_world(GWCS_GRISM, SPECTRAL_PIXEL)
+const GWCS_SPECTRAL_WORLD = GWCS.pixel_to_world(GWCS_SPECTRAL, SPECTRAL_PIXEL .- 1)
+const GWCS_GRISM_WORLD = GWCS.pixel_to_world(GWCS_GRISM, SPECTRAL_PIXEL .- 1)
 const SKY_ROTATION_WORLD = GWCS.pixel_to_world(SKY_ROTATION_WCS, PIXEL)
 const PIXEL_4D = SVector(400.0, 300.0, 3.0, 1.0)
 const FITS_CUBE_WORLD = FITSWCS.pixel_to_world(FITS_CUBE, PIXEL_4D)
-const GWCS_CUBE_WORLD = GWCS.pixel_to_world(GWCS_CUBE, PIXEL_4D)
+const GWCS_CUBE_WORLD = GWCS.pixel_to_world(GWCS_CUBE, PIXEL_4D .- 1)
 const BATCH_PIXELS = reduce(hcat, [PIXEL + SVector(200cos(k), 200sin(2k)) for k in 1:1000])
 const BATCH_WORLDS = GWCS.pixel_to_world(GWCS_SIP, BATCH_PIXELS)
 
 @assert GWCS_LINEAR_WORLD ≈ FITS_LINEAR_WORLD rtol=1e-12
 @assert GWCS_TAN_WORLD ≈ FITS_TAN_WORLD atol=1e-11
 @assert GWCS_SIP_WORLD ≈ FITS_SIP_WORLD atol=1e-11
-@assert GWCS.world_to_pixel(GWCS_LINEAR, FITS_LINEAR_WORLD) ≈ FITSWCS.world_to_pixel(FITS_LINEAR, FITS_LINEAR_WORLD) atol=1e-10
-@assert GWCS.world_to_pixel(GWCS_TAN, FITS_TAN_WORLD) ≈ FITSWCS.world_to_pixel(FITS_TAN, FITS_TAN_WORLD) atol=1e-9
-@assert GWCS.world_to_pixel(GWCS_SIP, FITS_SIP_WORLD) ≈ FITSWCS.world_to_pixel(FITS_SIP, FITS_SIP_WORLD) atol=1e-6
+@assert GWCS.world_to_pixel(GWCS_LINEAR, FITS_LINEAR_WORLD) ≈ FITSWCS.world_to_pixel(FITS_LINEAR, FITS_LINEAR_WORLD) .- 1 atol=1e-10
+@assert GWCS.world_to_pixel(GWCS_TAN, FITS_TAN_WORLD) ≈ FITSWCS.world_to_pixel(FITS_TAN, FITS_TAN_WORLD) .- 1 atol=1e-9
+@assert GWCS.world_to_pixel(GWCS_SIP, FITS_SIP_WORLD) ≈ FITSWCS.world_to_pixel(FITS_SIP, FITS_SIP_WORLD) .- 1 atol=1e-6
 @assert GWCS_SPECTRAL_WORLD ≈ FITS_SPECTRAL_WORLD rtol=1e-12
 @assert GWCS_GRISM_WORLD ≈ FITS_GRISM_WORLD rtol=1e-12
-@assert GWCS.world_to_pixel(GWCS_SPECTRAL, GWCS_SPECTRAL_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
-@assert GWCS.world_to_pixel(GWCS_GRISM, GWCS_GRISM_WORLD) ≈ SPECTRAL_PIXEL atol=1e-10
+@assert GWCS.world_to_pixel(GWCS_SPECTRAL, GWCS_SPECTRAL_WORLD) ≈ SPECTRAL_PIXEL .- 1 atol=1e-10
+@assert GWCS.world_to_pixel(GWCS_GRISM, GWCS_GRISM_WORLD) ≈ SPECTRAL_PIXEL .- 1 atol=1e-10
 @assert GWCS_CUBE_WORLD ≈ FITS_CUBE_WORLD atol=1e-9
-@assert GWCS.world_to_pixel(GWCS_CUBE, GWCS_CUBE_WORLD) ≈ PIXEL_4D atol=1e-8
+@assert GWCS.world_to_pixel(GWCS_CUBE, GWCS_CUBE_WORLD) ≈ PIXEL_4D .- 1 atol=1e-8
 @assert GWCS_SIP_NUMERICAL.backward isa GWCS.NoInverse
-@assert GWCS.world_to_pixel(GWCS_SIP_NUMERICAL, GWCS_SIP_WORLD) ≈ PIXEL atol=1e-6
+@assert GWCS.world_to_pixel(GWCS_SIP_NUMERICAL, GWCS_SIP_WORLD) ≈ PIXEL .- 1 atol=1e-6
 @assert GWCS.world_to_pixel(SKY_ROTATION_WCS, SKY_ROTATION_WORLD) ≈ PIXEL atol=1e-6
 
 const SUITE = BenchmarkGroup()

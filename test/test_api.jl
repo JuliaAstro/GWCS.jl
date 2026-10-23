@@ -77,15 +77,16 @@ end
     sky_header(code) = Dict("NAXIS" => 2, "CTYPE1" => "RA---$code", "CTYPE2" => "DEC--$code", "CRPIX1" => 181.0, "CRPIX2" => 91.0,
         "CRVAL1" => 0.0, "CRVAL2" => 0.0, "CDELT1" => -1.0, "CDELT2" => 1.0)
     ait = parse_fits_wcs(sky_header("AIT"))
-    grid = [1.0 181.0 360.0; 1.0 91.0 180.0]
+    # Pixels are zero-based, so (180, 90) is the reference pixel CRPIX = (181, 91).
+    grid = [0.0 180.0 359.0; 0.0 90.0 179.0]
     # By default, off-sky pixels of an all-sky projection return fill_value.
     filled = pixel_to_world(ait, grid)
     @test all(isnan, filled[:, 1]) && all(isnan, filled[:, 3])
     @test filled[:, 2] ≈ [0.0, 0.0] atol=1e-12
     @test pixel_to_world(ait, grid; fill_value=-999.0)[:, 1] == [-999.0, -999.0]
-    @test all(isnan, pixel_to_world(ait, 1.0, 1.0))
+    @test all(isnan, pixel_to_world(ait, 0.0, 0.0))
     @test_throws DomainError pixel_to_world(ait, grid; strict=true)
-    @test @inferred(pixel_to_world(ait, SVector(181.0, 91.0); strict=true)) == pixel_to_world(ait, SVector(181.0, 91.0))
+    @test @inferred(pixel_to_world(ait, SVector(180.0, 90.0); strict=true)) == pixel_to_world(ait, SVector(180.0, 90.0))
 
     # The antipode of a TAN reference point has no pixel under the analytical inverse.
     tan = parse_fits_wcs(sky_header("TAN"))
@@ -102,7 +103,7 @@ end
     @test !in_image(sip, 180.0, 0.0)
 
     # Strict errors name the coordinate, the step, and the transform that is undefined there.
-    @test_throws r"pixel \(1\.0, 1\.0\) has no world coordinate: IntermediateToNative\(HammerAitoffProjection\) in the step from frame \"intermediate\" to \"world\" is undefined at" pixel_to_world(ait, 1.0, 1.0; strict=true)
+    @test_throws r"pixel \(0\.0, 0\.0\) has no world coordinate: IntermediateToNative\(HammerAitoffProjection\) in the step from frame \"intermediate\" to \"world\" is undefined at \(180\.0, -90\.0\)" pixel_to_world(ait, 0.0, 0.0; strict=true)
     @test_throws r"world coordinate \(180\.0, 0\.0\) has no pixel coordinate: NativeToIntermediate\(GnomonicProjection\) in the inverse of the step" world_to_pixel(tan, 180.0, 0.0; strict=true)
     @test_throws r"world coordinate \(180\.0, 0\.0\) has no pixel coordinate: NativeToIntermediate\(GnomonicProjection\)" world_to_pixel(sip, 180.0, 0.0; strict=true)
 
