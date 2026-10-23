@@ -8,6 +8,8 @@ GWCS.jl implements composable generalized world coordinate systems in Julia. Pip
 > - Julia array index `(i, j)`, with `i` along the first pixel axis, is GWCS pixel `(i - 1, j - 1)`. A GWCS pixel `p` falls in array index `round.(Int, p) .+ 1`.
 > - A FITS pixel `p` (WCSLIB, FITSWCS.jl, DS9, SourceExtractor `X_IMAGE`) is GWCS pixel `p .- 1`. `parse_fits_wcs` applies this shift itself, so `CRPIX` needs no adjustment.
 > - Pixels from Python GWCS, astropy's APE 14 interface, and photutils are already zero-based.
+>
+> To pass and receive one-based pixels instead, give `origin=1` to `pixel_to_world`, `world_to_pixel`, `numerical_inverse`, `in_domain`, `in_image` (for `initial_guess`), or `grid_from_bounding_box` (for `fixed` values and the grid). As with the `origin` argument of astropy.wcs's `all_pix2world`, it shifts **every** input axis by one and never shifts world coordinates or `fill_value`. Do not use it for a WCS with an input that is not an array position, such as a grism spectral order or a selector label.
 
 ## Constructing a WCS
 

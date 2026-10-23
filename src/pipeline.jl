@@ -103,10 +103,14 @@ function _named_domain_pairs(frame::AbstractCoordinateFrame{N}, fixed) where {N}
     end
 end
 
-function grid_from_bounding_box(wcs::WCS; step=1, center=true, selector=nothing, fixed=())
+# With `origin=1`, `fixed` values and the grid are one-based on every input axis; `selector` is a key, not a pixel.
+function grid_from_bounding_box(wcs::WCS; step=1, center=true, selector=nothing, fixed=(), origin=0)
     wcs.bounding_box === nothing && throw(ArgumentError("WCS has no bounding box"))
-    values = _named_domain_pairs(input_frame(wcs), fixed)
-    return grid_from_bounding_box(wcs.bounding_box; step, center, selector, fixed=values)
+    offset = _origin_offset(origin)
+    values = map(pair -> pair.first => pair.second - offset, _named_domain_pairs(input_frame(wcs), fixed))
+    grid = grid_from_bounding_box(wcs.bounding_box; step, center, selector, fixed=values)
+    grid .+= offset
+    return grid
 end
 
 input_frame(wcs::WCS) = first(wcs.steps).frame
