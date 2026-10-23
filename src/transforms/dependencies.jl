@@ -21,7 +21,8 @@ function transform_dependencies(transform::Polynomial1D)
     return SMatrix{1,1,Bool}(depends)
 end
 
-function transform_dependencies(transform::Polynomial2D{N}) where {N}
+function transform_dependencies(transform::Polynomial2D)
+    N = size(transform.coefficients, 1)
     depends_x = any(!iszero(transform.coefficients[i + 1, j + 1]) for j in 0:(N - 1) for i in 1:(N - 1 - j))
     depends_y = any(!iszero(transform.coefficients[i + 1, j + 1]) for j in 1:(N - 1) for i in 0:(N - 1 - j))
     return SMatrix{1,2,Bool}(depends_x, depends_y)

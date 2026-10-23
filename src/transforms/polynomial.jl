@@ -47,9 +47,13 @@ end
 
 Triangular two-dimensional polynomial. Matrix element `[i + 1, j + 1]` is the
 coefficient of `x^i * y^j`; entries where `i + j` exceeds the degree are ignored.
+
+The coefficients are stored as an `SMatrix`, so the degree is part of the type and evaluation unrolls. Storage `C` can
+also be a `Matrix`, as in `Polynomial2D{Float64,Matrix{Float64},D,W}(coefficients, domain, window)`: polynomials of every
+degree then share one type and one compiled kernel, at two to three times the evaluation cost.
 """
-struct Polynomial2D{N,T,L,D,W} <: AbstractTransform{2,1}
-    coefficients::SMatrix{N,N,T,L}
+struct Polynomial2D{T,C<:AbstractMatrix{T},D,W} <: AbstractTransform{2,1}
+    coefficients::C
     domain::D
     window::W
 end
@@ -60,20 +64,22 @@ function Polynomial2D(coefficients::AbstractMatrix; domain=nothing, window=nothi
     N > 0 || throw(ArgumentError("polynomial requires at least one coefficient"))
     (domain === nothing) == (window === nothing) || throw(ArgumentError("domain and window must be provided together"))
     T = eltype(coefficients)
-    return Polynomial2D{N,T,N * N,typeof(domain),typeof(window)}(SMatrix{N,N,T}(coefficients), domain, window)
+    return Polynomial2D{T,SMatrix{N,N,T,N * N},typeof(domain),typeof(window)}(coefficients, domain, window)
 end
 
-degree(::Polynomial2D{N}) where {N} = N - 1
+degree(transform::Polynomial2D) = size(transform.coefficients, 1) - 1
 
-@inline function (transform::Polynomial2D{N})(coords::StaticVector{2}) where {N}
+@inline function (transform::Polynomial2D)(coords::StaticVector{2})
     T = _evaluation_type(eltype(coords))
     x = _map_domain(T(coords[1]), transform.domain === nothing ? nothing : transform.domain[1], transform.window === nothing ? nothing : transform.window[1])
     y = _map_domain(T(coords[2]), transform.domain === nothing ? nothing : transform.domain[2], transform.window === nothing ? nothing : transform.window[2])
     return SVector(_polynomial2d_value(transform.coefficients, x, y))
 end
 
-# Horner's rule over a triangular coefficient matrix whose element `[i + 1, j + 1]` multiplies `x^i * y^j`.
-@inline function _polynomial2d_value(coefficients::SMatrix{N,N}, x::T, y::T) where {N,T}
+# Horner's rule over a triangular coefficient matrix whose element `[i + 1, j + 1]` multiplies `x^i * y^j`. For an
+# SMatrix the size is a constant, so the loops unroll.
+@inline function _polynomial2d_value(coefficients::AbstractMatrix, x::T, y::T) where {T}
+    N = size(coefficients, 1)
     result = zero(x + y + T(coefficients[1, 1]))
     @inbounds for j in (N - 1):-1:0
         max_i = N - 1 - j
@@ -99,9 +105,9 @@ _domain_affine(domain::Nothing, window) = (1, 0)
 _domain_affine(domain, window) = ((window[2] - window[1]) / (domain[2] - domain[1]), (window[1] * domain[2] - window[2] * domain[1]) / (domain[2] - domain[1]))
 
 # The gradient row and constant of a polynomial of degree at most one.
-function _linear_form(transform::Polynomial2D{N}) where {N}
+function _linear_form(transform::Polynomial2D)
     c = transform.coefficients
-    cx, cy = N > 1 ? (c[2, 1], c[1, 2]) : (zero(c[1, 1]), zero(c[1, 1]))
+    cx, cy = size(c, 1) > 1 ? (c[2, 1], c[1, 2]) : (zero(c[1, 1]), zero(c[1, 1]))
     sx, ox = _domain_affine(transform.domain === nothing ? nothing : transform.domain[1], transform.window === nothing ? nothing : transform.window[1])
     sy, oy = _domain_affine(transform.domain === nothing ? nothing : transform.domain[2], transform.window === nothing ? nothing : transform.window[2])
     return SVector(cx * sx, cy * sy), c[1, 1] + cx * ox + cy * oy

@@ -99,16 +99,24 @@ struct ZeroTransform <: AbstractTransform{0,0} end
 
     # With an image shape, construction fits pixels as a polynomial of the prefix output, which starts Newton within
     # 0.01 px of an in-image root; without one, or with an AP/BP reverse, there is no fit.
-    @test sip.inverse_split.approximate === nothing
+    has_fit(wcs) = all(isfinite, wcs.inverse_split.approximate.low)
+    @test !has_fit(sip)
     shaped = parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024)))
-    @test shaped.inverse_split.approximate !== nothing
+    @test has_fit(shaped)
     shaped_intermediate = shaped.inverse_split.tail_inverse(sip_world)
     @test maximum(abs, GWCS._initial_guess(shaped, shaped_intermediate, Float64, nothing, shaped.inverse_split.prefix) - SVector(100.0, 900.0)) < 0.01
     @test GWCS._numerical_result(shaped, sip_world)[4] == 1
     @test @inferred(world_to_pixel(shaped, sip_world)) ≈ SVector(100.0, 900.0) atol=1e-9
     allocated_inverse(shaped, sip_world)
     @test allocated_inverse(shaped, sip_world) == 0
-    @test parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024, "AP_ORDER" => 2, "AP_2_0" => -5e-6, "BP_ORDER" => 2, "BP_0_2" => -2e-6))).inverse_split.approximate === nothing
+    @test !has_fit(parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024, "AP_ORDER" => 2, "AP_2_0" => -5e-6, "BP_ORDER" => 2, "BP_0_2" => -2e-6))))
+    # The fitted degree, and whether a fit exists at all, depend on the coefficients, so they must not change the WCS
+    # type: otherwise every file would compile its own solver, which the precompile workload cannot cover.
+    stronger = parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024, "A_2_0" => 2e-4)))
+    folded = parse_fits_wcs(merge(sip_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024, "A_2_0" => 2e-3)))
+    @test degree(stronger.inverse_split.approximate.fit.x) > degree(shaped.inverse_split.approximate.fit.x)
+    @test !has_fit(folded)
+    @test typeof(stronger) == typeof(shaped) == typeof(folded)
     # Outside the image the fit would extrapolate, so the usual guess applies.
     far_world = pixel_to_world(sip, SVector(6000.0, -4000.0))
     far_intermediate = shaped.inverse_split.tail_inverse(far_world)

@@ -162,6 +162,8 @@ correction(SVector(3.0)) # [24.0]
 
 `compose` recognizes Python GWCS's distortion idiom `Mapping((0, 1, 0, 1)) | Polynomial2D & Polynomial2D`, written in Julia as `RemapAxes{2}((1, 2, 1, 2)) | (px & py)`, and builds one two-output polynomial leaf that serializes back to the same idiom. When both polynomials have degree at most one, the result is an `AffineTransform`, which fuses with neighboring affines and has an exact inverse when its matrix is nonsingular, whereas Python GWCS inverts such a composition numerically. Annotated idioms, as in Python-written files, are fused only in the compiled WCS kernel.
 
+`Polynomial2D(coefficients; domain, window)` stores its coefficients as an `SMatrix`, so the degree is part of the type and evaluation unrolls. `Polynomial2D{T,C,D,W}` takes any coefficient storage `C`: with a `Matrix`, polynomials of every degree share one type and one compiled kernel, at two to three times the evaluation cost. `degree(p)` returns the degree for either.
+
 Analytical and metadata-provided inverses are compiled into the WCS. Square pipelines without an inverse use a damped Newton solver with ForwardDiff Jacobians:
 
 ```julia
@@ -419,7 +421,3 @@ julia --project=validation validation/compare_roman.jl FILE...
 ```
 
 The parser validation checks ASDF.jl lazy-array orientation and compares identity, affine, TAN, native/celestial rotation, Euler rotation, spherical rotation-sequence, arithmetic compound, bounding-box, label-mapper, and region-selector behavior against Astropy and Python GWCS. `audit_inference.jl` checks that scalar `pixel_to_world`, `world_to_pixel`, Jacobian, `in_domain`, and `in_image` calls are inferred and allocation-free, and that matrix calls do not allocate per column, across every FITS projection, the supported distortions, spectral, time, tabular, and mixed-axis headers, the ASDF fixtures, and programmatic pipelines; ASDF files passed on the command line, such as Roman L2 products, are audited as well, with and without their explicit inverses. `compare_written_asdf.jl` writes the canonical forms that `compose` and `parallel` build, loads them with Python GWCS, and compares the results. `check_schema_versions.jl` verifies that the built-in exact-version table matches the installed ASDF schema packages. Roman validation compares four detector positions per file in both directions against Python GWCS. Its current acceptance limits are `1e-10` degrees forward and `1e-8` pixels inverse.
-
-## Breaking changes
-
-- FITS-parsed WCSs now use zero-based pixel coordinates, like every other WCS in GWCS.jl. Earlier they used the FITS one-based convention, so the same pixel is now one less.
