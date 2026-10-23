@@ -51,23 +51,33 @@ end
 # fit in a TAN plane, and the fit must reach 0.01 px rather than Python's 5 px: coarser guesses save no iterations.
 _approximate_inverse(prefix, initializer, bounding_box, pixel_shape) = nothing
 
+# The fit's degree and whether a fit exists depend on the coefficients, so neither may change the WCS type: the
+# polynomials use Matrix storage, and without a fit an empty box, which no guess lies in, disables the fit.
+function _approximate_inverse_entry(coefficients, domain, low, high)
+    P = Polynomial2D{Float64,Matrix{Float64},NTuple{2,NTuple{2,Float64}},NTuple{2,NTuple{2,Float64}}}
+    window = ((-1.0, 1.0), (-1.0, 1.0))
+    return (; fit=_Polynomial2DPair(P(coefficients[1], domain, window), P(coefficients[2], domain, window)), low, high)
+end
+
+const _NO_APPROXIMATE_INVERSE = _approximate_inverse_entry((zeros(1, 1), zeros(1, 1)), ((-1.0, 1.0), (-1.0, 1.0)), SVector(Inf, Inf), SVector(-Inf, -Inf))
+
 function _approximate_inverse(@nospecialize(prefix::AbstractTransform{2,2}), @nospecialize(initializer), bounding_box, pixel_shape)
     domain = ntuple(axis -> _approximate_inverse_interval(bounding_box, pixel_shape, axis), 2)
-    any(isnothing, domain) && return nothing
+    any(isnothing, domain) && return _NO_APPROXIMATE_INVERSE
     low, high = SVector{2,Float64}(first.(domain)), SVector{2,Float64}(last.(domain))
-    all(isfinite, low) && all(isfinite, high) && all(low .< high) || return nothing
+    all(isfinite, low) && all(isfinite, high) && all(low .< high) || return _NO_APPROXIMATE_INVERSE
     # An explicit approximate reverse, such as SIP AP/BP, already starts Newton near the root.
-    last(_inverse_initialize(initializer, prefix((low + high) / 2))) && return nothing
+    last(_inverse_initialize(initializer, prefix((low + high) / 2))) && return _NO_APPROXIMATE_INVERSE
     fit = _fit_approximate_inverse(_approximate_inverse_samples(prefix, low, high, 16, false)..., _approximate_inverse_samples(prefix, low, high, 16, true)...)
-    return fit === nothing ? nothing : (; fit, low, high)
+    return fit === nothing ? _NO_APPROXIMATE_INVERSE : _approximate_inverse_entry(fit..., low, high)
 end
 
 function _approximate_inverse_interval(bounding_box, pixel_shape, axis)
     interval = bounding_box isa BoundingBox ? bounds(bounding_box, axis) : nothing
     interval !== nothing && return Float64.(interval)
     (pixel_shape === nothing || pixel_shape[axis] === nothing) && return nothing
-    # The padding covers both the zero-based GWCS and the one-based FITS pixel centers.
-    return (-1.5, pixel_shape[axis] + 0.5)
+    # Zero-based pixel centers 0:n-1, extended to the outer pixel edges.
+    return (-0.5, pixel_shape[axis] - 0.5)
 end
 
 # An `n` x `n` lattice spanning the domain, or with `stagger`, the `n - 1` x `n - 1` lattice of its cell centers.
@@ -91,15 +101,15 @@ function _fit_approximate_inverse(pixels, intermediate, check_pixels, check_inte
     for degree in degrees
         coefficients = design(intermediate, degree) \ targets
         maximum(abs, design(check_intermediate, degree) * coefficients - check_targets) <= tolerance || continue
-        polynomials = map(1:2) do axis
+        matrices = ntuple(2) do axis
             matrix = zeros(degree + 1, degree + 1)
             index = 0
             for i in 0:degree, j in 0:(degree - i)
                 matrix[i + 1, j + 1] = coefficients[index += 1, axis]
             end
-            Polynomial2D(matrix; domain, window=((-1.0, 1.0), (-1.0, 1.0)))
+            matrix
         end
-        return _Polynomial2DPair(polynomials...)
+        return (matrices, domain)
     end
     return nothing
 end
@@ -123,7 +133,7 @@ function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, init
     end
     approximate = wcs.inverse_split.approximate
     if approximate !== nothing
-        # Outside the fitted image the polynomial extrapolates, so the usual guesses apply there.
+        # Outside the fitted image the polynomial extrapolates, so the usual guesses apply there; without a fit the box is empty.
         guess = SVector{N,T}(approximate.fit(intermediate))
         all(approximate.low .<= guess .<= approximate.high) && return guess
     end

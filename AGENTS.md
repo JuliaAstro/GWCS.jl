@@ -44,7 +44,7 @@ Pipeline construction may perform extra validation, normalization, fusion, preco
 - Return `NaN` in every output component where a coordinate has no image (an undefined analytical inverse, a point off a projection, an output outside a constrained slice); do not throw `DomainError` from transform evaluation. The evaluation API turns finite input that yields `NaN` into `fill_value`, or into a diagnosed `DomainError` with `strict=true`. Zero-dimensional results, which cannot carry `NaN`, are the only exception.
 - Outer constructors should compute type parameters and delegate inward so all call forms apply the same conversions.
 - Parametric inner constructors must accept unconstrained values and let field declarations or `new` perform conversion. Do not require arguments to already have the field type.
-- GWCS.jl is unreleased, so breaking a public API is acceptable when it clearly simplifies the design. Propose any API-breaking change and get the maintainer's approval before making it; never break an API on your own initiative. Record approved breaks in the README.
+- GWCS.jl is unreleased, so breaking a public API is acceptable when it clearly simplifies the design. Propose any API-breaking change and get the maintainer's approval before making it; never break an API on your own initiative. The README documents what the package currently does, not its history, so describe the new behavior there rather than the change.
 
 Composition with `|` is left to right. Parallel composition with `&` operates on consecutive input slices. Elementwise arithmetic sends the same inputs to both operands. Preserve these semantics when simplifying or compiling transform trees.
 

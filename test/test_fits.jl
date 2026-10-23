@@ -625,7 +625,7 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test world_to_pixel(tpv, pixel_to_world(tpv, fits_pixel(632.0, 407.5))) ≈ fits_pixel(632.0, 407.5) atol=1e-8
     # An image containing the fold has no single-valued inverse to fit, so the approximate inverse is rejected.
     folded_tpv = parse_fits_wcs(merge(tpv_header, Dict("NAXIS1" => 1024, "NAXIS2" => 1024)))
-    @test folded_tpv.inverse_split.approximate === nothing
+    @test !all(isfinite, folded_tpv.inverse_split.approximate.low)
     @test world_to_pixel(folded_tpv, pixel_to_world(folded_tpv, fits_pixel(632.0, 407.5))) ≈ fits_pixel(632.0, 407.5) atol=1e-8
 
     empty_tpv = parse_fits_wcs(filter(pair -> !startswith(pair.first, "PV"), tpv_header))
