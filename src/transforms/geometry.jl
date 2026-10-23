@@ -118,6 +118,34 @@ inverse_transform(transform::CelestialToNative) = NativeToCelestial(transform.al
     throw(ArgumentError("rotation axis must be x, y, or z"))
 end
 
+"""
+    Rotation2D(angle)
+
+Counterclockwise rotation of `(x, y)` by `angle` degrees, astropy's `Rotation2D` (ASDF `rotate2d`). The compiled WCS
+kernel evaluates it as an `AffineTransform`, so it fuses with neighboring affines, while the stored transform keeps the
+angle to serialize.
+"""
+struct Rotation2D{T<:AbstractFloat} <: AbstractTransform{2,2}
+    angle::T
+    matrix::SMatrix{2,2,T,4}
+    function Rotation2D{T}(angle) where {T}
+        # sincosd is exact at multiples of 90 degrees, so those rotations keep exact zeros and axis dependencies.
+        sine, cosine = sincosd(T(angle))
+        return new{T}(angle, SMatrix{2,2,T}(cosine, sine, -sine, cosine))
+    end
+end
+
+Rotation2D(angle::Real) = Rotation2D{float(typeof(angle))}(angle)
+
+@inline function (transform::Rotation2D)(coords::StaticVector{2})
+    T = _evaluation_type(eltype(coords))
+    return SMatrix{2,2,T}(transform.matrix) * SVector{2,T}(coords)
+end
+
+inverse_transform(transform::Rotation2D) = Rotation2D(-transform.angle)
+transform_jacobian(transform::Rotation2D, coords::StaticVector{2}) = SMatrix{2,2,_evaluation_type(eltype(coords))}(transform.matrix)
+_numeric_transform(transform::Rotation2D) = AffineTransform(transform.matrix, zero(SVector{2,eltype(transform.matrix)}))
+
 """Three-dimensional rotation represented by a precomputed static matrix."""
 struct Rotation3D{T,L} <: AbstractTransform{3,3}
     matrix::SMatrix{3,3,T,L}

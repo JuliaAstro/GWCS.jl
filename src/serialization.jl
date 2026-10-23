@@ -166,6 +166,7 @@ end
 
 _serialize_shift(transform, context) = Dict("offset" => transform.offset)
 _serialize_scale(transform, context) = Dict("factor" => transform.factor)
+_serialize_rotate2d(transform, context) = Dict("angle" => transform.angle)
 
 function _serialize_affine(transform, context)
     return Dict("matrix" => _metadata_rows(transform.matrix), "translation" => _metadata_vector(transform.offset))
@@ -304,6 +305,7 @@ function _register_builtin_transform_serializers!()
     register_transform_serializer!(registry, IdentityTransform, "$_ASDF_TRANSFORM_TAG/identity", _serialize_identity; version=v"1.4.0")
     register_transform_serializer!(registry, Shift, "$_ASDF_TRANSFORM_TAG/shift", _serialize_shift; version=v"1.4.0")
     register_transform_serializer!(registry, Scale, "$_ASDF_TRANSFORM_TAG/scale", _serialize_scale; version=v"1.4.0")
+    register_transform_serializer!(registry, Rotation2D, "$_ASDF_TRANSFORM_TAG/rotate2d", _serialize_rotate2d; version=v"1.5.0")
     register_transform_serializer!(registry, AffineTransform{2,2}, "$_ASDF_TRANSFORM_TAG/affine", _serialize_affine; version=v"1.5.0")
     register_transform_serializer!(registry, ConstantTransform{0}, "$_ASDF_TRANSFORM_TAG/constant", _serialize_constant; version=v"1.3.0")
     register_transform_serializer!(registry, ConstantTransform{1}, "$_ASDF_TRANSFORM_TAG/constant", _serialize_constant; version=v"1.6.0")

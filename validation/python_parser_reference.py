@@ -9,6 +9,7 @@ def main():
         "affine": models.AffineTransformation2D(
             matrix=[[1.0, 0.2], [-0.1, 2.0]], translation=[3.0, 4.0]
         ),
+        "rotate2d": models.Rotation2D(30.0),
         "gnomonic": models.Pix2Sky_Gnomonic(),
         "native2celestial": models.RotateNative2Celestial(10.0, 20.0, 180.0),
         "celestial2native": models.RotateCelestial2Native(10.0, 20.0, 180.0),
