@@ -1,5 +1,7 @@
 const _ASDF_TRANSFORM_TAG = "tag:stsci.edu:asdf/transform"
 const _GWCS_TAG = "tag:stsci.edu:gwcs"
+const _ASTROPY_WCS_TAG = "tag:astropy.org:astropy/wcs/wcs"
+const _ASTROPY_FITS_TAG = "tag:astropy.org:astropy/fits/fits"
 const _SCHEMA_VERSIONS_1_0_TO_1_2 = (v"1.0.0", v"1.1.0", v"1.2.0")
 const _SCHEMA_VERSIONS_1_0_TO_1_3 = (_SCHEMA_VERSIONS_1_0_TO_1_2..., v"1.3.0")
 const _SCHEMA_VERSIONS_1_0_TO_1_4 = (_SCHEMA_VERSIONS_1_0_TO_1_3..., v"1.4.0")
@@ -316,6 +318,26 @@ function _validate_bounding_box_schema(node, context)
     return nothing
 end
 
+function _validate_astropy_wcs_schema(node, context)
+    path = metadata_path(context)
+    _schema_mapping(node, path)
+    _schema_property(node, "hdulist", context; required=true)
+    _schema_mapping(_schema_property(node, "attrs", context; required=true), "$path/attrs")
+    return nothing
+end
+
+function _validate_astropy_fits_schema(node, context)
+    path = metadata_path(context)
+    for (index, hdu) in enumerate(_schema_sequence(node, path))
+        _schema_mapping(hdu, "$path/$index")
+        haskey(hdu, "header") || _metadata_error("$path/$index", "missing required property header")
+        for (number, card) in enumerate(_schema_sequence(metadata_value(hdu["header"]), "$path/$index/header"))
+            1 <= length(_schema_sequence(card, "$path/$index/header/$number")) <= 3 || _metadata_error("$path/$index/header/$number", "a FITS card holds a keyword, a value, and a comment")
+        end
+    end
+    return nothing
+end
+
 function _register_builtin_metadata_schemas!()
     registry = default_transform_registry()
     _register_metadata_schema!(registry, "$_GWCS_TAG/wcs"; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_wcs_schema)
@@ -329,6 +351,8 @@ function _register_builtin_metadata_schemas!()
     _register_metadata_schema!(registry, "$_ASDF_TRANSFORM_TAG/property/bounding_box"; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_bounding_box_schema)
     _register_metadata_schema!(registry, "$_ASDF_TRANSFORM_TAG/property/compound_bounding_box"; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_bounding_box_schema)
     _register_metadata_schema!(registry, "tag:astropy.org:astropy/coordinates/frames/icrs"; versions=_SCHEMA_VERSIONS_1_0_TO_1_3)
+    _register_metadata_schema!(registry, _ASTROPY_WCS_TAG; versions=(v"1.0.0",), validate=_validate_astropy_wcs_schema)
+    _register_metadata_schema!(registry, _ASTROPY_FITS_TAG; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_astropy_fits_schema)
     _register_metadata_schema!(registry, "tag:stsci.edu:asdf/core/ndarray"; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_ndarray_schema)
     return nothing
 end

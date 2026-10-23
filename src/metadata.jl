@@ -945,7 +945,8 @@ end
 
 function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     node, context = _prepare_metadata(node, "wcs", registry)
-    metadata_tag(context) == "$_GWCS_TAG/wcs" || _metadata_error("wcs", "expected a GWCS WCS metadata node")
+    metadata_tag(context) == _ASTROPY_WCS_TAG && return _parse_astropy_wcs(node, registry)
+    metadata_tag(context) == "$_GWCS_TAG/wcs" || _metadata_error("wcs", "expected a GWCS WCS or astropy FITS WCS metadata node")
     raw_steps = _required(node, "steps", "wcs")
     steps = Any[_parse_step(value, "wcs/steps/$index", registry) for (index, value) in enumerate(raw_steps)]
     first_transform = get(first(raw_steps), "transform", nothing)
@@ -960,3 +961,36 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
 end
 
 parse_wcs(metadata::AbstractString; registry=default_transform_registry()) = parse_wcs(_load_tagged_yaml(metadata); registry)
+
+# asdf-astropy does not record an alternate key, since astropy's WCS has no `key` attribute, so astropy cannot read back
+# an alternate-key WCS it wrote. `WCS.to_fits` writes only the WCS's own representation, which WCSLIB always begins with
+# WCSAXESa, so that card identifies the key.
+function _astropy_wcs_key(header)
+    found = sort!([isempty(m.captures[1]) ? ' ' : only(m.captures[1]) for m in (match(r"^WCSAXES([A-Z]?)$", name) for name in keys(header)) if m !== nothing])
+    length(found) <= 1 || _metadata_error("wcs/hdulist", "the header holds WCS representations with keys $(join(repr.(found), ", ")) and attrs names none")
+    return isempty(found) ? ' ' : only(found)
+end
+
+# asdf-astropy writes an astropy FITS WCS as the HDU list `WCS.to_fits` returns plus the attributes its header lacks, and
+# reads it back as `WCS(header, fobj=hdulist; attrs...)`. The header goes to `parse_fits_wcs`, so it follows WCSLIB, and
+# APE 14's `pixel_bounds`, which Python GWCS reports from its bounding box, becomes the bounding box. Lookup and -TAB
+# arrays would come from the other HDUs, which are not read yet.
+function _parse_astropy_wcs(node, registry)
+    hdulist, _ = _prepare_metadata(_required(node, "hdulist", "wcs"), "wcs/hdulist", registry)
+    attrs = _required(node, "attrs", "wcs")
+    for name in ("colsel", "keysel")
+        _unwrap(get(attrs, name, nothing)) === nothing || _metadata_error("wcs/attrs/$name", "astropy FITS WCS attribute $name is not supported")
+    end
+    length(hdulist) == 1 || _metadata_error("wcs/hdulist", "astropy FITS WCS extension HDUs, which hold lookup distortions and -TAB arrays, are not supported")
+    header = _fits_card_dictionary((_unwrap(card[1]), length(card) > 1 ? _unwrap(card[2]) : "") for card in first(hdulist)["header"])
+    # Like asdf-astropy, a nonzero attribute replaces the header's NAXIS, which `WCS.to_fits` writes as 0.
+    naxis = _unwrap(get(attrs, "naxis", nothing))
+    naxis === nothing || iszero(naxis) || (header["NAXIS"] = Int(naxis))
+    key = _unwrap(get(attrs, "key", nothing))
+    wcs = parse_fits_wcs(header; key=key === nothing ? _astropy_wcs_key(header) : only(String(key)))
+    shape = _unwrap(get(attrs, "pixel_shape", nothing))
+    shape === nothing || (wcs = with_pixel_shape(wcs, Tuple(Int(_unwrap(value)) for value in shape)))
+    bounds = _unwrap(get(attrs, "pixel_bounds", nothing))
+    bounds === nothing || (wcs = with_bounding_box(wcs, BoundingBox(Tuple((Float64(_unwrap(bound[1])), Float64(_unwrap(bound[2]))) for bound in bounds))))
+    return wcs
+end

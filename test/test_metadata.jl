@@ -1,3 +1,6 @@
+using ASDF
+using Logging
+
 @testset "Metadata parsing" begin
     metadata = read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String)
     wcs = parse_wcs(metadata)
@@ -627,4 +630,45 @@ end
     """), "frame")
     @test axis_names(unnamed) == ("",)
     @test axis_physical_types(unnamed) == ("custom:PIXEL",)
+end
+
+@testset "astropy FITS WCS tag" begin
+    # validation/generate_astropy_wcs_fixture.py: astropy WCSs as asdf-astropy writes them, with astropy's zero-based results.
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "astropy_wcs.asdf"); extensions=true)
+    end
+    sip = parse_wcs(fixture["sip"])
+    @test sip.pixel_shape == (1024, 1024)
+    @test sip.bounding_box === nothing
+    @test maximum(abs, pixel_to_world(sip, fixture["sip_pixels"][]) - fixture["sip_world"][]) < 1e-10
+    @test maximum(abs, world_to_pixel(sip, fixture["sip_world"][]; tolerance=1e-12) - fixture["sip_pixels"][]) < 1e-8
+    bounded = parse_wcs(fixture["bounded"])
+    @test bounds(bounded.bounding_box, 1) == (-0.5, 199.5) && bounds(bounded.bounding_box, 2) == (-0.5, 99.5)
+    @test maximum(abs, pixel_to_world(bounded, fixture["bounded_pixels"][]) - fixture["bounded_world"][]) < 1e-10
+    @test all(isnan, pixel_to_world(bounded, 200.0, 0.0))
+    # asdf-astropy omits the alternate key, so it comes from the header's WCSAXESa card.
+    alternate = parse_wcs(fixture["alternate"])
+    @test maximum(abs, pixel_to_world(alternate, fixture["alternate_pixels"][]) - fixture["alternate_world"][]) < 1e-12
+    @test axis_units(output_frame(alternate)) == ("mm", "mm")
+
+    astropy_wcs(cards; wcs_version="1.0.0", fits_version="1.2.0", attrs="{naxis: 2, pixel_bounds: null, pixel_shape: null}", extra_hdu="") = """
+    !<tag:astropy.org:astropy/wcs/wcs-$wcs_version>
+    attrs: $attrs
+    hdulist: !<tag:astropy.org:astropy/fits/fits-$fits_version>
+    - header: $cards
+    $extra_hdu
+    """
+    cards = "[[NAXIS, 0], [WCSAXES, 2], [CTYPE1, RA---TAN], [CTYPE2, DEC--TAN], [CRPIX1, 11.0], [CRPIX2, 21.0], [CRVAL1, 30.0], [CRVAL2, 45.0], [CDELT1, -0.001], [CDELT2, 0.001], [COMMENT, a note]]"
+    tan = parse_wcs(astropy_wcs(cards))
+    @test pixel_to_world(tan, 10.0, 20.0) ≈ SVector(30.0, 45.0) atol=1e-12
+    alternate_cards = "[[WCSAXESA, 2], [CTYPE1A, XLIN], [CTYPE2A, YLIN], [CRPIX1A, 1.0], [CRPIX2A, 1.0], [CDELT1A, 0.5], [CDELT2A, 0.5]]"
+    # Pixel 1 is FITS pixel 2, one 0.5 step from CRPIX; the default primary WCS this must not fall back to gives 2.
+    @test pixel_to_world(parse_wcs(astropy_wcs(alternate_cards)), 1.0, 1.0) == SVector(0.5, 0.5)
+    @test pixel_to_world(parse_wcs(astropy_wcs(alternate_cards; attrs="{naxis: 2, key: A}")), 1.0, 1.0) == SVector(0.5, 0.5)
+    @test_throws "the header holds WCS representations with keys ' ', 'A' and attrs names none" parse_wcs(astropy_wcs("[[WCSAXES, 2], [WCSAXESA, 2], [CTYPE1, RA---TAN], [CTYPE2, DEC--TAN]]"))
+    @test_throws "unsupported metadata tag version tag:astropy.org:astropy/wcs/wcs-2.0.0" parse_wcs(astropy_wcs(cards; wcs_version="2.0.0"))
+    @test_throws "unsupported metadata tag version tag:astropy.org:astropy/fits/fits-9.0.0" parse_wcs(astropy_wcs(cards; fits_version="9.0.0"))
+    @test_throws "astropy FITS WCS attribute keysel is not supported" parse_wcs(astropy_wcs(cards; attrs="{naxis: 2, keysel: [image]}"))
+    @test_throws "extension HDUs, which hold lookup distortions and -TAB arrays, are not supported" parse_wcs(astropy_wcs(cards; extra_hdu="- header: [[XTENSION, IMAGE], [EXTNAME, WCSDVARR]]"))
+    @test_throws "a FITS card holds a keyword, a value, and a comment" parse_wcs(astropy_wcs("[[CTYPE1, RA---TAN, a, b]]"))
 end
