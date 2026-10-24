@@ -309,7 +309,7 @@ Singular linear transformation matrices are rejected. As in WCSLIB, the conic (C
 `parse_wcs` accepts a tagged YAML string or a tagged metadata mapping. The core parser supports:
 
 - GWCS WCS, step, simple and compound bounding boxes, generic, 2D, celestial, spectral, temporal, Stokes, composite, and name-only frames
-- ICRS, structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
+- ICRS and other astropy reference frames, kept as stored when they carry more than the frame name (such as a fiducial position), structured temporal reference metadata, units, axis classifications, and nonidentity frame-axis ordering
 - compose, concatenate, elementwise arithmetic, identity, shift, scale, affine, axis remapping, and polynomial transforms
 - legacy and current constant transforms, fixed-input compounds, and transform names/input/output names
 - array-, dictionary-, range-, and transform-backed label mappers and region selectors
