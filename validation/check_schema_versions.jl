@@ -83,4 +83,9 @@ registered_ndarray = registry.schemas["tag:stsci.edu:asdf/core/ndarray"].version
 available_ndarray = available_versions(ndarray_roots, "ndarray")
 registered_ndarray == available_ndarray || error("ndarray versions differ: GWCS.jl has $registered_ndarray, schema package has $available_ndarray")
 
+unit_root = joinpath(asdf_root, "stable", "schemas", "stsci.edu", "asdf", "unit")
+registered_quantity = registry.schemas["tag:stsci.edu:asdf/unit/quantity"].versions
+available_quantity = available_versions(unit_root, "quantity")
+registered_quantity == available_quantity || error("quantity versions differ: GWCS.jl has $registered_quantity, schema package has $available_quantity")
+
 println("GWCS.jl metadata schema versions match the installed ASDF schema packages")

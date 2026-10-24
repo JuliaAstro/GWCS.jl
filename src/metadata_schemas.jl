@@ -355,5 +355,6 @@ function _register_builtin_metadata_schemas!()
     _register_metadata_schema!(registry, _ASTROPY_WCS_TAG; versions=(v"1.0.0",), validate=_validate_astropy_wcs_schema)
     _register_metadata_schema!(registry, _ASTROPY_FITS_TAG; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_astropy_fits_schema)
     _register_metadata_schema!(registry, "tag:stsci.edu:asdf/core/ndarray"; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_ndarray_schema)
+    _register_metadata_schema!(registry, "tag:stsci.edu:asdf/unit/quantity"; versions=(v"1.1.0", v"1.2.0", v"1.3.0"))
     return nothing
 end

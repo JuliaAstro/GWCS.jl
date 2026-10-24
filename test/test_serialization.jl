@@ -307,3 +307,70 @@ end
     @test parsed isa Rotation2D && parsed.angle == 30.0
     @test_throws "unsupported transform tag version tag:stsci.edu:asdf/transform/rotate2d-1.6.0" parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/rotate2d-1.6.0> {angle: 30.0}"))
 end
+
+@testset "Quantity parameters" begin
+    # validation/generate_quantity_fixture.py: Python pipelines and transforms with angle and dimensionless quantities.
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "quantities.asdf"); extensions=true)
+    end
+    wcss = Dict(name => parse_wcs(node) for (name, node) in fixture["wcs"])
+    transforms = Dict(name => parse_transform(node) for (name, node) in fixture["transforms"])
+    columns(matrix) = (SVector{2}(matrix[:, j]) for j in axes(matrix, 2))
+    for (name, wcs) in wcss, (pixel, world) in zip(columns(fixture["wcs_inputs"][name][]), columns(fixture["wcs_outputs"][name][]))
+        @test pixel_to_world(wcs, pixel) ≈ world atol=1e-10
+    end
+    for (name, transform) in transforms, (input, output) in zip(columns(fixture["transform_inputs"][name][]), columns(fixture["transform_outputs"][name][]))
+        @test transform(input) ≈ output atol=1e-10
+    end
+    # Units live in the annotation, not the type: the same pipeline in rad, arcmin, and dimensionless quantities and in
+    # plain degrees compiles once.
+    @test typeof(wcss["mixed"]) == typeof(wcss["plain"])
+    allocated_quantity(wcs, coords) = @allocated pixel_to_world(wcs, coords)
+    allocated_quantity(wcss["mixed"], SVector(100.0, 200.0))
+    @test allocated_quantity(wcss["mixed"], SVector(100.0, 200.0)) == 0
+
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "quantities.asdf")
+        write_asdf(filename, Dict("wcs" => wcss, "transforms" => transforms))
+        written = read(filename, String)
+        # Quantities come back in their units, the fiducial ICRS frame keeps its position, and Galactic keeps its tag.
+        for unit in ("arcmin", "arcsec", "rad", "")
+            @test occursin("unit: !unit/unit-1.0.0 \"$unit\"", written)
+        end
+        @test occursin("astropy/coordinates/latitude-1.2.0", written)
+        @test occursin("astropy/coordinates/frames/galactic-1.2.0", written)
+        loaded = with_logger(NullLogger()) do
+            ASDF.load(filename; extensions=true)
+        end
+        for (name, wcs) in wcss
+            reparsed = parse_wcs(loaded["wcs"][name])
+            @test typeof(reparsed) == typeof(wcs)
+            @test pixel_to_world(reparsed, first(columns(fixture["wcs_inputs"][name][]))) == pixel_to_world(wcs, first(columns(fixture["wcs_inputs"][name][])))
+        end
+        for (name, transform) in transforms
+            input = first(columns(fixture["transform_inputs"][name][]))
+            @test parse_transform(loaded["transforms"][name])(input) ≈ transform(input) atol=1e-12
+        end
+    end
+    # An Euler rotate3d is written in another canonical form, whose parameters differ, so its plain values stay in degrees.
+    @test !endswith(first(GWCS._split_metadata_tag(to_metadata(transforms["euler"]).tag, "")), "rotate3d")
+
+    quantity(unit, value) = "!<tag:stsci.edu:asdf/unit/quantity-1.3.0> {unit: !<tag:stsci.edu:asdf/unit/unit-1.0.0> $unit, value: $value}"
+    tagged(text) = parse_transform(GWCS._load_tagged_yaml(text))
+    sequence(angles) = tagged("!<tag:stsci.edu:asdf/transform/rotate_sequence_3d-1.2.0> {angles: $angles, axes_order: zyx, rotation_type: cartesian}")
+    radians = sequence(quantity("rad", "[0.1, 0.2, 0.3]"))
+    @test radians(SVector(1.0, 2.0, 3.0)) ≈ sequence(string(rad2deg.([0.1, 0.2, 0.3])))(SVector(1.0, 2.0, 3.0)) atol=1e-14
+    # The writer re-derives a cartesian sequence as xyz angles; they keep the stored unit.
+    @test to_metadata(radians)["angles"]["unit"].value == "rad"
+    @test parse_transform(to_metadata(radians))(SVector(1.0, 2.0, 3.0)) ≈ radians(SVector(1.0, 2.0, 3.0)) atol=1e-14
+    rotate3d(phi) = "!<tag:stsci.edu:asdf/transform/rotate3d-1.5.0> {direction: native2celestial, phi: $phi, theta: 45.0, psi: 180.0}"
+    @test_throws "expected an angle quantity, got unit \"m\" at transform/phi/unit" tagged(rotate3d(quantity("m", 1.0)))
+    @test_throws "unsupported metadata tag version tag:stsci.edu:asdf/unit/quantity-9.0.0" tagged(rotate3d("!<tag:stsci.edu:asdf/unit/quantity-9.0.0> {unit: deg, value: 1.0}"))
+    # Projection angles convert by their units
+    airy(theta_b) = tagged("!<tag:stsci.edu:asdf/transform/airy-1.4.0> {direction: pix2sky, theta_b: $theta_b}")
+    @test airy(quantity("rad", 1.2))(SVector(1.0, 2.0)) == airy(rad2deg(1.2))(SVector(1.0, 2.0))
+    @test to_metadata(airy(quantity("rad", 1.2)))["theta_b"]["value"] ≈ 1.2 atol=1e-15
+    @test_throws "expected a dimensionless quantity with an empty unit, got unit \"%\"" tagged("!<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0> {direction: pix2sky, mu: $(quantity("'%'", 200.0)), gamma: 0.0}")
+    # Parameters whose meaning depends on the frames' units, such as a shift, still reject quantities.
+    @test_throws "expected a unitless numeric value at transform/offset" tagged("!<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: $(quantity("pix", 1.0))}")
+end

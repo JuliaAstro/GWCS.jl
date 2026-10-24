@@ -101,6 +101,12 @@ function cases(files)
     push!(list, "ASDF asdf_parser_wcs.yaml" => (parse_wcs(read(joinpath(FIXTURES, "asdf_parser_wcs.yaml"), String)), SVector(11.0, 22.0)))
     mixed = parse_wcs(read(joinpath(FIXTURES, "mixed_frame_wcs.yaml"), String))
     push!(list, "ASDF mixed_frame_wcs.yaml" => (mixed, SVector(ntuple(i -> 1.0 + i, input_dimension(mixed.forward)))))
+    quantities = with_logger(NullLogger()) do
+        ASDF.load(joinpath(FIXTURES, "quantities.asdf"); extensions=true)
+    end
+    for name in ("mixed", "fiducial")
+        push!(list, "ASDF quantities.asdf $name" => (parse_wcs(quantities["wcs"][name]), SVector(1.0, 2.0)))
+    end
     boxes = GWCS._load_tagged_yaml(read(joinpath(FIXTURES, "asdf_bounding_boxes.yaml"), String))
     push!(list, "ASDF bounding box (ignored axis)" => (parse_wcs(boxes["simple_ignored"]), SVector(2.0, 3.0, 1.0)))
     push!(list, "ASDF compound bounding box" => (parse_wcs(boxes["compound"]), SVector(2.0, 3.0, 1.0)))

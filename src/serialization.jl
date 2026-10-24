@@ -95,12 +95,26 @@ function _to_metadata(value::AbstractArray, path, registry)
     return _has_tag(value) ? TaggedSequence(_tag(value), items) : items
 end
 
+# Writes a parameter read as a quantity back in its unit; the serializer wrote it as a plain number in degrees.
+function _quantity_metadata(node, unit::_ParameterUnit, path)
+    haskey(node, unit.property) || _metadata_error("$path/$(unit.property)", "the serializer omitted parameter $(unit.property), which was read as a quantity in $(repr(unit.unit))")
+    _, from_degrees = _quantity_conversion(unit.kind, unit.unit, "$path/$(unit.property)")
+    value = metadata_value(node[unit.property])
+    quantity = Dict{Any,Any}("value" => value isa Real ? from_degrees(value) : from_degrees.(collect(Float64, value)), "unit" => TaggedScalar(unit.unit_tag, unit.unit))
+    unit.datatype === nothing || (quantity["datatype"] = unit.datatype)
+    return TaggedMapping(unit.tag, quantity)
+end
+
 function _to_metadata(transform::AnnotatedTransform, path, registry)
     node = _metadata_mapping(_to_metadata(transform.transform, path, registry), path)
     properties = Pair{String,Any}[]
     transform.name === nothing || push!(properties, "name" => transform.name)
     transform.inputs === nothing || push!(properties, "inputs" => _metadata_vector(transform.inputs))
     transform.outputs === nothing || push!(properties, "outputs" => _metadata_vector(transform.outputs))
+    # A transform written with another tag, such as an Euler rotate3d written as rotate_sequence_3d, has other
+    # parameters; its plain values are in degrees, as the schemas define them.
+    family = first(_split_metadata_tag(node.tag, path))
+    foreach(unit -> unit.transform_tag == family && push!(properties, unit.property => _quantity_metadata(node, unit, path)), transform.parameter_units)
     return _decorate_metadata(node, properties)
 end
 
