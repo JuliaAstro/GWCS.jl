@@ -7,6 +7,8 @@ struct TransformRegistration{F,V,N,S}
     validator::V
     normalizer::N
     versions::S
+    # Properties that may hold quantities, as `property => :angle` or `:dimensionless`.
+    quantities::Vector{Pair{String,Symbol}}
 end
 
 """Validation and normalization rules for a non-transform metadata tag."""
@@ -112,14 +114,19 @@ function _registrations_overlap(left::TransformRegistration, right::TransformReg
 end
 
 """
-    register_transform!([registry], tag, constructor; min_version, max_version, versions, validate, normalize)
+    register_transform!([registry], tag, constructor; min_version, max_version, versions, validate, normalize, angles, dimensionless)
 
 Register a native transform constructor for either an explicit collection of
 schema `versions` or the half-open semantic version range
 `[min_version, max_version)`. Existing registrations default to `[1.0.0, 2.0.0)`.
 `tag` is the full metadata tag family without its trailing version.
+
+`angles` and `dimensionless` name properties that may hold an ASDF quantity, which is replaced by a plain number
+before validation, so the constructor sees what a unitless file holds. An angle quantity in any angle unit is converted
+to degrees; a dimensionless one must have an empty unit. The parsed transform records each unit, and writing restores
+it.
 """
-function register_transform!(registry::TransformRegistry, tag::AbstractString, constructor; min_version=nothing, max_version=nothing, versions=nothing, validate=_no_metadata_validation, normalize=_no_metadata_normalization)
+function register_transform!(registry::TransformRegistry, tag::AbstractString, constructor; min_version=nothing, max_version=nothing, versions=nothing, validate=_no_metadata_validation, normalize=_no_metadata_normalization, angles=(), dimensionless=())
     if versions === nothing
         minimum = min_version === nothing ? v"1.0.0" : min_version
         maximum = max_version === nothing ? v"2.0.0" : max_version
@@ -136,7 +143,9 @@ function register_transform!(registry::TransformRegistry, tag::AbstractString, c
     family = String(tag)
     isempty(family) && throw(ArgumentError("transform registration tag must not be empty"))
     occursin(r"-\d+\.\d+\.\d+$", family) && throw(ArgumentError("transform registration tag must omit the schema version: $family"))
-    registration = TransformRegistration(family, minimum, maximum, constructor, validate, normalize, supported)
+    quantities = Pair{String,Symbol}[(String(name) => :angle for name in angles)..., (String(name) => :dimensionless for name in dimensionless)...]
+    allunique(first.(quantities)) || throw(ArgumentError("transform registration for $family lists a quantity property twice"))
+    registration = TransformRegistration(family, minimum, maximum, constructor, validate, normalize, supported, quantities)
     lock(registry.lock) do
         registrations = get!(registry.registrations, family, Any[])
         for existing in registrations

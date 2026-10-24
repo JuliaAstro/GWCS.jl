@@ -90,6 +90,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P1** Validate that composite-frame axis orders are unique and complete.
 - [x] **P1** Add public accessors for pixel/world axis names, physical types, units, and axis types.
 - [ ] **P1** Integrate frame-boundary unit validation and conversion through an optional Unitful.jl extension.
+- [x] **P1** Read angle and dimensionless transform parameters stored as ASDF quantities, converting angles to degrees and restoring each unit on write. Dimensional quantities (shifts, scales, polynomial and tabular coefficients) still need unit propagation through the pipeline.
 - [ ] **P2** Integrate celestial outputs with an established Julia coordinate package through an optional extension.
 - [ ] **P2** Integrate temporal outputs with an established Julia time/astronomy package through an optional extension.
 - [ ] **P2** Define an idiomatic Julia protocol for converting raw numeric axes to and from richer world-coordinate objects.

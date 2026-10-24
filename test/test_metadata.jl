@@ -532,23 +532,26 @@ end
     @test_throws "zenithal perspective projection is undefined for mu = -1 at transform" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0> {mu: -1}
     """))
-    @test_throws "expected a unitless numeric value at transform/gamma" parse_transform(GWCS._load_tagged_yaml("""
+    # Angle quantities are read in degrees and give the transform a plain number would.
+    gamma_quantity = parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0>
     gamma: !<tag:stsci.edu:asdf/unit/quantity-1.2.0> {value: 15.0, unit: deg}
     """))
+    @test gamma_quantity(SVector(0.3, 0.4)) == parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/zenithal_perspective-1.5.0> {gamma: 15.0}"))(SVector(0.3, 0.4))
     @test_throws "missing required property psi at transform" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate3d-1.5.0>
     phi: 1.0
     theta: 2.0
     direction: xyz
     """))
-    @test_throws "expected a unitless numeric value at transform/phi" parse_transform(GWCS._load_tagged_yaml("""
+    phi_quantity = parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate3d-1.5.0>
     phi: !<tag:stsci.edu:asdf/unit/quantity-1.2.0> {value: 1.0, unit: deg}
     theta: 2.0
     psi: 3.0
     direction: xyz
     """))
+    @test phi_quantity(SVector(10.0, 20.0)) == parse_transform(GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/rotate3d-1.5.0> {phi: 1.0, theta: 2.0, psi: 3.0, direction: xyz}"))(SVector(10.0, 20.0))
     @test_throws "rotation axes must contain only x, y, or z at transform/axes_order" parse_transform(GWCS._load_tagged_yaml("""
     !<tag:stsci.edu:asdf/transform/rotate_sequence_3d-1.2.0>
     angles: [1.0, 2.0]
