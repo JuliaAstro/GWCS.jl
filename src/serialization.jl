@@ -51,7 +51,10 @@ function to_metadata(value, context::TransformWriteContext; path=metadata_path(c
 end
 
 _to_metadata(value::Nothing, path, registry) = nothing
-_to_metadata(value::Union{Bool,Number,AbstractString}, path, registry) = value
+_to_metadata(value::Union{Bool,Number}, path, registry) = value
+# Stored metadata, such as an astropy frame kept from a parsed file, keeps its tags: ASDF.jl's tagged nodes are also
+# strings, mappings, and vectors.
+_to_metadata(value::AbstractString, path, registry) = _has_tag(value) ? TaggedScalar(_tag(value), String(value)) : value
 _to_metadata(value::Symbol, path, registry) = String(value)
 _to_metadata(value::AxisType, path, registry) = string(value)
 
@@ -76,7 +79,8 @@ function _to_metadata(value::NamedTuple, path, registry)
 end
 
 function _to_metadata(value::AbstractDict, path, registry)
-    return Dict{Any,Any}(_to_metadata(key, "$path/key", registry) => _to_metadata(item, "$path/$key", registry) for (key, item) in value)
+    properties = Dict{Any,Any}(_to_metadata(key, "$path/key", registry) => _to_metadata(item, "$path/$key", registry) for (key, item) in value)
+    return _has_tag(value) ? TaggedMapping(_tag(value), properties) : properties
 end
 
 function _to_metadata(value::Tuple, path, registry)
@@ -84,10 +88,11 @@ function _to_metadata(value::Tuple, path, registry)
 end
 
 function _to_metadata(value::AbstractArray, path, registry)
-    return map(CartesianIndices(value)) do index
+    items = map(CartesianIndices(value)) do index
         indices = join(Tuple(index), "/")
         _to_metadata(value[index], "$path/$indices", registry)
     end
+    return _has_tag(value) ? TaggedSequence(_tag(value), items) : items
 end
 
 function _to_metadata(transform::AnnotatedTransform, path, registry)

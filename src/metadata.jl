@@ -30,6 +30,9 @@ _tag(node::TaggedMapping) = node.tag
 _tag(node::TaggedSequence) = node.tag
 _tag(node::TaggedScalar) = node.tag
 _tag(node) = throw(ArgumentError("metadata node $(typeof(node)) does not retain a tag"))
+# Whether a node retains a tag; the ASDF extension adds ASDF.jl's tagged nodes.
+_has_tag(node) = false
+_has_tag(::Union{TaggedMapping,TaggedSequence,TaggedScalar}) = true
 
 _unwrap(node::TaggedScalar) = node.value
 _unwrap(node) = node
@@ -697,7 +700,9 @@ function _parse_reference_frame(value, path, registry)
     family, version = _split_metadata_tag(tag, path)
     if family == "tag:astropy.org:astropy/coordinates/frames/icrs"
         _lookup_metadata_schema(registry, family, version, path)
-        return :ICRS
+        # An ICRS frame that carries more, such as the position data of a `wcs_from_fiducial` frame, is kept as stored,
+        # like the other astropy frames, so writing reproduces it.
+        all(key -> key == "frame_attributes" && isempty(value[key]), keys(value)) && return :ICRS
     end
     return value
 end

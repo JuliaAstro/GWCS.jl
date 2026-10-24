@@ -166,6 +166,18 @@ end
     @test pixel_to_world(reparsed_mixed, pixels) == pixel_to_world(mixed, pixels)
     celestial_metadata = to_metadata(output_frame(parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))))
     @test celestial_metadata["reference_frame"]["frame_attributes"] == Dict()
+    # An astropy frame other than a bare ICRS is stored as parsed, so it is written back with its tags.
+    roman = read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String)
+    bare_icrs = "!<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>\n        frame_attributes: {}"
+    stored(reference) = to_metadata(output_frame(parse_wcs(replace(roman, bare_icrs => reference))))["reference_frame"]
+    galactic = stored("!<tag:astropy.org:astropy/coordinates/frames/galactic-1.2.0>\n        frame_attributes: {}")
+    @test GWCS._tag(galactic) == "tag:astropy.org:astropy/coordinates/frames/galactic-1.2.0"
+    @test galactic["frame_attributes"] == Dict()
+    fiducial = stored("!<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>\n        frame_attributes: {}\n        data: !<tag:astropy.org:astropy/coordinates/representation-1.2.0> {type: UnitSphericalRepresentation, components: {lat: !<tag:astropy.org:astropy/coordinates/latitude-1.2.0> {unit: !unit/unit-1.0.0 deg, value: 45.0}}}")
+    @test GWCS._tag(fiducial) == "tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0"
+    @test GWCS._tag(fiducial["data"]["components"]["lat"]) == "tag:astropy.org:astropy/coordinates/latitude-1.2.0"
+    @test GWCS._tag(fiducial["data"]["components"]["lat"]["unit"]) == "tag:stsci.edu:asdf/unit/unit-1.0.0"
+    @test fiducial["data"]["components"]["lat"]["value"] == 45.0
 
     bounding_fixture = GWCS._load_tagged_yaml(read(joinpath(@__DIR__, "fixtures", "asdf_bounding_boxes.yaml"), String))
     for name in ("simple_ignored", "compound")

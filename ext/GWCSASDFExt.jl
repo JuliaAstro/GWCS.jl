@@ -8,6 +8,7 @@ GWCS._tag(node::ASDF.TaggedMapping) = node.tag
 GWCS._tag(node::ASDF.TaggedSequence) = node.tag
 GWCS._tag(node::ASDF.TaggedScalar) = node.tag
 GWCS._unwrap(node::ASDF.TaggedScalar) = String(node)
+GWCS._has_tag(::Union{ASDF.TaggedMapping,ASDF.TaggedSequence,ASDF.TaggedScalar}) = true
 
 function GWCS._materialize_array(array::ASDF.NDArray)
     value = array[]
