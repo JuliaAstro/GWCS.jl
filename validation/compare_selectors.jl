@@ -15,7 +15,9 @@ function main()
     range_mapper = RangeLabelMapper(((0.0, 2.0) => ConstantTransform{2}(1.0), (2.0, 4.0) => ConstantTransform{2}(2.0)), 2; inputs_mapping=(1,))
 
     @assert [map_label(array_mapper, 0.0, 1.0), map_label(array_mapper, 1.0, 0.0), something(map_label(array_mapper, 0.0, 0.0), 0)] == reference["array_labels"]
-    @assert [collect(regions(SVector(0.0, 1.0))), collect(regions(SVector(1.0, 0.0))), collect(regions(SVector(0.0, 0.0)))] == reference["region_outputs"]
+    @assert [collect(regions(SVector(0.0, 1.0))), collect(regions(SVector(1.0, 0.0)))] == reference["region_outputs"][1:2]
+    # Python returns undefined_value where no region applies; GWCS.jl deliberately returns NaN and stores the value only for ASDF round trips.
+    @assert all(isnan, regions(SVector(0.0, 0.0))) && reference["region_outputs"][3] == fill(regions.undefined_value, 2)
     @assert [map_label(dictionary_mapper, -2.0005, 8.0), map_label(dictionary_mapper, 3.0, 8.0), something(map_label(dictionary_mapper, 0.0, 8.0), 0.0)] == reference["dictionary_labels"]
     @assert [map_label(range_mapper, 1.0, 8.0), map_label(range_mapper, 3.0, 8.0), something(map_label(range_mapper, 2.0, 8.0), 0.0)] == reference["range_labels"]
 
