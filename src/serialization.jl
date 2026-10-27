@@ -96,10 +96,10 @@ function _to_metadata(value::AbstractArray, path, registry)
 end
 
 # Writes a parameter read as a quantity back in its unit; the serializer wrote it as a plain number in degrees.
-function _quantity_metadata(node, unit::_ParameterUnit, path)
-    haskey(node, unit.property) || _metadata_error("$path/$(unit.property)", "the serializer omitted parameter $(unit.property), which was read as a quantity in $(repr(unit.unit))")
-    _, from_degrees = _quantity_conversion(unit.kind, unit.unit, "$path/$(unit.property)")
-    value = metadata_value(node[unit.property])
+function _quantity_metadata(node, unit::_ParameterUnit, property, path)
+    haskey(node, property) || _metadata_error("$path/$property", "the serializer omitted parameter $property, which was read as a quantity in $(repr(unit.unit))")
+    _, from_degrees = _quantity_conversion(unit.kind, unit.unit, "$path/$property")
+    value = metadata_value(node[property])
     quantity = Dict{Any,Any}("value" => value isa Real ? from_degrees(value) : from_degrees.(collect(Float64, value)), "unit" => TaggedScalar(unit.unit_tag, unit.unit))
     unit.datatype === nothing || (quantity["datatype"] = unit.datatype)
     return TaggedMapping(unit.tag, quantity)
@@ -114,7 +114,12 @@ function _to_metadata(transform::AnnotatedTransform, path, registry)
     # A transform written with another tag, such as an Euler rotate3d written as rotate_sequence_3d, has other
     # parameters; its plain values are in degrees, as the schemas define them.
     family = first(_split_metadata_tag(node.tag, path))
-    foreach(unit -> unit.transform_tag == family && push!(properties, unit.property => _quantity_metadata(node, unit, path)), transform.parameter_units)
+    for unit in transform.parameter_units
+        unit.transform_tag == family || continue
+        # A cylinder radius read from the schemas' `lambda` is written as `lam`, the key Python GWCS reads.
+        property = unit.property == "lambda" && haskey(node, "lam") ? "lam" : unit.property
+        push!(properties, property => _quantity_metadata(node, unit, property, path))
+    end
     return _decorate_metadata(node, properties)
 end
 
@@ -222,14 +227,21 @@ end
 _projection_direction(::IntermediateToNative) = "pix2sky"
 _projection_direction(::NativeToIntermediate) = "sky2pix"
 
-_projection_properties(::GnomonicProjection) = Dict{String,Any}()
-_projection_properties(::StereographicProjection) = Dict{String,Any}()
-_projection_properties(::ZenithalEquidistant) = Dict{String,Any}()
-_projection_properties(::ZenithalEqualArea) = Dict{String,Any}()
+const _ParameterlessProjection = Union{GnomonicProjection,StereographicProjection,ZenithalEquidistant,ZenithalEqualArea,PlateCarreeProjection,MercatorProjection,
+    SansonFlamsteedProjection,ParabolicProjection,MollweideProjection,HammerAitoffProjection,PolyconicProjection,TangentialSphericalCube,COBESphericalCube,
+    QuadrilateralizedSphericalCube,HEALPixPolarProjection}
+
+_projection_properties(::_ParameterlessProjection) = Dict{String,Any}()
 _projection_properties(projection::ZenithalPerspective) = Dict{String,Any}("mu" => projection.mu, "gamma" => projection.gamma)
 _projection_properties(projection::SlantZenithalPerspective) = Dict{String,Any}("mu" => projection.mu, "phi0" => projection.phi0, "theta0" => projection.theta0)
 _projection_properties(projection::SlantOrthographic) = Dict{String,Any}("xi" => projection.xi, "eta" => projection.eta)
 _projection_properties(projection::AiryProjection) = Dict{String,Any}("theta_b" => projection.theta_b)
+# Written as astropy's `lam`, which Python GWCS reads; it ignores the schemas' `lambda`.
+_projection_properties(projection::CylindricalEqualArea) = Dict{String,Any}("lam" => projection.lambda)
+_projection_properties(projection::CylindricalPerspective) = Dict{String,Any}("mu" => projection.mu, "lam" => projection.lambda)
+_projection_properties(projection::AbstractConicProjection) = Dict{String,Any}("sigma" => projection.sigma, "delta" => projection.delta)
+_projection_properties(projection::BonneProjection) = Dict{String,Any}("theta1" => projection.theta1)
+_projection_properties(projection::HEALPixProjection) = Dict{String,Any}("H" => Float64(projection.H), "X" => Float64(projection.K))
 
 function _serialize_projection(transform::Union{IntermediateToNative,NativeToIntermediate}, context)
     properties = _projection_properties(transform.projection)
@@ -340,7 +352,26 @@ function _register_builtin_transform_serializers!()
         (SlantOrthographic, "slant_orthographic", v"1.4.0"),
         (ZenithalEquidistant, "zenithal_equidistant", v"1.4.0"),
         (ZenithalEqualArea, "zenithal_equal_area", v"1.4.0"),
-        (AiryProjection, "airy", v"1.4.0")
+        (AiryProjection, "airy", v"1.4.0"),
+        (PlateCarreeProjection, "plate_carree", v"1.4.0"),
+        (CylindricalEqualArea, "cylindrical_equal_area", v"1.5.0"),
+        (CylindricalPerspective, "cylindrical_perspective", v"1.5.0"),
+        (MercatorProjection, "mercator", v"1.4.0"),
+        (SansonFlamsteedProjection, "sanson_flamsteed", v"1.4.0"),
+        (ParabolicProjection, "parabolic", v"1.4.0"),
+        (MollweideProjection, "molleweide", v"1.4.0"),
+        (HammerAitoffProjection, "hammer_aitoff", v"1.4.0"),
+        (PolyconicProjection, "polyconic", v"1.4.0"),
+        (ConicPerspective, "conic_perspective", v"1.5.0"),
+        (ConicEquidistant, "conic_equidistant", v"1.5.0"),
+        (ConicEqualArea, "conic_equal_area", v"1.5.0"),
+        (ConicOrthomorphic, "conic_orthomorphic", v"1.5.0"),
+        (BonneProjection, "bonne_equal_area", v"1.5.0"),
+        (TangentialSphericalCube, "tangential_spherical_cube", v"1.4.0"),
+        (COBESphericalCube, "cobe_quad_spherical_cube", v"1.4.0"),
+        (QuadrilateralizedSphericalCube, "quad_spherical_cube", v"1.4.0"),
+        (HEALPixProjection, "healpix", v"1.4.0"),
+        (HEALPixPolarProjection, "healpix_polar", v"1.4.0")
     )
         register_transform_serializer!(registry, IntermediateToNative{<:projection_type}, "$_ASDF_TRANSFORM_TAG/$tag", _serialize_projection; version)
         register_transform_serializer!(registry, NativeToIntermediate{<:projection_type}, "$_ASDF_TRANSFORM_TAG/$tag", _serialize_projection; version)

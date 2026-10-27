@@ -172,7 +172,7 @@ end
         _test_projection_performance(IntermediateToNative(projection), NativeToIntermediate(projection)(native))
     end
 
-    for projection in (GnomonicProjection(), PlateCarreeProjection(), HammerAitoffProjection(), MollweideProjection(), ZenithalPolynomial((0.0, 1.0, -0.2)), ConicEqualArea(), HEALPixProjection())
+    for projection in (GnomonicProjection(), PlateCarreeProjection(), HammerAitoffProjection(), MollweideProjection(), ZenithalPolynomial((0.0, 1.0, -0.2)), ConicEqualArea(45), HEALPixProjection())
         for coords in (SVector(NaN, 1.0), SVector(1.0, Inf))
             @test all(isnan, @inferred(IntermediateToNative(projection)(coords)))
             @test all(isnan, @inferred(NativeToIntermediate(projection)(coords)))

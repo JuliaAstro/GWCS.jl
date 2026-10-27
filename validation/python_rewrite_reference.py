@@ -1,4 +1,4 @@
-"""Read a GWCS.jl rewrite of test/fixtures/quantities.asdf and evaluate it against the fixture's Python results."""
+"""Read a GWCS.jl rewrite of a test fixture and evaluate it against the fixture's Python results."""
 
 import json
 import sys

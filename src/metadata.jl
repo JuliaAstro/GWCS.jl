@@ -346,6 +346,55 @@ function _parse_airy(node, context)
     return _parse_projection(node, context, projection)
 end
 
+# The schemas name the cylinder radius `lambda`, but asdf-astropy reads and writes astropy's `lam` and ignores
+# `lambda`. Either is read; the writer uses `lam`.
+function _cylinder_radius(node, context)
+    haskey(node, "lam") && haskey(node, "lambda") && _metadata_error(metadata_path(context), "the cylinder radius is given as both lam and lambda")
+    return _projection_parameter(node, haskey(node, "lambda") ? "lambda" : "lam", 1)
+end
+
+function _parse_cylindrical_equal_area(node, context)
+    projection = _construct_projection(context) do
+        CylindricalEqualArea(_cylinder_radius(node, context))
+    end
+    return _parse_projection(node, context, projection)
+end
+
+function _parse_cylindrical_perspective(node, context)
+    projection = _construct_projection(context) do
+        CylindricalPerspective(_projection_parameter(node, "mu", 1), _cylinder_radius(node, context))
+    end
+    return _parse_projection(node, context, projection)
+end
+
+# The schemas give sigma no default. astropy's default of 90 puts both standard parallels at the pole, so a missing
+# sigma is an error, as in WCSLIB.
+function _conic_parser(constructor)
+    return function (node, context)
+        sigma = metadata_value(required_metadata(node, "sigma", context))
+        projection = _construct_projection(context) do
+            constructor(sigma, _projection_parameter(node, "delta", 0))
+        end
+        return _parse_projection(node, context, projection)
+    end
+end
+
+function _parse_bonne_equal_area(node, context)
+    projection = _construct_projection(context) do
+        BonneProjection(_projection_parameter(node, "theta1", 0))
+    end
+    return _parse_projection(node, context, projection)
+end
+
+function _parse_healpix(node, context)
+    H, K = _projection_parameter(node, "H", 4), _projection_parameter(node, "X", 3)
+    isinteger(H) && isinteger(K) || _metadata_error(metadata_path(context), "HEALPix H and X must be integers, got $H and $K")
+    projection = _construct_projection(context) do
+        HEALPixProjection(Int(H), Int(K))
+    end
+    return _parse_projection(node, context, projection)
+end
+
 function _parse_constant(node, context)
     value = metadata_value(required_metadata(node, "value", context))
     dimensions = Int(metadata_value(required_metadata(node, "dimensions", context)))
@@ -724,6 +773,19 @@ function _register_builtin_transform_parsers!()
     register_transform!("$asdf_transform/zenithal_equidistant", _parse_zenithal_equidistant; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
     register_transform!("$asdf_transform/zenithal_equal_area", _parse_zenithal_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
     register_transform!("$asdf_transform/airy", _parse_airy; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("theta_b",)), angles=("theta_b",))
+    for (name, projection) in (("plate_carree", PlateCarreeProjection()), ("mercator", MercatorProjection()), ("sanson_flamsteed", SansonFlamsteedProjection()),
+                               ("parabolic", ParabolicProjection()), ("molleweide", MollweideProjection()), ("hammer_aitoff", HammerAitoffProjection()),
+                               ("polyconic", PolyconicProjection()), ("tangential_spherical_cube", TangentialSphericalCube()), ("cobe_quad_spherical_cube", COBESphericalCube()),
+                               ("quad_spherical_cube", QuadrilateralizedSphericalCube()), ("healpix_polar", HEALPixPolarProjection()))
+        register_transform!("$asdf_transform/$name", (node, context) -> _parse_projection(node, context, projection); versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+    end
+    register_transform!("$asdf_transform/cylindrical_equal_area", _parse_cylindrical_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("lam", "lambda")), dimensionless=("lam", "lambda"))
+    register_transform!("$asdf_transform/cylindrical_perspective", _parse_cylindrical_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "lam", "lambda")), dimensionless=("mu", "lam", "lambda"))
+    for (name, constructor) in (("conic_perspective", ConicPerspective), ("conic_equidistant", ConicEquidistant), ("conic_equal_area", ConicEqualArea), ("conic_orthomorphic", ConicOrthomorphic))
+        register_transform!("$asdf_transform/$name", _conic_parser(constructor); versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("sigma", "delta")), angles=("sigma", "delta"))
+    end
+    register_transform!("$asdf_transform/bonne_equal_area", _parse_bonne_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("theta1",)), angles=("theta1",))
+    register_transform!("$asdf_transform/healpix", _parse_healpix; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("H", "X")))
     register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_rotate3d_schema, angles=("phi", "theta", "psi"))
     register_transform!("$asdf_transform/constant", _parse_constant; versions=_SCHEMA_VERSIONS_1_0_TO_1_6, validate=_validate_constant_schema, normalize=_normalize_constant_schema)
     register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; versions=(v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"), validate=_validate_fixed_inputs_schema)

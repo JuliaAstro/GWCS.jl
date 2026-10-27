@@ -967,7 +967,7 @@ end
     projections = (
         PlateCarreeProjection(), CylindricalEqualArea(), CylindricalPerspective(), MercatorProjection(),
         SansonFlamsteedProjection(), ParabolicProjection(), MollweideProjection(), PolyconicProjection(), HammerAitoffProjection(),
-        ZenithalPolynomial(), ConicPerspective(), ConicEquidistant(), ConicEqualArea(), ConicOrthomorphic(), BonneProjection(),
+        ZenithalPolynomial(), ConicPerspective(45), ConicEquidistant(45), ConicEqualArea(45), ConicOrthomorphic(45), BonneProjection(45),
         TangentialSphericalCube(), QuadrilateralizedSphericalCube(), HEALPixProjection(), HEALPixPolarProjection(),
     )
     native = SVector(20.0, 30.0)
