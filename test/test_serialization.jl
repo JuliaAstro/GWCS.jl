@@ -374,3 +374,63 @@ end
     # Parameters whose meaning depends on the frames' units, such as a shift, still reject quantities.
     @test_throws "expected a unitless numeric value at transform/offset" tagged("!<tag:stsci.edu:asdf/transform/shift-1.4.0> {offset: $(quantity("pix", 1.0))}")
 end
+
+@testset "Projection tags" begin
+    # validation/generate_projection_fixture.py: every non-zenithal projection tag in both directions, and
+    # wcs_from_fiducial pipelines with CAR and Bonne projections.
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "projections.asdf"); extensions=true)
+    end
+    wcss = Dict(name => parse_wcs(node) for (name, node) in fixture["wcs"])
+    transforms = Dict(name => parse_transform(node) for (name, node) in fixture["transforms"])
+    columns(matrix) = (SVector{2}(matrix[:, j]) for j in axes(matrix, 2))
+    for (name, wcs) in wcss, (pixel, world) in zip(columns(fixture["wcs_inputs"][name][]), columns(fixture["wcs_outputs"][name][]))
+        @test pixel_to_world(wcs, pixel) ≈ world atol=1e-10
+    end
+    # WCSLIB evaluates CSC in single precision.
+    for (name, transform) in transforms, (input, output) in zip(columns(fixture["transform_inputs"][name][]), columns(fixture["transform_outputs"][name][]))
+        @test transform(input) ≈ output atol=(startswith(name, "csc") ? 2e-5 : 1e-10)
+    end
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "projections.asdf")
+        write_asdf(filename, Dict("wcs" => wcss, "transforms" => transforms))
+        loaded = with_logger(NullLogger()) do
+            ASDF.load(filename; extensions=true)
+        end
+        for (name, transform) in transforms
+            reparsed = parse_transform(loaded["transforms"][name])
+            @test typeof(reparsed) == typeof(transform)
+            input = first(columns(fixture["transform_inputs"][name][]))
+            @test reparsed(input) == transform(input)
+        end
+        @test occursin(r"sigma:\s+!unit/quantity-1.3.0", read(filename, String))
+    end
+
+    tagged(text) = parse_transform(GWCS._load_tagged_yaml(text))
+    projection(tag, properties="") = tagged("!<tag:stsci.edu:asdf/transform/$tag> {direction: pix2sky$properties}").projection
+    # Missing parameters take astropy's defaults.
+    @test projection("cylindrical_perspective-1.5.0") == CylindricalPerspective(1, 1)
+    @test projection("conic_equidistant-1.0.0", ", sigma: 30") == ConicEquidistant(30, 0)
+    @test projection("bonne_equal_area-1.5.0").theta1 == 0
+    @test projection("healpix-1.4.0") == HEALPixProjection(4, 3)
+    @test projection("healpix-1.4.0", ", H: 6.0, X: 4.0") == HEALPixProjection(6, 4)
+    @test projection("plate_carree-1.0.0") isa PlateCarreeProjection
+    @test_throws "HEALPix H and X must be integers, got 4.5 and 3 at transform" projection("healpix-1.4.0", ", H: 4.5")
+    # The schemas' lambda is read as well as lam, and written as lam.
+    @test projection("cylindrical_equal_area-1.5.0", ", lambda: 0.5") == CylindricalEqualArea(0.5)
+    @test projection("cylindrical_perspective-1.0.0", ", mu: 2.0, lambda: 0.5") == CylindricalPerspective(2.0, 0.5)
+    @test_throws "the cylinder radius is given as both lam and lambda at transform" projection("cylindrical_equal_area-1.5.0", ", lam: 0.5, lambda: 0.5")
+    radius = tagged("!<tag:stsci.edu:asdf/transform/cylindrical_equal_area-1.5.0> {lambda: !<tag:stsci.edu:asdf/unit/quantity-1.3.0> {unit: !<tag:stsci.edu:asdf/unit/unit-1.0.0> '', value: 0.5}}")
+    written = to_metadata(radius)
+    @test !haskey(written, "lambda") && written["lam"]["unit"].value == "" && written["lam"]["value"] == 0.5
+    @test parse_transform(written).transform == radius.transform
+    @test_throws "cylindrical equal-area lambda must be in (0, 1] at transform" projection("cylindrical_equal_area-1.5.0", ", lam: 2.0")
+    @test_throws "conic projection parameters must be between -90 and 90 degrees at transform" projection("conic_perspective-1.5.0", ", sigma: 100")
+    @test_throws "missing required property sigma at transform" projection("conic_equal_area-1.5.0", ", delta: 10")
+    @test_throws "expected a unitless numeric value at transform/H" projection("healpix-1.4.0", ", H: four")
+    @test_throws "unsupported transform tag version tag:stsci.edu:asdf/transform/healpix-1.5.0" projection("healpix-1.5.0")
+    # Conic and Bonne angles convert by their units.
+    bonne = tagged("!<tag:stsci.edu:asdf/transform/bonne_equal_area-1.5.0> {theta1: !<tag:stsci.edu:asdf/unit/quantity-1.3.0> {unit: !<tag:stsci.edu:asdf/unit/unit-1.0.0> arcmin, value: 1800.0}}")
+    @test bonne.transform.projection.theta1 ≈ 30
+    @test to_metadata(bonne)["theta1"]["unit"].value == "arcmin"
+end

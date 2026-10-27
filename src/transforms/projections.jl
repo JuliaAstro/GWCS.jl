@@ -297,10 +297,10 @@ end
 
 _conic_type(sigma, delta) = promote_type(typeof(float(sigma)), typeof(float(delta)))
 
-ConicPerspective(sigma::Real=45, delta::Real=0) = ConicPerspective{_conic_type(sigma, delta)}(sigma, delta)
-ConicEquidistant(sigma::Real=45, delta::Real=0) = ConicEquidistant{_conic_type(sigma, delta)}(sigma, delta)
-ConicEqualArea(sigma::Real=45, delta::Real=0) = ConicEqualArea{_conic_type(sigma, delta)}(sigma, delta)
-ConicOrthomorphic(sigma::Real=45, delta::Real=0) = ConicOrthomorphic{_conic_type(sigma, delta)}(sigma, delta)
+ConicPerspective(sigma::Real, delta::Real=0) = ConicPerspective{_conic_type(sigma, delta)}(sigma, delta)
+ConicEquidistant(sigma::Real, delta::Real=0) = ConicEquidistant{_conic_type(sigma, delta)}(sigma, delta)
+ConicEqualArea(sigma::Real, delta::Real=0) = ConicEqualArea{_conic_type(sigma, delta)}(sigma, delta)
+ConicOrthomorphic(sigma::Real, delta::Real=0) = ConicOrthomorphic{_conic_type(sigma, delta)}(sigma, delta)
 
 """The BON/Bonne projection with standard parallel `theta1`."""
 struct BonneProjection{T<:AbstractFloat} <: AbstractSphericalProjection
@@ -316,7 +316,7 @@ struct BonneProjection{T<:AbstractFloat} <: AbstractSphericalProjection
     end
 end
 
-BonneProjection(theta1::Real=45) = BonneProjection{typeof(float(theta1))}(theta1)
+BonneProjection(theta1::Real) = BonneProjection{typeof(float(theta1))}(theta1)
 
 struct TangentialSphericalCube <: AbstractSphericalProjection end
 struct COBESphericalCube <: AbstractSphericalProjection end

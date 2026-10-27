@@ -40,7 +40,9 @@ gwcs_root = joinpath(resource_path("asdf_wcs_schemas.resources"), "schemas", "st
 
 for family in ("compose", "concatenate", "add", "subtract", "multiply", "divide", "power", "shift", "scale", "identity", "affine", "gnomonic",
                "zenithal_perspective", "slant_zenithal_perspective", "stereographic", "slant_orthographic", "zenithal_equidistant", "zenithal_equal_area", "airy",
-               "rotate3d", "rotate2d", "constant", "fix_inputs", "remap_axes", "polynomial", "rotate_sequence_3d")
+               "plate_carree", "cylindrical_equal_area", "cylindrical_perspective", "mercator", "sanson_flamsteed", "parabolic", "molleweide", "hammer_aitoff",
+               "polyconic", "conic_perspective", "conic_equidistant", "conic_equal_area", "conic_orthomorphic", "bonne_equal_area", "tangential_spherical_cube",
+               "cobe_quad_spherical_cube", "quad_spherical_cube", "healpix", "healpix_polar", "rotate3d", "rotate2d", "constant", "fix_inputs", "remap_axes", "polynomial", "rotate_sequence_3d")
     registered = registered_versions(registry, "tag:stsci.edu:asdf/transform/$family")
     available = available_versions(transform_root, family)
     registered == available || error("$family versions differ: GWCS.jl has $registered, schema package has $available")

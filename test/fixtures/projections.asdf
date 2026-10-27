@@ -1,0 +1,649 @@
+#ASDF 1.0.0
+#ASDF_STANDARD 1.6.0
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+--- !core/asdf-1.1.0
+asdf_library: !core/software-1.0.0 {author: The ASDF Developers, homepage: 'http://github.com/asdf-format/asdf',
+  name: asdf, version: 5.3.1}
+history:
+  extensions:
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/core/extensions/core-1.6.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf, version: 5.3.1}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/transform/extensions/transform-1.7.0
+    manifest_software: !core/software-1.0.0 {name: asdf_transform_schemas, version: 0.6.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/gwcs/extensions/gwcs-1.4.0
+    manifest_software: !core/software-1.0.0 {name: asdf_wcs_schemas, version: 0.5.0}
+    software: !core/software-1.0.0 {name: gwcs, version: 1.0.3}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://astropy.org/astropy/extensions/units-1.3.0
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/extensions/astronomy-1.2.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/coordinates/extensions/coordinates-1.0.0
+    manifest_software: !core/software-1.0.0 {name: asdf_coordinates_schemas, version: 0.5.1}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/coordinates/extensions/coordinates-1.3.0
+    manifest_software: !core/software-1.0.0 {name: asdf_coordinates_schemas, version: 0.5.1}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+transform_inputs:
+  ait_pix2sky: &id001 !core/ndarray-1.1.0
+    data:
+    - [10.0, 20.0]
+    - [-30.0, 5.0]
+    - [0.5, -0.25]
+    datatype: float64
+    shape: [3, 2]
+  ait_sky2pix: &id002 !core/ndarray-1.1.0
+    data:
+    - [10.0, 20.0]
+    - [-30.0, 45.0]
+    - [100.0, -30.0]
+    datatype: float64
+    shape: [3, 2]
+  bon_pix2sky: *id001
+  bon_sky2pix: *id002
+  car_pix2sky: *id001
+  car_sky2pix: *id002
+  cea_pix2sky: *id001
+  cea_sky2pix: *id002
+  cod_pix2sky: *id001
+  cod_sky2pix: *id002
+  coe_pix2sky: *id001
+  coe_sky2pix: *id002
+  coo_pix2sky: *id001
+  coo_sky2pix: *id002
+  cop_pix2sky: *id001
+  cop_sky2pix: *id002
+  csc_pix2sky: *id001
+  csc_sky2pix: *id002
+  cyp_pix2sky: *id001
+  cyp_sky2pix: *id002
+  hpx_pix2sky: *id001
+  hpx_sky2pix: *id002
+  mer_pix2sky: *id001
+  mer_sky2pix: *id002
+  mol_pix2sky: *id001
+  mol_sky2pix: *id002
+  par_pix2sky: *id001
+  par_sky2pix: *id002
+  pco_pix2sky: *id001
+  pco_sky2pix: *id002
+  qsc_pix2sky: *id001
+  qsc_sky2pix: *id002
+  sfl_pix2sky: *id001
+  sfl_sky2pix: *id002
+  tsc_pix2sky: *id001
+  tsc_sky2pix: *id002
+  xph_pix2sky: *id001
+  xph_sky2pix: *id002
+transform_outputs:
+  ait_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.488275634046252, 20.08235826555906]
+    - [-30.17207849545041, 4.958361451209612]
+    - [0.5000039664032367, -0.24999960335537194]
+    datatype: float64
+    shape: [3, 2]
+  ait_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [9.538578830274863, 19.916982300716292]
+    - [-22.861523144763698, 44.16507126766506]
+    - [86.16956301719993, -32.47201963986173]
+    datatype: float64
+    shape: [3, 2]
+  bon_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.626078625299858, 19.5432437592808]
+    - [-30.291962720207312, 1.4292676463593779]
+    - [0.5000060390016283, -0.25096532786469083]
+    datatype: float64
+    shape: [3, 2]
+  bon_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [9.385341409377641, 20.40391994697961]
+    - [-20.989711466069075, 47.656880619758425]
+    - [82.39609021658073, -7.02527514922619]
+    datatype: float64
+    shape: [3, 2]
+  car_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.0, 20.0]
+    - [-30.0, 5.0]
+    - [0.5, -0.25]
+    datatype: float64
+    shape: [3, 2]
+  car_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.0, 20.0]
+    - [-30.0, 45.0]
+    - [100.0, -30.0]
+    datatype: float64
+    shape: [3, 2]
+  cea_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.0, 14.14319329584254]
+    - [-30.0, 3.502180408650118]
+    - [0.5, -0.17500027209430627]
+    datatype: float64
+    shape: [3, 2]
+  cea_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.0, 27.994729601457614]
+    - [-30.0, 57.87747746724253]
+    - [100.0, -40.925556795058796]
+    datatype: float64
+    shape: [3, 2]
+  cod_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [9.886148264994866, -9.57328738231844]
+    - [-33.16837704015812, -20.67816512176408]
+    - [0.5992567450795762, -30.248707504966674]
+    datatype: float64
+    shape: [3, 2]
+  cod_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [12.663091502803434, 49.45341939800984]
+    - [-44.01167944955069, 69.27246112648861]
+    - [73.65400889800185, -33.90104410132486]
+    datatype: float64
+    shape: [3, 2]
+  coe_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [21.550327746121493, 63.790027339154285]
+    - [-42.84819114914264, 42.049747249279044]
+    - [0.7147930581483701, 44.75162070919478]
+    datatype: float64
+    shape: [3, 2]
+  coe_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [9.942951535723067, -24.103266108682313]
+    - [-20.433536611606097, 3.7670181524120294]
+    - [113.52966421263018, 15.163428719475872]
+    datatype: float64
+    shape: [3, 2]
+  coo_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [21.76514429562901, 63.57818967224905]
+    - [-42.77155508254092, 41.80233057657873]
+    - [0.7148414446894856, 44.74388566480381]
+    datatype: float64
+    shape: [3, 2]
+  coo_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.086993189385781, -24.762337188050612]
+    - [-20.411194361971074, 3.8425489733679647]
+    - [146.79464781515577, 5.807314547586706]
+    datatype: float64
+    shape: [3, 2]
+  cop_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [21.71021307640615, 63.292099469322196]
+    - [-42.791288099646394, 41.84428786994652]
+    - [0.7148292688532023, 44.74390552671115]
+    datatype: float64
+    shape: [3, 2]
+  cop_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.184941913185938, -25.68228436543696]
+    - [-20.416907256786885, 3.82335525132013]
+    - [252.01839250336178, -31.7775331863913]
+    datatype: float64
+    shape: [3, 2]
+  csc_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [9.306968525636744, 18.521446322308414]
+    - [-28.66385523229244, 4.1446311315734565]
+    - [0.462873931043546, -0.23142654630086135]
+    datatype: float64
+    shape: [3, 2]
+  csc_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.724897235631943, 21.587959080934525]
+    - [-26.78444266319275, 48.6010479927063]
+    - [100.5302882194519, -31.682698130607605]
+    datatype: float64
+    shape: [3, 2]
+  cyp_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [12.5, 21.637042408020648]
+    - [-37.5, 5.433154835618565]
+    - [0.625, -0.2717389266890324]
+    datatype: float64
+    shape: [3, 2]
+  cyp_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [8.0, 18.474259533493065]
+    - [-24.0, 42.21940665334059]
+    - [80.0, -27.848452655941006]
+    datatype: float64
+    shape: [3, 2]
+  hpx_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.0, 19.47122063449069]
+    - [-30.0, 4.780191847199159]
+    - [0.5, -0.23873310541990247]
+    datatype: float64
+    shape: [3, 2]
+  hpx_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.0, 20.521208599540124]
+    - [-30.0, 42.426406871192846]
+    - [100.0, -29.999999999999996]
+    datatype: float64
+    shape: [3, 2]
+  mer_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.0, 19.605793951272645]
+    - [-30.0, 4.9936658593533]
+    - [0.5, -0.24999920672924247]
+    datatype: float64
+    shape: [3, 2]
+  mer_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [10.0, 20.41898422989405]
+    - [-30.0, 50.498986710526204]
+    - [100.0, -31.472923730945396]
+    datatype: float64
+    shape: [3, 2]
+  mol_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [11.461841253020026, 18.122447266032093]
+    - [-33.385243449035244, 4.503358466007268]
+    - [0.5553630106080761, -0.22507930084812613]
+    datatype: float64
+    shape: [3, 2]
+  mol_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [8.663681677262907, 22.040936990592442]
+    - [-21.767144581826056, 47.97223624981865]
+    - [82.35832726686475, -32.73329349706095]
+    datatype: float64
+    shape: [3, 2]
+  par_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.51948051948052, 19.138110625328412]
+    - [-30.092879256965944, 4.775262529757708]
+    - [0.5000038580544603, -0.23873249139087213]
+    datatype: float64
+    shape: [3, 2]
+  par_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [9.460897411596477, 20.896724542541442]
+    - [-21.96152422706632, 46.58742811845373]
+    - [87.93852415718167, -31.25667198004746]
+    datatype: float64
+    shape: [3, 2]
+  pco_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.627764013841807, 19.687451418529772]
+    - [-30.096647232236066, 4.395978772213357]
+    - [0.5000047594433025, -0.2499904810076797]
+    datatype: float64
+    shape: [3, 2]
+  pco_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [9.391346450763915, 20.28038573036315]
+    - [-20.731870960944587, 48.88233666888357]
+    - [76.02163860038185, -65.44947226484969]
+    datatype: float64
+    shape: [3, 2]
+  qsc_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [8.967942156779525, 18.75608647185908]
+    - [-29.491243915750054, 4.206748708704]
+    - [0.46820897342074985, -0.214929240563701]
+    datatype: float64
+    shape: [3, 2]
+  qsc_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [11.094260693754489, 21.393483028635128]
+    - [-25.680691469632702, 48.558091254660134]
+    - [100.33719027869853, -31.08386372681889]
+    datatype: float64
+    shape: [3, 2]
+  sfl_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [10.64177772475912, 20.0]
+    - [-30.114595126300422, 5.0]
+    - [0.5000047596849415, -0.25]
+    datatype: float64
+    shape: [3, 2]
+  sfl_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [9.396926207859085, 20.0]
+    - [-21.213203435596427, 45.0]
+    - [86.60254037844388, -30.0]
+    datatype: float64
+    shape: [3, 2]
+  tsc_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [12.528807709151511, 23.454137315996075]
+    - [-33.69006752597979, 5.281982452343408]
+    - [0.6365935759634864, -0.31828696511843274]
+    datatype: float64
+    shape: [3, 2]
+  tsc_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [7.934714131880924, 16.631327781368583]
+    - [-22.5, 51.02885682970025]
+    - [97.93471413188092, -26.381557247154497]
+    datatype: float64
+    shape: [3, 2]
+  xph_pix2sky: !core/ndarray-1.1.0
+    data:
+    - [150.0, 67.80839343372722]
+    - [-102.85714285714286, 64.0500916191648]
+    - [59.99999999999988, 89.44866897751575]
+    datatype: float64
+    shape: [3, 2]
+  xph_sky2pix: !core/ndarray-1.1.0
+    data:
+    - [22.566351486521782, -72.06382616958011]
+    - [-19.884814442135507, -39.769628884271015]
+    - [112.25320151336442, 62.75572683030609]
+    datatype: float64
+    shape: [3, 2]
+transforms:
+  ait_pix2sky: !transform/hammer_aitoff-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  ait_sky2pix: !transform/hammer_aitoff-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  bon_pix2sky: !transform/bonne_equal_area-1.5.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+    theta1: 29.999999999999996
+  bon_sky2pix: !transform/bonne_equal_area-1.5.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+    theta1: 29.999999999999996
+  car_pix2sky: !transform/plate_carree-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  car_sky2pix: !transform/plate_carree-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  cea_pix2sky: !transform/cylindrical_equal_area-1.5.0
+    direction: pix2sky
+    inputs: [x, y]
+    lam: 0.7
+    outputs: [phi, theta]
+  cea_sky2pix: !transform/cylindrical_equal_area-1.5.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    lam: 0.7
+    outputs: [x, y]
+  cod_pix2sky: !transform/conic_equidistant-1.5.0
+    delta: 14.999999999999998
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+    sigma: -29.999999999999996
+  cod_sky2pix: !transform/conic_equidistant-1.5.0
+    delta: 14.999999999999998
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+    sigma: -29.999999999999996
+  coe_pix2sky: !transform/conic_equal_area-1.5.0
+    delta: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg, value: 10.0}
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+    sigma: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg, value: 45.0}
+  coe_sky2pix: !transform/conic_equal_area-1.5.0
+    delta: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg, value: 10.0}
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+    sigma: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg, value: 45.0}
+  coo_pix2sky: !transform/conic_orthomorphic-1.5.0
+    delta: 10.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+    sigma: 45.0
+  coo_sky2pix: !transform/conic_orthomorphic-1.5.0
+    delta: 10.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+    sigma: 45.0
+  cop_pix2sky: !transform/conic_perspective-1.5.0
+    delta: 10.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+    sigma: 45.0
+  cop_sky2pix: !transform/conic_perspective-1.5.0
+    delta: 10.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+    sigma: 45.0
+  csc_pix2sky: !transform/cobe_quad_spherical_cube-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  csc_sky2pix: !transform/cobe_quad_spherical_cube-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  cyp_pix2sky: !transform/cylindrical_perspective-1.5.0
+    direction: pix2sky
+    inputs: [x, y]
+    lam: 0.8
+    mu: 1.5
+    outputs: [phi, theta]
+  cyp_sky2pix: !transform/cylindrical_perspective-1.5.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    lam: 0.8
+    mu: 1.5
+    outputs: [x, y]
+  hpx_pix2sky: !transform/healpix-1.4.0
+    H: 6.0
+    X: 4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  hpx_sky2pix: !transform/healpix-1.4.0
+    H: 6.0
+    X: 4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  mer_pix2sky: !transform/mercator-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  mer_sky2pix: !transform/mercator-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  mol_pix2sky: !transform/molleweide-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  mol_sky2pix: !transform/molleweide-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  par_pix2sky: !transform/parabolic-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  par_sky2pix: !transform/parabolic-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  pco_pix2sky: !transform/polyconic-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  pco_sky2pix: !transform/polyconic-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  qsc_pix2sky: !transform/quad_spherical_cube-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  qsc_sky2pix: !transform/quad_spherical_cube-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  sfl_pix2sky: !transform/sanson_flamsteed-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  sfl_sky2pix: !transform/sanson_flamsteed-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  tsc_pix2sky: !transform/tangential_spherical_cube-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  tsc_sky2pix: !transform/tangential_spherical_cube-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+  xph_pix2sky: !transform/healpix_polar-1.4.0
+    direction: pix2sky
+    inputs: [x, y]
+    outputs: [phi, theta]
+  xph_sky2pix: !transform/healpix_polar-1.4.0
+    direction: sky2pix
+    inputs: [phi, theta]
+    outputs: [x, y]
+wcs:
+  bon: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/compose-1.4.0
+        forward:
+        - !transform/bonne_equal_area-1.5.0
+          direction: pix2sky
+          inputs: [x, y]
+          outputs: [phi, theta]
+          theta1: 29.999999999999996
+        - !transform/rotate3d-1.5.0
+          direction: native2celestial
+          inputs: [phi_N, theta_N]
+          outputs: [alpha_C, delta_C]
+          phi: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg,
+            value: 29.999999999999996}
+          psi: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg,
+            value: 0.0}
+          theta: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg,
+            value: 45.0}
+        inputs: [x, y]
+        outputs: [alpha_C, delta_C]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: CelestialFrame
+        reference_frame: &id003 !<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>
+          data: !<tag:astropy.org:astropy/coordinates/representation-1.2.0>
+            components:
+              lat: !<tag:astropy.org:astropy/coordinates/latitude-1.2.0> {datatype: float64,
+                unit: !unit/unit-1.0.0 deg, value: 45.0}
+              lon: !<tag:astropy.org:astropy/coordinates/longitude-1.2.0>
+                datatype: float64
+                unit: !unit/unit-1.0.0 deg
+                value: 30.0
+                wrap_angle: !<tag:astropy.org:astropy/coordinates/angle-1.2.0> {datatype: float64,
+                  unit: !unit/unit-1.0.0 deg, value: 360.0}
+            type: UnitSphericalRepresentation
+          frame_attributes: {}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  car: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/compose-1.4.0
+        forward:
+        - !transform/plate_carree-1.4.0
+          direction: pix2sky
+          inputs: [x, y]
+          outputs: [phi, theta]
+        - !transform/rotate3d-1.5.0
+          direction: native2celestial
+          inputs: [phi_N, theta_N]
+          outputs: [alpha_C, delta_C]
+          phi: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg,
+            value: 29.999999999999996}
+          psi: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg,
+            value: 0.0}
+          theta: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 deg,
+            value: 45.0}
+        inputs: [x, y]
+        outputs: [alpha_C, delta_C]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: CelestialFrame
+        reference_frame: *id003
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+wcs_inputs:
+  bon: !core/ndarray-1.1.0
+    data:
+    - [0.0, 0.0]
+    - [1.5, -2.0]
+    datatype: float64
+    shape: [2, 2]
+  car: !core/ndarray-1.1.0
+    data:
+    - [0.0, 0.0]
+    - [1.5, -2.0]
+    datatype: float64
+    shape: [2, 2]
+wcs_outputs:
+  bon: !core/ndarray-1.1.0
+    data:
+    - [210.0, 45.0]
+    - [212.05031952622534, 42.97243833009103]
+    datatype: float64
+    shape: [2, 2]
+  car: !core/ndarray-1.1.0
+    data:
+    - [210.0, 45.0]
+    - [212.04931214858766, 42.98103158872089]
+    datatype: float64
+    shape: [2, 2]
+...

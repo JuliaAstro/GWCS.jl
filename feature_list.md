@@ -176,7 +176,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P0** Parse ASDF fixed-input compound-transform tags.
 - [x] **P0** Parse ASDF compound-transform tags for arithmetic operations.
 - [x] **P0** Parse all implemented zenithal projection tags.
-- [ ] **P0** Parse orthogonal-polynomial, tabular, spline, mathematical-function, and remaining projection tags as their implementations become available.
+- [x] **P0** Parse and write the tags of every implemented projection. ZPN has no ASDF tag.
+- [ ] **P0** Parse orthogonal-polynomial, tabular, spline, and mathematical-function tags as their implementations become available.
 - [x] **P0** Support compound bounding-box metadata.
 - [x] **P0** Validate tag properties and dimensions against supported schema versions rather than relying only on constructor errors.
 - [x] **P0** Add explicit schema-version dispatch and migrations for known incompatible metadata versions.
