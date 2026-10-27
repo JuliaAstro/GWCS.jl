@@ -137,27 +137,29 @@ struct PlateCarreeProjection <: AbstractSphericalProjection end
 """The CEA/cylindrical equal-area projection with parameter `lambda`."""
 struct CylindricalEqualArea{T<:AbstractFloat} <: AbstractSphericalProjection
     lambda::T
+    function CylindricalEqualArea{T}(lambda) where {T}
+        value = T(lambda)
+        isfinite(value) && 0 < value <= 1 || throw(ArgumentError("cylindrical equal-area lambda must be in (0, 1]"))
+        return new{T}(value)
+    end
 end
 
-function CylindricalEqualArea(lambda::Real=1)
-    value = float(lambda)
-    isfinite(value) && 0 < value <= 1 || throw(ArgumentError("cylindrical equal-area lambda must be in (0, 1]"))
-    return CylindricalEqualArea{typeof(value)}(value)
-end
+CylindricalEqualArea(lambda::Real=1) = CylindricalEqualArea{typeof(float(lambda))}(lambda)
 
 """The CYP/cylindrical perspective projection."""
 struct CylindricalPerspective{T<:AbstractFloat} <: AbstractSphericalProjection
     mu::T
     lambda::T
+    function CylindricalPerspective{T}(mu, lambda) where {T}
+        mu_value, lambda_value = T(mu), T(lambda)
+        all(isfinite, (mu_value, lambda_value)) || throw(ArgumentError("cylindrical perspective parameters must be finite"))
+        iszero(lambda_value) && throw(ArgumentError("cylindrical perspective lambda must be nonzero"))
+        iszero(mu_value + lambda_value) && throw(ArgumentError("cylindrical perspective mu + lambda must be nonzero"))
+        return new{T}(mu_value, lambda_value)
+    end
 end
 
-function CylindricalPerspective(mu::Real=1, lambda::Real=1)
-    mu_value, lambda_value = promote(float(mu), float(lambda))
-    all(isfinite, (mu_value, lambda_value)) || throw(ArgumentError("cylindrical perspective parameters must be finite"))
-    iszero(lambda_value) && throw(ArgumentError("cylindrical perspective lambda must be nonzero"))
-    iszero(mu_value + lambda_value) && throw(ArgumentError("cylindrical perspective mu + lambda must be nonzero"))
-    return CylindricalPerspective{typeof(mu_value)}(mu_value, lambda_value)
-end
+CylindricalPerspective(mu::Real=1, lambda::Real=1) = CylindricalPerspective{promote_type(typeof(float(mu)), typeof(float(lambda)))}(mu, lambda)
 
 """The MER/Mercator projection."""
 struct MercatorProjection <: AbstractSphericalProjection end

@@ -85,6 +85,11 @@ end
     @test IntermediateToNative(cyp)(SVector(1.0, 2.0)) ≈ SVector(0.33333333333333331, 1.2000000012828205) atol=2e-15
     @test NativeToIntermediate(cyp)(SVector(30.0, 60.0)) ≈ SVector(90.0, 99.23920117592256) atol=2e-14
     @test_throws "lambda must be nonzero" CylindricalPerspective(1, 0)
+    # Float arguments of the field type are validated too.
+    @test_throws "lambda must be nonzero" CylindricalPerspective(1.0, 0.0)
+    @test_throws "mu + lambda must be nonzero" CylindricalPerspective(-1.0, 1.0)
+    @test_throws "lambda must be in (0, 1]" CylindricalEqualArea(2.0)
+    @test_throws "lambda must be in (0, 1]" CylindricalEqualArea{Float32}(0)
 
     airy = IntermediateToNative(AiryProjection(75.8))
     finite_difference = (airy(SVector(1.0, 2.0 + 1e-6)) - airy(SVector(1.0, 2.0 - 1e-6))) / 2e-6
