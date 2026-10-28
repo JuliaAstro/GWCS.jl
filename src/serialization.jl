@@ -19,6 +19,23 @@ function _decorate_metadata(node::TaggedMapping, properties)
     return TaggedMapping(node.tag, values)
 end
 
+# Writes back the properties a node was read with that GWCS.jl does not model. A property the writer produced wins, and a
+# node now written with another tag family, such as an Euler rotate3d written as a composition, gets none.
+function _restore_pass_through!(node, pass_through, path, registry)
+    for (relative, (family, properties)) in pass_through
+        target = node
+        for key in split(relative, '/'; keepempty=false)
+            target = target isa AbstractDict ? get(target, key, nothing) : target isa AbstractVector ? get(target, parse(Int, key), nothing) : nothing
+        end
+        target isa TaggedMapping && _pass_through_family(target.tag) == family || continue
+        node_path = isempty(relative) ? path : "$path/$relative"
+        for (key, value) in properties
+            haskey(target, key) || (target.value[key] = _to_metadata(value, "$node_path/$key", registry))
+        end
+    end
+    return node
+end
+
 function _metadata_shorthand_tag(tag::AbstractString)
     prefix = "tag:stsci.edu:asdf/"
     return startswith(tag, prefix) ? "!" * chopprefix(tag, prefix) : "!<" * tag * ">"
@@ -120,7 +137,7 @@ function _to_metadata(transform::AnnotatedTransform, path, registry)
         property = unit.property == "lambda" && haskey(node, "lam") ? "lam" : unit.property
         push!(properties, property => _quantity_metadata(node, unit, property, path))
     end
-    return _decorate_metadata(node, properties)
+    return _restore_pass_through!(_decorate_metadata(node, properties), transform.pass_through, path, registry)
 end
 
 function _to_metadata(transform::WithInverse, path, registry)
@@ -566,6 +583,11 @@ end
 
 function _to_metadata(frame::CoordinateFrame, path, registry)
     properties = _frame_properties(frame, path, registry)
+    # A two-axis spatial frame without a reference frame is what Python GWCS's Frame2D holds, and it reads frame2d as
+    # one; its reader rejects naxes there, and ignores axes_type.
+    if frame_dimension(frame) == 2 && all(==(SPATIAL), frame.axis_types) && frame.reference_frame === nothing
+        return _tagged_metadata("$_GWCS_TAG/frame2d", v"1.2.0", properties)
+    end
     properties["naxes"] = frame_dimension(frame)
     properties["axes_type"] = [_axis_type_metadata(value) for value in frame.axis_types]
     return _tagged_metadata("$_GWCS_TAG/frame", v"1.2.0", properties)
@@ -657,20 +679,22 @@ function _to_metadata(box::AbstractBoundingBox, path, registry)
     return _serialize_bounding_box(box, names, path, registry)
 end
 
-function _serialize_step(step::Step, path, registry; bounding_box=nothing)
+# The first step's transform carries the WCS's bounding box, which replaces any it was read with, even when it is
+# `nothing`.
+function _serialize_step(step::Step, path, registry; bounding_box=_UNSPECIFIED_PIPELINE_METADATA)
     # The step schema requires an astropy reference frame, which a temporal frame's time is not; in a composite it is valid.
     frame = step.frame isa TemporalFrame ? CompositeFrame((step.frame,); name=step.frame.name) : step.frame
     properties = Dict{String,Any}("frame" => _to_metadata(frame, "$path/frame", registry))
     if step.transform !== nothing
         transform = _metadata_mapping(_to_metadata(step.transform, "$path/transform", registry), "$path/transform")
-        if bounding_box !== nothing
+        if bounding_box !== _UNSPECIFIED_PIPELINE_METADATA
             names = _transform_axis_names(step.transform)
-            box = _serialize_bounding_box(bounding_box, names, "$path/transform/bounding_box", registry)
+            box = bounding_box === nothing ? nothing : _serialize_bounding_box(bounding_box, names, "$path/transform/bounding_box", registry)
             transform = _decorate_metadata(transform, ("bounding_box" => box,))
         end
         properties["transform"] = transform
     end
-    return _tagged_metadata("$_GWCS_TAG/step", v"1.3.0", properties)
+    return _restore_pass_through!(_tagged_metadata("$_GWCS_TAG/step", v"1.3.0", properties), step.pass_through, path, registry)
 end
 
 function _to_metadata(step::Step, path, registry)
@@ -680,11 +704,11 @@ end
 function _to_metadata(wcs::WCS, path, registry)
     steps = Any[]
     for (index, step) in enumerate(wcs.steps)
-        push!(steps, _serialize_step(step, "$path/steps/$index", registry; bounding_box=index == 1 ? wcs.bounding_box : nothing))
+        push!(steps, index == 1 ? _serialize_step(step, "$path/steps/$index", registry; wcs.bounding_box) : _serialize_step(step, "$path/steps/$index", registry))
     end
     properties = Dict{String,Any}("name" => wcs.name, "steps" => steps)
     wcs.pixel_shape === nothing || any(isnothing, wcs.pixel_shape) || (properties["pixel_shape"] = collect(wcs.pixel_shape))
-    return _tagged_metadata("$_GWCS_TAG/wcs", v"1.4.0", properties)
+    return _restore_pass_through!(_tagged_metadata("$_GWCS_TAG/wcs", v"1.4.0", properties), wcs.pass_through, path, registry)
 end
 
 function _to_metadata(value, path, registry)

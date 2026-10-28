@@ -188,7 +188,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P0** Support compound bounding-box metadata.
 - [x] **P0** Validate tag properties and dimensions against supported schema versions rather than relying only on constructor errors.
 - [x] **P0** Add explicit schema-version dispatch and migrations for known incompatible metadata versions.
-- [ ] **P0** Preserve unknown optional metadata fields so a read/write cycle does not silently discard them.
+- [x] **P0** Preserve unknown optional metadata fields so a read/write cycle does not silently discard them. Transforms (through their registration's `properties`), label mappers, frames, steps, and the WCS keep the properties they do not model, including Python GWCS's `fixed`, `bounds`, and `input_units_equivalencies`; two-axis spatial frames are written as `frame2d`.
+- [ ] **P2** Keep unmodeled properties inside untagged sub-mappings (a region selector's `selector`, a label mapper's label/model mapping), inside bounding-box nodes, and on a label mapper's `inputs_mapping` transform, which are still dropped.
 - [x] **P1** Add canonical WCS, frame, transform, inverse, bounding-box, and pixel-shape serialization.
 - [x] **P1** Add writing of canonical inline metadata through ASDF.jl.
 - [ ] **P1** Add lazy, external, compressed, and explicit ASDF array-block writing policies.

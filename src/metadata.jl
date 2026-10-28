@@ -511,6 +511,8 @@ function _metadata_label_type(labels, path)
     return type
 end
 
+const _LABEL_MAPPER_PROPERTIES = ("name", "inputs", "mapper", "inputs_mapping", "no_label", "atol")
+
 function _parse_label_mapper(node, path, registry; expected_label_type=nothing)
     node, context = _prepare_metadata(node, path, registry)
     metadata_tag(context) == "$_GWCS_TAG/label_mapper" || _metadata_error(path, "expected a GWCS label_mapper metadata node")
@@ -618,12 +620,15 @@ function _parse_region_selector(node, context)
     end
     entries = ntuple(index -> label_values[index] => parsed_transforms[index], length(label_values))
     undefined_value = haskey(node, "undefined_transform_value") ? _numeric_property(node, "undefined_transform_value", context) : NaN
-    try
-        return RegionSelector(mapper, entries; undefined_value)
+    selector = try
+        RegionSelector(mapper, entries; undefined_value)
     catch error
         error isa ArgumentError || error isa DimensionMismatch || rethrow()
         _metadata_error(path, sprint(showerror, error))
     end
+    # Label mappers are not transforms, so the selector keeps its label mapper's unmodeled properties.
+    pass_through = _add_pass_through!(_PassThrough(), "label_mapper", mapper_node, _LABEL_MAPPER_PROPERTIES)
+    return isempty(pass_through) ? selector : AnnotatedTransform(selector; pass_through)
 end
 
 function _parse_polynomial(node, context)
@@ -718,8 +723,35 @@ function _normalize_quantities(registration, node, context)
     return TaggedMapping(_tag(node), values), units
 end
 
-function _parse_transform_annotation(@nospecialize(transform), node, context, units=_ParameterUnit[])
-    has_annotation = haskey(node, "name") || haskey(node, "inputs") || haskey(node, "outputs") || !isempty(units)
+# The properties every transform has, which the annotation and `parse_transform` model.
+const _TRANSFORM_PROPERTIES = ("name", "inputs", "outputs", "inverse")
+
+# A frame2d is written for a two-axis spatial `frame`, so the two share their unmodeled properties.
+_pass_through_family(tag) = replace(first(_split_metadata_tag(tag, "")), r"/frame2d$" => "/frame")
+
+# Unmodeled values are kept as GWCS.jl's own metadata nodes, without ASDF.jl's lazy arrays, which hold the file open.
+function _pass_through_value(value::AbstractDict)
+    items = Dict{Any,Any}(_pass_through_value(key) => _pass_through_value(item) for (key, item) in value)
+    return _has_tag(value) ? TaggedMapping(_tag(value), items) : items
+end
+
+function _pass_through_value(value::AbstractVector)
+    items = Any[_pass_through_value(item) for item in value]
+    return _has_tag(value) ? TaggedSequence(_tag(value), items) : items
+end
+
+_pass_through_value(value::AbstractString) = _has_tag(value) ? TaggedScalar(_tag(value), String(value)) : String(value)
+_pass_through_value(value) = value
+
+# Records the properties of `node` outside `modeled` under `relative`, the node's path below the owner's.
+function _add_pass_through!(pass_through, relative, node, modeled)
+    properties = Dict{Any,Any}(_unwrap(key) => _pass_through_value(value) for (key, value) in node if !(_unwrap(key) in modeled))
+    isempty(properties) || (pass_through[relative] = (_pass_through_family(_tag(node)), properties))
+    return pass_through
+end
+
+function _parse_transform_annotation(@nospecialize(transform), node, context, units=_ParameterUnit[], pass_through=_NO_PASS_THROUGH)
+    has_annotation = haskey(node, "name") || haskey(node, "inputs") || haskey(node, "outputs") || !isempty(units) || !isempty(pass_through)
     has_annotation || return transform
     name = if haskey(node, "name")
         value = _metadata_string(node, "name", context)
@@ -730,7 +762,7 @@ function _parse_transform_annotation(@nospecialize(transform), node, context, un
     end
     inputs = haskey(node, "inputs") ? _metadata_axis_names(node, "inputs", input_dimension(transform), "input", context) : input_names(transform)
     outputs = haskey(node, "outputs") ? _metadata_axis_names(node, "outputs", output_dimension(transform), "output", context) : output_names(transform)
-    return annotate_transform(transform; name, inputs, outputs, parameter_units=units)
+    return annotate_transform(transform; name, inputs, outputs, parameter_units=units, pass_through)
 end
 
 function parse_transform(node; path="transform", registry=default_transform_registry())
@@ -746,7 +778,11 @@ function parse_transform(node; path="transform", registry=default_transform_regi
         input_dimension(transform) == output_dimension(backward) && output_dimension(transform) == input_dimension(backward) || _metadata_error(path, "explicit inverse dimensions do not match the forward transform")
         transform = WithInverse(transform, backward)
     end
-    return _parse_transform_annotation(transform, node, context, units)
+    pass_through = _pass_through(transform)
+    if registration.properties !== nothing
+        pass_through = _add_pass_through!(copy(pass_through), "", node, (_TRANSFORM_PROPERTIES..., registration.properties...))
+    end
+    return _parse_transform_annotation(transform, node, context, units, pass_through)
 end
 
 function parse_transform(node, context::TransformParseContext; path=metadata_path(context))
@@ -755,45 +791,45 @@ end
 
 function _register_builtin_transform_parsers!()
     asdf_transform = "tag:stsci.edu:asdf/transform"
-    register_transform!("$asdf_transform/compose", _parse_compose; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_compound_transform)
-    register_transform!("$asdf_transform/concatenate", _parse_concatenate; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_compound_transform)
+    register_transform!("$asdf_transform/compose", _parse_compose; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_compound_transform, properties=("forward",))
+    register_transform!("$asdf_transform/concatenate", _parse_concatenate; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_compound_transform, properties=("forward",))
     for (name, parser) in (("add", _parse_add), ("subtract", _parse_subtract), ("multiply", _parse_multiply), ("divide", _parse_divide), ("power", _parse_power))
-        register_transform!("$asdf_transform/$name", parser; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_binary_transform)
+        register_transform!("$asdf_transform/$name", parser; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_binary_transform, properties=("forward",))
     end
-    register_transform!("$asdf_transform/shift", _parse_shift; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "offset"))
-    register_transform!("$asdf_transform/scale", _parse_scale; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "factor"))
-    register_transform!("$asdf_transform/rotate2d", _parse_rotate2d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_numeric_transform(node, context, "angle"), angles=("angle",))
-    register_transform!("$asdf_transform/identity", _parse_identity; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_identity_schema)
-    register_transform!("$asdf_transform/affine", _parse_affine; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_affine_schema)
-    register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
-    register_transform!("$asdf_transform/zenithal_perspective", _parse_zenithal_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "gamma")), angles=("gamma",), dimensionless=("mu",))
-    register_transform!("$asdf_transform/slant_zenithal_perspective", _parse_slant_zenithal_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "phi0", "theta0")), angles=("phi0", "theta0"), dimensionless=("mu",))
-    register_transform!("$asdf_transform/stereographic", _parse_stereographic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
-    register_transform!("$asdf_transform/slant_orthographic", _parse_slant_orthographic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("xi", "eta")), dimensionless=("xi", "eta"))
-    register_transform!("$asdf_transform/zenithal_equidistant", _parse_zenithal_equidistant; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
-    register_transform!("$asdf_transform/zenithal_equal_area", _parse_zenithal_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
-    register_transform!("$asdf_transform/airy", _parse_airy; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("theta_b",)), angles=("theta_b",))
+    register_transform!("$asdf_transform/shift", _parse_shift; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "offset"), properties=("offset",))
+    register_transform!("$asdf_transform/scale", _parse_scale; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_numeric_transform(node, context, "factor"), properties=("factor",))
+    register_transform!("$asdf_transform/rotate2d", _parse_rotate2d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_numeric_transform(node, context, "angle"), angles=("angle",), properties=("angle",))
+    register_transform!("$asdf_transform/identity", _parse_identity; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_identity_schema, properties=("n_dims",))
+    register_transform!("$asdf_transform/affine", _parse_affine; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_affine_schema, properties=("matrix", "translation"))
+    register_transform!("$asdf_transform/gnomonic", _parse_gnomonic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema, properties=("direction",))
+    register_transform!("$asdf_transform/zenithal_perspective", _parse_zenithal_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "gamma")), angles=("gamma",), dimensionless=("mu",), properties=("direction", "mu", "gamma"))
+    register_transform!("$asdf_transform/slant_zenithal_perspective", _parse_slant_zenithal_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "phi0", "theta0")), angles=("phi0", "theta0"), dimensionless=("mu",), properties=("direction", "mu", "phi0", "theta0"))
+    register_transform!("$asdf_transform/stereographic", _parse_stereographic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema, properties=("direction",))
+    register_transform!("$asdf_transform/slant_orthographic", _parse_slant_orthographic; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("xi", "eta")), dimensionless=("xi", "eta"), properties=("direction", "xi", "eta"))
+    register_transform!("$asdf_transform/zenithal_equidistant", _parse_zenithal_equidistant; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema, properties=("direction",))
+    register_transform!("$asdf_transform/zenithal_equal_area", _parse_zenithal_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema, properties=("direction",))
+    register_transform!("$asdf_transform/airy", _parse_airy; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("theta_b",)), angles=("theta_b",), properties=("direction", "theta_b"))
     for (name, projection) in (("plate_carree", PlateCarreeProjection()), ("mercator", MercatorProjection()), ("sanson_flamsteed", SansonFlamsteedProjection()),
                                ("parabolic", ParabolicProjection()), ("molleweide", MollweideProjection()), ("hammer_aitoff", HammerAitoffProjection()),
                                ("polyconic", PolyconicProjection()), ("tangential_spherical_cube", TangentialSphericalCube()), ("cobe_quad_spherical_cube", COBESphericalCube()),
                                ("quad_spherical_cube", QuadrilateralizedSphericalCube()), ("healpix_polar", HEALPixPolarProjection()))
-        register_transform!("$asdf_transform/$name", (node, context) -> _parse_projection(node, context, projection); versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema)
+        register_transform!("$asdf_transform/$name", (node, context) -> _parse_projection(node, context, projection); versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=_validate_gnomonic_schema, properties=("direction",))
     end
-    register_transform!("$asdf_transform/cylindrical_equal_area", _parse_cylindrical_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("lam", "lambda")), dimensionless=("lam", "lambda"))
-    register_transform!("$asdf_transform/cylindrical_perspective", _parse_cylindrical_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "lam", "lambda")), dimensionless=("mu", "lam", "lambda"))
+    register_transform!("$asdf_transform/cylindrical_equal_area", _parse_cylindrical_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("lam", "lambda")), dimensionless=("lam", "lambda"), properties=("direction", "lam", "lambda"))
+    register_transform!("$asdf_transform/cylindrical_perspective", _parse_cylindrical_perspective; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("mu", "lam", "lambda")), dimensionless=("mu", "lam", "lambda"), properties=("direction", "mu", "lam", "lambda"))
     for (name, constructor) in (("conic_perspective", ConicPerspective), ("conic_equidistant", ConicEquidistant), ("conic_equal_area", ConicEqualArea), ("conic_orthomorphic", ConicOrthomorphic))
-        register_transform!("$asdf_transform/$name", _conic_parser(constructor); versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("sigma", "delta")), angles=("sigma", "delta"))
+        register_transform!("$asdf_transform/$name", _conic_parser(constructor); versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("sigma", "delta")), angles=("sigma", "delta"), properties=("direction", "sigma", "delta"))
     end
-    register_transform!("$asdf_transform/bonne_equal_area", _parse_bonne_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("theta1",)), angles=("theta1",))
-    register_transform!("$asdf_transform/healpix", _parse_healpix; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("H", "X")))
-    register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_rotate3d_schema, angles=("phi", "theta", "psi"))
-    register_transform!("$asdf_transform/constant", _parse_constant; versions=_SCHEMA_VERSIONS_1_0_TO_1_6, validate=_validate_constant_schema, normalize=_normalize_constant_schema)
-    register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; versions=(v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"), validate=_validate_fixed_inputs_schema)
-    register_transform!("$asdf_transform/remap_axes", _parse_remap; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_remap_schema)
-    register_transform!("$asdf_transform/polynomial", _parse_polynomial; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_polynomial_schema)
-    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_rotation_sequence_schema, angles=("angles",))
-    register_transform!("$_GWCS_TAG/spherical_cartesian", _parse_spherical_cartesian; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_spherical_cartesian_schema)
-    register_transform!("$_GWCS_TAG/regions_selector", _parse_region_selector; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_region_selector_schema)
+    register_transform!("$asdf_transform/bonne_equal_area", _parse_bonne_equal_area; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=(node, context) -> _validate_projection_schema(node, context, ("theta1",)), angles=("theta1",), properties=("direction", "theta1"))
+    register_transform!("$asdf_transform/healpix", _parse_healpix; versions=_SCHEMA_VERSIONS_1_0_TO_1_4, validate=(node, context) -> _validate_projection_schema(node, context, ("H", "X")), properties=("direction", "H", "X"))
+    register_transform!("$asdf_transform/rotate3d", _parse_rotate3d; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_rotate3d_schema, angles=("phi", "theta", "psi"), properties=("direction", "phi", "theta", "psi"))
+    register_transform!("$asdf_transform/constant", _parse_constant; versions=_SCHEMA_VERSIONS_1_0_TO_1_6, validate=_validate_constant_schema, normalize=_normalize_constant_schema, properties=("value", "dimensions"))
+    register_transform!("$asdf_transform/fix_inputs", _parse_fixed_inputs; versions=(v"1.1.0", v"1.2.0", v"1.3.0", v"1.4.0"), validate=_validate_fixed_inputs_schema, properties=("forward",))
+    register_transform!("$asdf_transform/remap_axes", _parse_remap; versions=_SCHEMA_VERSIONS_1_0_TO_1_5, validate=_validate_remap_schema, properties=("mapping", "n_inputs"))
+    register_transform!("$asdf_transform/polynomial", _parse_polynomial; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_polynomial_schema, properties=("coefficients", "domain", "window"))
+    register_transform!("$asdf_transform/rotate_sequence_3d", _parse_rotation; versions=_SCHEMA_VERSIONS_1_0_TO_1_2, validate=_validate_rotation_sequence_schema, angles=("angles",), properties=("rotation_type", "angles", "axes_order"))
+    register_transform!("$_GWCS_TAG/spherical_cartesian", _parse_spherical_cartesian; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_spherical_cartesian_schema, properties=("transform_type", "wrap_lon_at"))
+    register_transform!("$_GWCS_TAG/regions_selector", _parse_region_selector; versions=_SCHEMA_VERSIONS_1_0_TO_1_3, validate=_validate_region_selector_schema, properties=("label_mapper", "selector", "undefined_transform_value"))
     return nothing
 end
 
@@ -850,6 +886,7 @@ function _temporal_reference(node, path, registry)
 end
 
 function _parse_composite_frame(node, path, registry)
+    # Python GWCS rejects any other property here.
     length(node) == 2 || _metadata_error(path, "composite frame must contain only name and frames")
     frame_name = String(_unwrap(_required(node, "name", path)))
     values = _required(node, "frames", path)
@@ -881,13 +918,15 @@ function _parse_frame(node, path; validate_order=true, registry=default_transfor
             reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
             CoordinateFrame{N}(; name=frame_name, axes_names, axes_order, axis_types, axis_physical_types=physical_types, unit=units, reference_frame)
         elseif name == "frame2d"
+            # The frame schemas do not define axes_type. Python GWCS's frame reader applies it only with naxes, which its
+            # Frame2D does not accept, so a frame2d's axes are always spatial there; GWCS.jl ignores axes_type likewise
+            # and writes it back unchanged.
             axes_names = _metadata_frame_strings(node, "axes_names", ("x", "y"))
             axes_order = _frame_order(node, 2)
-            axis_types = haskey(node, "axes_type") ? _frame_axis_types(node, 2) : nothing
             physical_types = haskey(node, "axis_physical_types") ? _metadata_frame_strings(node, "axis_physical_types", ()) : nothing
             units = _metadata_frame_strings(node, "unit", ("", ""))
             reference_frame = _parse_reference_frame(get(node, "reference_frame", nothing), "$path/reference_frame", registry)
-            Frame2D(; name=frame_name, axes_names, axes_order, axis_types, axis_physical_types=physical_types, unit=units, reference_frame)
+            Frame2D(; name=frame_name, axes_names, axes_order, axis_physical_types=physical_types, unit=units, reference_frame)
         elseif name == "celestial_frame"
             N = haskey(node, "axes_names") ? length(_metadata_sequence(node["axes_names"])) :
                 haskey(node, "axes_order") ? length(_metadata_sequence(node["axes_order"])) :
@@ -927,6 +966,24 @@ function _parse_frame(node, path; validate_order=true, registry=default_transfor
     end
 end
 
+# The properties each frame tag's reader and writer model.
+const _FRAME_PROPERTIES = Dict("frame" => ("name", "naxes", "axes_type", "axes_names", "axes_order", "axis_physical_types", "unit", "reference_frame"),
+    "frame2d" => ("name", "axes_names", "axes_order", "axis_physical_types", "unit", "reference_frame"),
+    "celestial_frame" => ("name", "axes_names", "axes_order", "axis_physical_types", "unit", "reference_frame"),
+    "spectral_frame" => ("name", "axes_names", "axes_order", "axis_physical_types", "unit", "reference_frame", "reference_position"),
+    "temporal_frame" => ("name", "axes_names", "axes_order", "axis_physical_types", "unit", "reference_frame"),
+    "stokes_frame" => ("name", "axes_names", "axes_order", "axis_physical_types"), "composite_frame" => ("name", "frames"))
+
+function _frame_pass_through!(pass_through, node, relative)
+    node isa AbstractDict || return pass_through
+    name = split(first(_split_metadata_tag(_tag(node), relative)), '/')[end]
+    _add_pass_through!(pass_through, relative, node, _FRAME_PROPERTIES[name])
+    if name == "composite_frame"
+        foreach(((index, frame),) -> _frame_pass_through!(pass_through, frame, "$relative/frames/$index"), enumerate(node["frames"]))
+    end
+    return pass_through
+end
+
 # A frame written as a bare string is an EmptyFrame, sized by the step's transform or, for the last step, by the
 # previous step's outputs (`previous`).
 function _parse_step(node, path, registry, previous=nothing)
@@ -942,7 +999,8 @@ function _parse_step(node, path, registry, previous=nothing)
     else
         frame = _parse_frame(frame_node, "$path/frame"; registry)
     end
-    return transform === nothing ? Step(frame) : Step(frame, transform)
+    pass_through = _frame_pass_through!(_add_pass_through!(_PassThrough(), "", node, ("frame", "transform")), frame_node, "frame")
+    return Step(frame, transform, isempty(pass_through) ? _NO_PASS_THROUGH : pass_through)
 end
 
 function _bounding_box_order(node, path)
@@ -1081,7 +1139,8 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     name = String(_unwrap(get(node, "name", "")))
     pixel_shape = get(node, "pixel_shape", nothing)
     pixel_shape === nothing || (pixel_shape = Tuple(Int(_unwrap(value)) for value in pixel_shape))
-    return WCS(steps...; name, pixel_shape, bounding_box=parsed_box)
+    pass_through = _add_pass_through!(_PassThrough(), "", node, ("name", "steps", "pixel_shape"))
+    return _with_pass_through(WCS(steps...; name, pixel_shape, bounding_box=parsed_box), pass_through)
 end
 
 parse_wcs(metadata::AbstractString; registry=default_transform_registry()) = parse_wcs(_load_tagged_yaml(metadata); registry)

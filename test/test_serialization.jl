@@ -275,6 +275,65 @@ end
     """)
 end
 
+@testset "Unmodeled metadata" begin
+    # validation/generate_metadata_fidelity_fixture.py: Python GWCS's constraints and unknown properties at every level.
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "metadata_fidelity.asdf"); extensions=true)
+    end
+    wcs = parse_wcs(fixture["wcs"]["constrained"])
+    @test input_frame(wcs).axis_types == (SPATIAL, SPATIAL)
+    @test pixel_to_world(wcs, 20.0, 40.0) == SVector(42.0, 126.0)
+    node = to_metadata(wcs)
+    steps = node["steps"]
+    @test node["note"] == "kept by GWCS.jl"
+    @test steps[1]["note"] == Dict("step" => 1)
+    @test steps[1]["frame"].tag == "tag:stsci.edu:gwcs/frame2d-1.2.0"
+    @test steps[1]["frame"]["axes_type"] == ["SPECTRAL", "SPATIAL"] && steps[1]["frame"]["note"] == [1, 2]
+    # A two-axis spatial frame is written as a frame2d, which Python GWCS reads without naxes or axes_type.
+    @test steps[2]["frame"].tag == "tag:stsci.edu:gwcs/frame2d-1.2.0" && steps[2]["frame"]["note"] == "focal"
+    @test !haskey(steps[2]["frame"], "naxes") && !haskey(steps[2]["frame"], "axes_type")
+    @test steps[3]["frame"]["frames"][2]["note"] == "slit"
+    @test steps[1]["transform"]["note"] == "concatenate"
+    shift = steps[1]["transform"]["forward"][1]
+    @test shift["fixed"] == Dict("offset" => true) && shift["bounds"] == Dict("offset" => [0.0, 10.0])
+    # The block array is read while parsing, so it outlives the file, and is written inline in the file's axis order.
+    @test shift["note"] == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
+    scale = steps[2]["transform"]["forward"][1]
+    @test scale["bounds"] == Dict("factor" => [1.0, nothing])
+    @test GWCS._tag(scale["input_units_equivalencies"]["x"]) == "tag:astropy.org:astropy/units/equivalency-1.2.0"
+    @test parse_wcs(node).steps[1].pass_through == wcs.steps[1].pass_through
+
+    # Edits keep the metadata of what they keep, and replaced parts take theirs with them.
+    edited = to_metadata(set_transform(wcs, "detector", "focal", Shift(1.0) & Shift(2.0)))
+    @test !haskey(edited["steps"][1]["transform"], "note") && edited["steps"][1]["note"] == Dict("step" => 1)
+    @test edited["steps"][1]["frame"]["note"] == [1, 2] && edited["note"] == "kept by GWCS.jl"
+    @test to_metadata(rename_frame(wcs, "focal", "pupil"))["steps"][2]["frame"]["note"] == "focal"
+    @test to_metadata(with_pixel_shape(wcs, (100, 50)))["note"] == "kept by GWCS.jl"
+    @test haskey(steps[1]["transform"], "bounding_box")
+    @test !haskey(to_metadata(with_bounding_box(wcs, nothing))["steps"][1]["transform"], "bounding_box")
+    @test length(to_metadata(remove_frame(wcs, "focal"))["steps"]) == 2
+
+    # The label mapper's properties are kept by the selector, as label mappers are not transforms.
+    selectors = read(joinpath(@__DIR__, "fixtures", "asdf_selectors.yaml"), String)
+    noted = GWCS._load_tagged_yaml(replace(selectors, "    no_label: 0\n" => "    no_label: 0\n    outputs: [label]\n"; count=1))["array"]
+    @test to_metadata(parse_transform(noted))["label_mapper"]["outputs"] == ["label"]
+    # A transform written with another tag family keeps none: an Euler rotate3d is written as a composition.
+    rotate3d(direction) = GWCS._load_tagged_yaml("!<tag:stsci.edu:asdf/transform/rotate3d-1.3.0> {phi: 1.0, theta: 2.0, psi: 3.0, direction: $direction, note: kept}")
+    euler_node = to_metadata(parse_transform(rotate3d("zxz")))
+    @test euler_node.tag == "tag:stsci.edu:asdf/transform/compose-1.4.0" && !haskey(euler_node, "note")
+    @test to_metadata(parse_transform(rotate3d("native2celestial")))["note"] == "kept"
+
+    # A registration keeps only the properties outside those it declares, and keeps none when it declares none.
+    tag = "tag:example.org:gwcs/serialization_transform"
+    noted_transform = GWCS.TaggedMapping("$tag-1.0.0", Dict{Any,Any}("offset" => 1.0, "note" => "kept"))
+    for (properties, kept) in ((nothing, false), (("offset",), true))
+        registry = TransformRegistry()
+        register_transform!(registry, tag, serialization_transform_parser; versions=(v"1.0.0",), properties)
+        register_transform_serializer!(registry, SerializationTransform, tag, (transform, context) -> Dict("offset" => transform.offset); version=v"1.0.0")
+        @test haskey(to_metadata(parse_transform(noted_transform; registry); registry), "note") == kept
+    end
+end
+
 @testset "Rotation2D" begin
     # References from astropy's Rotation2D.
     rotation = Rotation2D(30.0)

@@ -15,6 +15,10 @@ function GWCS._materialize_array(array::ASDF.NDArray)
     return value isa AbstractMatrix ? permutedims(value) : value
 end
 
+# An unmodeled array is kept as nested lists in the file's row-major axis order, as GWCS.jl writes its arrays inline.
+GWCS._pass_through_value(array::Union{ASDF.NDArray,ASDF.ChunkedNDArray}) = _nested_lists(array[])
+_nested_lists(value::AbstractArray) = ndims(value) == 0 ? value[] : ndims(value) == 1 ? collect(value) : [_nested_lists(slice) for slice in eachslice(value; dims=ndims(value))]
+
 _asdf_metadata(value::GWCS.TaggedMapping) = ASDF.TaggedMapping(value.tag, Dict{Any,Any}(_asdf_metadata(key) => _asdf_metadata(item) for (key, item) in value))
 _asdf_metadata(value::GWCS.TaggedSequence) = ASDF.TaggedSequence(value.tag, map(_asdf_metadata, value.value))
 _asdf_metadata(value::GWCS.TaggedScalar) = ASDF.TaggedScalar(value.tag, String(value.value))
