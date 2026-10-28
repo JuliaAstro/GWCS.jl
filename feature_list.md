@@ -230,6 +230,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P2** Expand differential coverage at projection domains, longitude wrapping, cube/facet boundaries, strong projection parameters (including ZPN's first monotonic radial interval), and strong SIP/TPD inverse cases.
 - [x] **P3** Expand real-container tests for paired/transposed lookup arrays, alternate-key and `EXTVER` isolation, duplicate matching extensions, and coupled multidimensional `-TAB` tables.
 
+- [x] **P1** Serialize FITS SIP, TPV, and Paper IV TPD distortions as the standard polynomial transforms they equal, so FITS-derived WCSs with polynomial distortions can be written to ASDF in a form Python GWCS reads.
+- [ ] **P2** Write FITS lookup-table (D2IM, CPDIS), `-TAB`, nonlinear spectral, and radial TPV/TPD transforms to ASDF once tabular and mathematical-function tags are supported.
 ## Other declarative and text formats
 
 - [ ] **P1** Define a stable, human-editable GWCS.jl schema that can be represented in YAML, JSON, or TOML without Python class names.

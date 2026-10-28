@@ -129,6 +129,88 @@ function _to_metadata(transform::WithInverse, path, registry)
     return _decorate_metadata(node, ("inverse" => inverse,))
 end
 
+# FITS distortions have no ASDF tags (asdf-astropy leaves SIP out as FITS-specific), so they are written as the standard
+# polynomial transforms they equal, which Python GWCS evaluates. A reverse polynomial, such as SIP's AP and BP, only
+# starts the numerical inverse and is not an inverse, so it is not written.
+_to_metadata(transform::Union{SIPTransform,TPVTransform,_FITSTPDTransform,_FITSPriorDistortion}, path, registry) = _to_metadata(_polynomial_form(transform, path), path, registry)
+_to_metadata(transform::_ApproximateInverseTransform, path, registry) = _to_metadata(transform.forward, path, registry)
+_to_metadata(::FITSLookupDistortion, path, registry) = _metadata_error(path, "FITS lookup-table distortions (D2IM, CPDIS) have no ASDF form")
+
+# Coefficients with one more in the linear term of `axis`, which adds that input to the polynomial.
+function _with_linear_term(coefficients, axis, weight=1.0)
+    padded = zeros(max(size(coefficients, 1), 2), max(size(coefficients, 2), 2))
+    padded[axes(coefficients)...] .= coefficients
+    padded[axis == 1 ? 2 : 1, axis == 1 ? 1 : 2] += weight
+    return padded
+end
+
+# Both outputs of a pair of polynomials in the two inputs.
+_polynomial_pair(first, second) = ComposedTransform((RemapAxes{2}((1, 2, 1, 2)), parallel(Polynomial2D(first), Polynomial2D(second))))
+
+function _polynomial_form(transform::SIPTransform, path)
+    (transform.a, transform.b) isa NTuple{2,Polynomial2D{<:Any,<:Any,Nothing,Nothing}} || _metadata_error(path, "SIP polynomials with a domain or window have no polynomial form")
+    return _polynomial_pair(_with_linear_term(transform.a.coefficients, 1), _with_linear_term(transform.b.coefficients, 2))
+end
+
+function _polynomial_form(transform::TPVTransform, path)
+    any(!iszero, (transform.x[2]..., transform.y[2]...)) && _metadata_error(path, "TPV radial terms have no polynomial form")
+    # The y polynomial takes (y, x).
+    return _polynomial_pair(transform.x[1], permutedims(transform.y[1]))
+end
+
+function _polynomial_form(transform::_FITSPriorDistortion, path)
+    any(table -> table !== nothing, (transform.detector_to_image..., transform.cpdis...)) && _metadata_error(path, "FITS lookup-table distortions (D2IM, CPDIS) have no ASDF form")
+    # Without lookup tables, the axes a TPD model leaves out keep the SIP output, so this is SIP followed by TPD.
+    return ComposedTransform((transform.sip, transform.tpd))
+end
+
+# Each output axis takes the inputs its model reads, or its own input where it has no model.
+function _polynomial_form(transform::_FITSTPDTransform{N}, path) where {N}
+    selected = Int[]
+    outputs = AbstractTransform[]
+    for (axis, model) in enumerate(transform.models)
+        append!(selected, model === nothing ? (axis,) : model.axes)
+        push!(outputs, model === nothing ? IdentityTransform{1}() : _tpd_axis_form(model, axis, "$path/$axis"))
+    end
+    return ComposedTransform((RemapAxes{N}(Tuple(selected)), parallel(outputs...)))
+end
+
+# A TPD axis evaluates its polynomial at (u, v), an affine map of the inputs it reads (an offset, a scale, and an
+# auxiliary affine), and with DOCORR adds its own input, which inverting that map writes as linear terms in (u, v).
+function _tpd_axis_form(model::_FITSTPDAxis{M}, axis, path) where {M}
+    coefficients, radial = model.polynomial
+    any(!iszero, radial) && _metadata_error(path, "FITS TPD radial terms have no polynomial form")
+    position = findfirst(==(axis), model.axes)
+    model.docorr && position === nothing && _metadata_error(path, "a FITS TPD correction to an axis its polynomial does not read has no polynomial form")
+    if M == 1
+        model.auxiliary === nothing || _metadata_error(path, "a one-variable FITS TPD with an auxiliary affine has no polynomial form")
+        offset, scale = Float64(model.offset[1]), Float64(model.scale[1])
+        values = Vector{Float64}(coefficients[:, 1])
+        if model.docorr
+            values[1] += offset
+            length(values) < 2 && push!(values, 0.0)
+            values[2] += 1 / scale
+        end
+        return ComposedTransform((Shift(-offset), Scale(scale), Polynomial1D(values)))
+    end
+    matrix = SMatrix{2,2,Float64}(Diagonal(SVector{2,Float64}(model.scale)))
+    translation = -(matrix * SVector{2,Float64}(model.offset))
+    if model.auxiliary !== nothing
+        auxiliary = SMatrix{2,3,Float64}(model.auxiliary)
+        linear = auxiliary[:, SVector(2, 3)]
+        matrix, translation = linear * matrix, auxiliary[:, 1] + linear * translation
+    end
+    polynomial = Matrix{Float64}(coefficients)
+    if model.docorr
+        iszero(det(matrix)) && _metadata_error(path, "a FITS TPD correction with a singular variable map has no polynomial form")
+        # The input is an affine function of (u, v): row `position` of inv(matrix) * ((u, v) - translation).
+        inverse = inv(matrix)
+        polynomial = _with_linear_term(_with_linear_term(polynomial, 1, inverse[position, 1]), 2, inverse[position, 2])
+        polynomial[1, 1] -= (inverse * translation)[position]
+    end
+    return ComposedTransform((AffineTransform(matrix, translation), Polynomial2D(polynomial)))
+end
+
 function _to_metadata(transform::AffineTransform{1,1}, path, registry)
     factor = transform.matrix[1, 1]
     offset = transform.offset[1]
