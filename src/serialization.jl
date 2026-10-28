@@ -460,10 +460,13 @@ function _axis_type_metadata(value)
     return string(value)
 end
 
-_unit_metadata(value) = isempty(value) ? "" : TaggedScalar("$_UNIT_TAG-1.0.0", String(value))
+# The frame schemas require a unit tag for every axis; an axis without a unit is dimensionless, as Python GWCS writes it.
+_unit_metadata(value) = TaggedScalar("$_UNIT_TAG-1.0.0", String(value))
 
 function _reference_metadata(value, path, registry)
     value === nothing && return nothing
+    # Metadata kept from a FITS header that the ASDF frame schemas cannot hold.
+    value isa NamedTuple && _metadata_error(path, "FITS reference metadata $value has no ASDF representation")
     value === :ICRS && return _tagged_metadata(_ICRS_TAG, v"1.1.0", Dict("frame_attributes" => Dict()))
     return _to_metadata(value, path, registry)
 end
@@ -499,15 +502,20 @@ function _to_metadata(frame::SpectralFrame, path, registry)
 end
 
 function _temporal_reference_metadata(frame::TemporalFrame, path, registry)
+    frame.reference_frame isa NamedTuple && return _reference_metadata(frame.reference_frame, path, registry)
     frame.reference_frame === :ICRS && return _reference_metadata(:ICRS, path, registry)
     frame.reference_frame isa Union{TaggedMapping,TaggedSequence,TaggedScalar} && return _to_metadata(frame.reference_frame, path, registry)
     frame.reference_epoch === nothing && return _reference_metadata(frame.reference_frame, path, registry)
     properties = Dict{String,Any}("value" => _to_metadata(frame.reference_epoch, "$path/value", registry))
     isempty(frame.time_scale) || (properties["scale"] = frame.time_scale)
     isempty(frame.time_format) || (properties["format"] = frame.time_format)
-    frame.location === nothing || (properties["location"] = _to_metadata(frame.location, "$path/location", registry))
+    frame.location === nothing || (properties["location"] = _location_metadata(frame.location, "$path/location", registry))
     return _tagged_metadata(_TIME_TAG, v"1.4.0", properties)
 end
+
+# A FITS OBSGEO location is geocentric (x, y, z) in meters.
+_location_metadata(location::NTuple{3,Real}, path, registry) = Dict(name => TaggedMapping("$_QUANTITY_TAG-1.3.0", Dict{Any,Any}("value" => value, "unit" => TaggedScalar("$_UNIT_TAG-1.0.0", "m"))) for (name, value) in zip(("x", "y", "z"), location))
+_location_metadata(location, path, registry) = _to_metadata(location, path, registry)
 
 function _to_metadata(frame::TemporalFrame, path, registry)
     properties = _frame_properties(frame, path, registry)
@@ -568,7 +576,9 @@ function _to_metadata(box::AbstractBoundingBox, path, registry)
 end
 
 function _serialize_step(step::Step, path, registry; bounding_box=nothing)
-    properties = Dict{String,Any}("frame" => _to_metadata(step.frame, "$path/frame", registry))
+    # The step schema requires an astropy reference frame, which a temporal frame's time is not; in a composite it is valid.
+    frame = step.frame isa TemporalFrame ? CompositeFrame((step.frame,); name=step.frame.name) : step.frame
+    properties = Dict{String,Any}("frame" => _to_metadata(frame, "$path/frame", registry))
     if step.transform !== nothing
         transform = _metadata_mapping(_to_metadata(step.transform, "$path/transform", registry), "$path/transform")
         if bounding_box !== nothing
