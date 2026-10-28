@@ -1131,3 +1131,41 @@ end
     # The frame schemas require a unit tag for an axis without a unit.
     @test to_metadata(CoordinateFrame{1}(name="plain"))["unit"][1] == GWCS.TaggedScalar("tag:stsci.edu:asdf/unit/unit-1.0.0", "")
 end
+
+@testset "FITS distortions written to ASDF" begin
+    tan = Dict{String,Any}("NAXIS" => 2, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CRPIX1" => 512.0, "CRPIX2" => 512.0, "CRVAL1" => 83.8, "CRVAL2" => -5.4,
+        "CD1_1" => -1e-4, "CD1_2" => 2e-6, "CD2_1" => 1e-6, "CD2_2" => 1e-4)
+    sip = merge(tan, Dict("CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "A_ORDER" => 3, "A_2_0" => 2e-6, "A_1_1" => -1e-6, "A_0_3" => 3e-9,
+        "B_ORDER" => 3, "B_0_2" => -2e-6, "B_2_1" => 1e-9, "AP_ORDER" => 2, "AP_2_0" => -2e-6, "BP_ORDER" => 2, "BP_0_2" => 2e-6))
+    tpv = merge(tan, Dict("CTYPE1" => "RA---TPV", "CTYPE2" => "DEC--TPV", "PV1_1" => 1.0, "PV1_4" => 0.01, "PV1_5" => -0.003, "PV2_1" => 1.0, "PV2_4" => -0.02, "PV2_6" => 0.004))
+    linear = Dict{String,Any}("NAXIS" => 2, "CTYPE1" => "LINEAR", "CTYPE2" => "LINEAR", "CRPIX1" => 10.0, "CRPIX2" => 20.0, "CRVAL1" => 5.0, "CRVAL2" => -7.0,
+        "CDELT1" => -0.02, "CDELT2" => 0.035, "PC1_1" => 0.8, "PC1_2" => 0.3, "PC2_1" => -0.2, "PC2_2" => 1.1)
+    tpd(prefix, extra...) = merge(linear, Dict("$(prefix == "DP" ? "CPDIS" : "CQDIS")1" => "TPD", "$(prefix == "DP" ? "CPDIS" : "CQDIS")2" => "TPD",
+        "$(prefix)1.NAXES" => 2, "$(prefix)1.AXIS.1" => 1, "$(prefix)1.AXIS.2" => 2, "$(prefix)1.OFFSET.1" => 1.0, "$(prefix)1.OFFSET.2" => -2.0,
+        "$(prefix)1.SCALE.1" => 0.5, "$(prefix)1.SCALE.2" => 2.0, "$(prefix)1.TPD.FWD.0" => 0.01, "$(prefix)1.TPD.FWD.1" => 1.02, "$(prefix)1.TPD.FWD.2" => -0.03,
+        "$(prefix)1.TPD.FWD.4" => 0.0007, "$(prefix)2.NAXES" => 2, "$(prefix)2.AXIS.1" => 2, "$(prefix)2.AXIS.2" => 1, "$(prefix)2.TPD.FWD.4" => -0.002), Dict(extra))
+    # The prior TPD adds its correction (DOCORR defaults to 1); the sequent one replaces its axis and maps its
+    # variables through an auxiliary affine.
+    sequent = tpd("DQ", "DQ1.DOCORR" => 0, "DQ1.AUX.1.COEFF.0" => 0.1, "DQ1.AUX.1.COEFF.1" => 1.1, "DQ1.AUX.1.COEFF.2" => -0.2,
+        "DQ1.AUX.2.COEFF.0" => -0.3, "DQ1.AUX.2.COEFF.1" => 0.4, "DQ1.AUX.2.COEFF.2" => 0.9)
+    paper4_sip = Dict{String,Any}("NAXIS" => 2, "CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CRPIX1" => 0.0, "CRPIX2" => 0.0, "CRVAL1" => 0.0, "CRVAL2" => 0.0,
+        "CDELT1" => 1.0, "CDELT2" => 1.0, "CPDIS1" => "SIP", "DP1.NAXES" => 2, "DP1.SIP.FWD.2_0" => 0.001, "DP1.SIP.REV.2_0" => -0.001,
+        "CPDIS2" => "SIP", "DP2.NAXES" => 2, "DP2.SIP.FWD.0_2" => 0.002, "DP2.SIP.REV.0_2" => -0.002)
+    tags(node) = node isa AbstractDict ? union(GWCS._has_tag(node) ? Set([GWCS._tag(node)]) : Set{String}(), Set{String}(), map(tags, collect(values(node)))...) :
+        node isa AbstractVector ? union(Set{String}(), Set{String}(), map(tags, node)...) : Set{String}()
+    for header in (sip, tpv, tpd("DP"), sequent, paper4_sip)
+        wcs = parse_fits_wcs(header)
+        metadata = to_metadata(wcs)
+        # Only standard tags, which Python GWCS reads (validation/compare_fits_asdf.jl).
+        written = tags(metadata)
+        @test "tag:stsci.edu:asdf/transform/polynomial-1.3.0" in written && !any(tag -> occursin("sip", lowercase(tag)), written)
+        reparsed = parse_wcs(metadata)
+        for pixel in (SVector(0.0, 0.0), SVector(13.5, -4.25), SVector(511.0, 511.0), SVector(1023.0, 5.0))
+            @test pixel_to_world(reparsed, pixel) ≈ pixel_to_world(wcs, pixel) rtol=1e-14 atol=1e-13
+        end
+        @test world_to_pixel(reparsed, pixel_to_world(wcs, 13.5, -4.25); tolerance=1e-10) ≈ SVector(13.5, -4.25) atol=1e-8
+    end
+    @test_throws r"FITS TPD radial terms have no polynomial form at metadata/steps/1/transform" to_metadata(parse_fits_wcs(merge(tpv, Dict("PV1_3" => 0.001))))
+    @test_throws "TPV radial terms have no polynomial form" to_metadata(TPVTransform([0.0, 1.0, 0.0, 0.01], [0.0, 1.0]))
+    @test GWCS._polynomial_form(SIPTransform(Polynomial2D([0.0 0.0 1e-3; 0.0 0.0 0.0; 0.0 0.0 0.0]), Polynomial2D(zeros(3, 3))), "sip")(SVector(2.0, 3.0)) == SVector(2.009, 3.0)
+end
