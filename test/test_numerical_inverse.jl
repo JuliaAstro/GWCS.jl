@@ -161,3 +161,13 @@ end
     @test !first(GWCS._newton(wcs.inverse_split.prefix, intermediate, (false, false), guess, 1e-10, 30, 12))
     @test world_to_pixel(wcs, target; tolerance=1e-10) ≈ SVector(512.0, 512.0) atol=1e-8
 end
+
+@testset "Numerical inverse with an analytical inverse" begin
+    # An analytical inverse that only approximates the forward transform starts Newton, which refines against the
+    # forward transform, while world_to_pixel returns the analytical inverse's pixel.
+    approximate = WithInverse(Scale(2.0) & Scale(3.0), Scale(0.5) & Scale(0.3333))
+    wcs = WCS(Step(Frame2D(name="pixels"), approximate), Step(CoordinateFrame{2}(name="world")))
+    @test world_to_pixel(wcs, 2.0, 3.0) == SVector(1.0, 0.9999)
+    @test numerical_inverse(wcs, 2.0, 3.0; tolerance=1e-12) ≈ SVector(1.0, 1.0) atol=1e-12
+    @test numerical_inverse(wcs, 2.0, 3.0; tolerance=1e-12, origin=1) ≈ SVector(2.0, 2.0) atol=1e-12
+end

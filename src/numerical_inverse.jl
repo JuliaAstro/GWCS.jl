@@ -202,6 +202,13 @@ function _numerical_result(wcs::WCS{N,N}, world::StaticVector{N}; tolerance=1e-5
     target = SVector{N,T}(world)
     undefined = (true, SVector{N,T}(ntuple(_ -> T(NaN), N)), zero(SVector{N,T}), 0)
     all(isfinite, target) || return undefined
+    if wcs.inverse_split === nothing
+        # An analytical inverse may only approximate the forward transform, as a fitted polynomial does, so it only
+        # starts Newton on the forward transform itself.
+        estimate = initial_guess === nothing ? wcs.backward(target) : SVector{N,T}(initial_guess) .- offset
+        all(isfinite, estimate) || wcs.bounding_box === nothing || (estimate = _box_initial_guess(wcs, wcs.bounding_box, T))
+        return _newton(wcs.forward, target, _longitude_axes(output_frame(wcs)), estimate, tolerance, maxiter, max_backtracks)
+    end
     # NaN from the analytically invertible tail proves that no pixel maps to the target.
     intermediate = wcs.inverse_split.tail_inverse(target)
     any(isnan, intermediate) && return undefined
@@ -292,6 +299,15 @@ function _numerical_inverse(wcs::WCS, world::StaticVector; with_bounding_box=tru
     return _finish_inverse(wcs, world, _numerical_solve(wcs, world; offset, kwargs...); with_bounding_box, fill_value, strict, offset)
 end
 
+"""
+    numerical_inverse(wcs, world...; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12, quiet=false,
+                      with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> SVector
+
+Solve `pixel_to_world(wcs, pixel) == world` for the pixel with the damped Newton solver that `world_to_pixel` uses for a
+square WCS without an analytical inverse, to `tolerance` pixels. With an analytical inverse, which may only approximate
+the forward transform, the solver starts from that inverse's pixel and refines it against the forward transform.
+Nonconvergence throws `NoConvergence` unless `quiet=true`; the other keywords act as in `world_to_pixel`.
+"""
 function numerical_inverse(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
     length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))
     T = _coordinate_float_type(eltype(coords))
