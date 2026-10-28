@@ -40,6 +40,8 @@ world = pixel_to_world(wcs, pixel; strict=true)    # throw instead, e.g. while d
 
 With `strict=true`, any coordinate without a result throws `DomainError`. For an undefined coordinate the message names the coordinate, the pipeline step, and the transform that is undefined there, for example `pixel (0.0, 0.0) has no world coordinate: IntermediateToNative(HammerAitoffProjection) in the step from frame "intermediate" to "world" is undefined at (180.0, -90.0)`. Non-finite input propagates as `NaN` in both modes, and `NoConvergence` from the numerical inverse (controlled by `quiet`) always propagates. Internally every transform returns `NaN` where a coordinate has no image rather than throwing, so the default and strict modes share one compiled pipeline; the step-by-step diagnosis runs only when a strict error is reported.
 
+`pixel_area(wcs, pixels...)` returns the solid angle in steradians that a pixel covers on the sky, `|det J| cos(lat)` with `J` the Jacobian of the world coordinates at the pixel center, computed in one pass with the world coordinate. It needs 2 pixel axes and a 2D `CelestialFrame` output frame in `deg` or `rad`, with the latitude at whatever transform position its `axes_order` gives it. It takes the same coordinate forms and keywords as `pixel_to_world`, and a matrix gives one area per column. Derivatives through native spherical coordinates are singular at a zenithal projection's reference point, so the area there is `NaN` and loses accuracy very near it (a relative error of about 1e-8 at 1e-3 pixel from it for 1 arcsec pixels).
+
 ### Editing a pipeline
 
 `WCS` values are immutable. Editing functions return a newly validated and compiled WCS, leaving the source unchanged:

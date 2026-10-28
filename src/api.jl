@@ -94,6 +94,61 @@ function pixel_to_world(wcs::WCS{Nin,Nout}, pixels::AbstractMatrix; kwargs...) w
     return result
 end
 
+_angle_radians(unit) = unit == "deg" ? deg2rad(1.0) : unit == "rad" ? 1.0 : throw(ArgumentError("pixel_area requires celestial axes in deg or rad, got $(repr(unit))"))
+
+# The latitude's transform position and the radian conversions of a 2D celestial output frame, as
+# (latitude, lon * lat scale, lat scale).
+function _celestial_area_scales(wcs::WCS)
+    frame = output_frame(wcs)
+    pixel_n_dim(wcs) == 2 && frame isa CelestialFrame{2} || throw(ArgumentError("pixel_area requires 2 pixel axes and a 2D CelestialFrame output frame, got $(pixel_n_dim(wcs)) pixel axes and a $(nameof(typeof(frame))){$(frame_dimension(frame))}"))
+    latitude = _axis_rank(frame.axes_order, 2)
+    radians = map(_angle_radians, axis_units(frame))
+    return latitude, radians[1] * radians[2], radians[latitude]
+end
+
+@inline function _pixel_area(wcs::WCS{2,2}, coords::StaticVector{2}, scales; with_bounding_box=true, fill_value=NaN, strict=false, origin=0)
+    T = _coordinate_float_type(eltype(coords))
+    given = SVector{2,T}(coords)
+    pixels = given .- _origin_offset(origin)
+    finite = all(isfinite, pixels)
+    if with_bounding_box && wcs.bounding_box !== nothing && finite && !(pixels in wcs.bounding_box)
+        strict && _throw_outside_box(given)
+        return T(fill_value)
+    end
+    world, jacobian = _value_and_jacobian(wcs.forward, pixels)
+    latitude, solid_angle, latitude_radians = scales
+    area = abs(det(jacobian)) * solid_angle * cos(world[latitude] * latitude_radians)
+    isnan(area) || return area
+    strict || return T(fill_value)
+    finite || return area
+    any(isnan, world) && _throw_undefined(wcs, pixels, given)
+    throw(DomainError(Tuple(given), "the Jacobian at pixel $(Tuple(given)) is undefined"))
+end
+
+"""
+    pixel_area(wcs, pixels...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> Real
+    pixel_area(wcs, pixels::AbstractMatrix; kwargs...) -> Vector
+
+Return the solid angle in steradians that a pixel covers on the sky, `|det J| cos(lat)`, with `J` the Jacobian of
+the world coordinates with respect to the pixel at its center. The WCS needs 2 pixel axes and a 2D `CelestialFrame`
+output frame in `deg` or `rad`. Matrix columns are pixels, and the keywords act as in `pixel_to_world`.
+"""
+function pixel_area(wcs::WCS, coords::AbstractVector; kwargs...)
+    scales = _celestial_area_scales(wcs)
+    length(coords) == 2 || throw(DimensionMismatch("pixel has length $(length(coords)), expected 2"))
+    return _pixel_area(wcs, SVector{2,_coordinate_float_type(eltype(coords))}(coords), scales; kwargs...)
+end
+
+pixel_area(wcs::WCS, coords::Tuple{Vararg{Real}}; kwargs...) = pixel_area(wcs, _coordinate_vector(coords); kwargs...)
+pixel_area(wcs::WCS, coords::Real...; kwargs...) = pixel_area(wcs, coords; kwargs...)
+
+function pixel_area(wcs::WCS, pixels::AbstractMatrix; kwargs...)
+    scales = _celestial_area_scales(wcs)
+    size(pixels, 1) == 2 || throw(DimensionMismatch("pixel matrix has $(size(pixels, 1)) rows, expected 2"))
+    T = _coordinate_float_type(eltype(pixels))
+    return map(column -> _pixel_area(wcs, SVector{2,T}(view(pixels, :, column)), scales; kwargs...), axes(pixels, 2))
+end
+
 @inline function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, strict=false, origin=0, kwargs...) where {Nin,Nout}
     T = _coordinate_float_type(eltype(coords))
     world = SVector{Nout,T}(coords)

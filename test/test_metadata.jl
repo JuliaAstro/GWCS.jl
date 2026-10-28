@@ -705,6 +705,8 @@ end
     @test all(isnan, pixel_to_world(celestial, 49.0, 99.0)) && all(isnan, fixture["outside"]["celestial"][][:, 2])
     @test input_frame(celestial).axes_names == ("x", "y") && output_frame(celestial).axes_names == ("lon", "lat")
     @test pixel_axis_names(celestial) == ("y", "x")
+    # The latitude is the first world axis here.
+    @test pixel_area(celestial, 20.0, 40.0) ≈ 1e-3 * 2e-3 * cosd(pixel_to_world(celestial, 20.0, 40.0)[1]) * deg2rad(1.0)^2 rtol=1e-14
     # The lists are written back in the frame's own order.
     written = to_metadata(output_frame(celestial))
     @test collect(written["axes_names"]) == ["lon", "lat"]
