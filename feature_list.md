@@ -121,6 +121,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Handle longitude wrapping and pole crossings when computing and testing celestial footprints.
 - [x] **P2** Add concise text and MIME displays showing frames, transforms, dimensions, inverses, and bounding boxes.
 - [ ] **P2** Add transform and pipeline visualization suitable for documentation and debugging.
+- [ ] **P1** Add docstrings to every exported name before release.
 
 ## Numerical inversion
 
@@ -229,9 +230,9 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P3** Add per-axis invalid-coordinate status or masks together with batch evaluation, so independent valid axes survive failures in another coordinate group. Requires the batch result and error/mask API to be designed first.
 - [x] **P2** Expand differential coverage at projection domains, longitude wrapping, cube/facet boundaries, strong projection parameters (including ZPN's first monotonic radial interval), and strong SIP/TPD inverse cases.
 - [x] **P3** Expand real-container tests for paired/transposed lookup arrays, alternate-key and `EXTVER` isolation, duplicate matching extensions, and coupled multidimensional `-TAB` tables.
-
 - [x] **P1** Serialize FITS SIP, TPV, and Paper IV TPD distortions as the standard polynomial transforms they equal, so FITS-derived WCSs with polynomial distortions can be written to ASDF in a form Python GWCS reads.
 - [ ] **P2** Write FITS lookup-table (D2IM, CPDIS), `-TAB`, nonlinear spectral, and radial TPV/TPD transforms to ASDF once tabular and mathematical-function tags are supported.
+
 ## Other declarative and text formats
 
 - [ ] **P1** Define a stable, human-editable GWCS.jl schema that can be represented in YAML, JSON, or TOML without Python class names.
@@ -257,6 +258,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P2** Add generated or tuple-recursive kernels for large static pipelines when normal compiler inference becomes insufficient. Composition is unrolled; parallel and Jacobian helpers remain recursive (Julia 1.10 does not infer a nested cube Jacobian).
 - [ ] **P2** Investigate CPU-vectorized and threaded batch evaluation without changing scalar semantics.
 - [ ] **P2** Investigate GPU-compatible compiled transforms for array workloads where all leaf transforms support the target backend.
+- [ ] **P2** Revisit precompile workloads for representative pipelines closer to release.
 
 ## Validation and compatibility coverage
 
