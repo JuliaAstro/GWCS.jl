@@ -6,7 +6,7 @@ Generalized world coordinate systems with composable, compiled transformations.
 module GWCS
 
 using ForwardDiff
-using LinearAlgebra: Diagonal, I, det, inv
+using LinearAlgebra: Diagonal, I, cross, det, dot, inv, norm
 using PrecompileTools: @compile_workload, @setup_workload
 using StaticArrays: MMatrix, MVector, SMatrix, SVector, StaticMatrix, StaticVector
 using YAML

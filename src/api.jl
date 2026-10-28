@@ -108,14 +108,15 @@ end
 
 # The world coordinate and Jacobian at a pixel, or `nothing` where there is no result: outside the bounding box, or an
 # undefined coordinate or Jacobian. strict=true throws instead, and NaN input propagates, as in pixel_to_world.
-@inline function _world_and_jacobian(wcs::WCS{Nin}, given::SVector{Nin}; with_bounding_box=true, strict=false, origin=0) where {Nin}
+# `transforms` evaluates part of the forward pipeline instead, such as the steps before a sky rotation.
+@inline function _world_and_jacobian(wcs::WCS{Nin}, given::SVector{Nin}, transforms=wcs.forward; with_bounding_box=true, strict=false, origin=0) where {Nin}
     pixels = given .- _origin_offset(origin)
     finite = all(isfinite, pixels)
     if with_bounding_box && wcs.bounding_box !== nothing && finite && !(pixels in wcs.bounding_box)
         strict && _throw_outside_box(given)
         return nothing
     end
-    world, jacobian = _value_and_jacobian(wcs.forward, pixels)
+    world, jacobian = _value_and_jacobian(transforms, pixels)
     any(isnan, world) || any(isnan, jacobian) || return world, jacobian
     strict || return nothing
     finite || return world, jacobian
@@ -209,14 +210,39 @@ function world_to_pixel_jacobian(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwa
     return map(column -> _world_to_pixel_jacobian(wcs, SVector{Nout,T}(view(worlds, :, column)); kwargs...), axes(worlds, 2))
 end
 
+# A pipeline that ends in a rotation of the sphere, as Roman's and JWST's v2v3-to-world steps do, covers the same solid
+# angle before it, where the longitude and latitude in degrees take fewer steps to differentiate and have not yet been
+# rounded by the rotation. Returns the steps before it and the rotation, or `nothing`.
+@generated function _sphere_rotation_split(transforms::Tuple)
+    types = transforms.parameters
+    n = length(types)
+    n > 3 && types[n - 2] <: SphericalToCartesian && types[n - 1] <: Rotation3D && types[n] <: CartesianToSpherical || return :(nothing)
+    Nin = supertype(types[1]).parameters[1]
+    prefix = Expr(:tuple, (:(transforms[$i]) for i in 1:(n - 3))...)
+    return :((ComposedTransform{$Nin,2,$(Tuple{types[1:(n - 3)]...})}($prefix), transforms[$(n - 1)]))
+end
+
+_sphere_rotation_split(transform::ComposedTransform) = _sphere_rotation_split(transform.transforms)
+_sphere_rotation_split(::AbstractTransform) = nothing
+# A Rotation3D built from a matrix need not be orthogonal, and only an orthogonal one preserves area.
+_is_rotation(rotation::Rotation3D) = maximum(abs, rotation.matrix' * rotation.matrix - I) <= 1e-12
+
 @inline function _pixel_area(wcs::WCS{2,2}, coords::StaticVector{2}, scales; fill_value=NaN, strict=false, kwargs...)
     T = _coordinate_float_type(eltype(coords))
     given = SVector{2,T}(coords)
-    result = _world_and_jacobian(wcs, given; strict, kwargs...)
-    result === nothing && return T(fill_value)
-    world, jacobian = result
-    latitude, solid_angle, latitude_radians = scales
-    area = abs(det(jacobian)) * solid_angle * cos(world[latitude] * latitude_radians)
+    split = _sphere_rotation_split(wcs.forward)
+    if split !== nothing && _is_rotation(last(split))
+        result = _world_and_jacobian(wcs, given, first(split); strict, kwargs...)
+        result === nothing && return T(fill_value)
+        before, jacobian = result
+        area = abs(det(jacobian)) * deg2rad(one(eltype(before)))^2 * cos(deg2rad(before[2]))
+    else
+        result = _world_and_jacobian(wcs, given; strict, kwargs...)
+        result === nothing && return T(fill_value)
+        world, jacobian = result
+        latitude, solid_angle, latitude_radians = scales
+        area = abs(det(jacobian)) * solid_angle * cos(world[latitude] * latitude_radians)
+    end
     # A defined Jacobian can still give no finite area, as at a celestial pole, where the longitude derivative is infinite.
     isfinite(area) && return area
     strict || return T(fill_value)
@@ -224,13 +250,56 @@ end
     throw(DomainError(Tuple(given), "the pixel area at pixel $(Tuple(given)) is undefined"))
 end
 
+_unit_vector(lon, lat) = (sincos_lon = sincos(lon); sincos_lat = sincos(lat); SVector(sincos_lat[2] * sincos_lon[2], sincos_lat[2] * sincos_lon[1], sincos_lat[1]))
+_cross2(u, v) = u[1] * v[2] - u[2] * v[1]
+# The solid angle of a pixel from its corners a, b, c, d in order, from the cross product of its diagonals: of unit
+# vectors projected on the pixel's direction, or of longitude and latitude in degrees with the metric at the center.
+_sphere_corner_area(a, b, c, d) = (direction = a + b + c + d; abs(dot(direction, cross(c - a, d - b))) / (2 * norm(direction)))
+_degree_corner_area(a, b, c, d) = abs(_cross2(c - a, d - b)) / 2 * cos(deg2rad((a[2] + b[2] + c[2] + d[2]) / 4)) * deg2rad(1.0)^2
+
+# Corner rows are evaluated once and shared by the pixels on either side, so a grid costs about one evaluation per pixel.
+function _pixel_area_grid(wcs::WCS{2,2}, xs, ys, corner, corner_area; with_bounding_box=true, fill_value=NaN, strict=false, origin=0)
+    offset = _origin_offset(origin)
+    corner_xs = (first(xs) - offset - 0.5):(last(xs) - offset + 0.5)
+    corner_row!(row, y) = (for (k, x) in enumerate(corner_xs); row[k] = corner(SVector(x, y)); end; row)
+    below = corner_row!(Vector{typeof(corner(SVector(0.0, 0.0)))}(undef, length(corner_xs)), first(ys) - offset - 0.5)
+    above = similar(below)
+    areas = Matrix{Float64}(undef, length(xs), length(ys))
+    for (j, y) in enumerate(ys)
+        corner_row!(above, y - offset + 0.5)
+        for (i, x) in enumerate(xs)
+            pixels = SVector{2,Float64}(x - offset, y - offset)
+            if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)
+                strict && _throw_outside_box(SVector{2,Float64}(x, y))
+                areas[i, j] = fill_value
+                continue
+            end
+            area = corner_area(below[i], below[i + 1], above[i + 1], above[i])
+            if !isfinite(area)
+                strict && (any(isnan, wcs.forward(pixels)) ? _throw_undefined(wcs, pixels, SVector{2,Float64}(x, y)) : throw(DomainError((x, y), "the pixel area at pixel $((x, y)) is undefined")))
+                area = fill_value
+            end
+            areas[i, j] = area
+        end
+        below, above = above, below
+    end
+    return areas
+end
+
 """
     pixel_area(wcs, pixels...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> Real
     pixel_area(wcs, pixels::AbstractMatrix; kwargs...) -> Vector
+    pixel_area(wcs, xs::AbstractUnitRange, ys::AbstractUnitRange; kwargs...) -> Matrix
 
 Return the solid angle in steradians that a pixel covers on the sky, `|det J| cos(lat)`, with `J` the Jacobian of
 the world coordinates with respect to the pixel at its center. The WCS needs 2 pixel axes and a 2D `CelestialFrame`
 output frame in `deg` or `rad`. Matrix columns are pixels, and the keywords act as in `pixel_to_world`.
+
+Given ranges of integer pixel coordinates, it returns the areas of the pixels in the grid `xs × ys` as a matrix
+indexed like `data[x, y]`, so `pixel_area(wcs, axes(data)...; origin=1)` covers an image. Each is the solid angle within
+the pixel's four corners, which neighboring pixels share, so the grid costs about one evaluation per pixel. Integrated
+over the pixel rather than taken at its center, it differs from the per-pixel area by the variation of the area across
+the pixel, about 1e-10 for Roman.
 """
 function pixel_area(wcs::WCS, coords::AbstractVector; kwargs...)
     scales = _celestial_area_scales(wcs)
@@ -240,6 +309,15 @@ end
 
 pixel_area(wcs::WCS, coords::Tuple{Vararg{Real}}; kwargs...) = pixel_area(wcs, _coordinate_vector(coords); kwargs...)
 pixel_area(wcs::WCS, coords::Real...; kwargs...) = pixel_area(wcs, coords; kwargs...)
+
+function pixel_area(wcs::WCS, xs::AbstractUnitRange{<:Integer}, ys::AbstractUnitRange{<:Integer}; kwargs...)
+    latitude, _, latitude_radians = _celestial_area_scales(wcs)
+    split = _sphere_rotation_split(wcs.forward)
+    split !== nothing && _is_rotation(last(split)) && return _pixel_area_grid(wcs, xs, ys, first(split), _degree_corner_area; kwargs...)
+    longitude_radians = _angle_radians(axis_units(output_frame(wcs))[3 - latitude])
+    corner(pixels) = (world = wcs.forward(pixels); _unit_vector(world[3 - latitude] * longitude_radians, world[latitude] * latitude_radians))
+    return _pixel_area_grid(wcs, xs, ys, corner, _sphere_corner_area; kwargs...)
+end
 
 function pixel_area(wcs::WCS, pixels::AbstractMatrix; kwargs...)
     scales = _celestial_area_scales(wcs)
