@@ -247,6 +247,26 @@ end
     @test_throws "pixel_area requires celestial axes in deg or rad, got \"arcsec\"" pixel_area(arcsec, 1.0, 2.0)
     @test_throws DimensionMismatch pixel_area(tan, [1.0])
 
+    # A pipeline that ends in a rotation of the sphere has the same area before it; a non-orthogonal Rotation3D does not.
+    general_area(wcs, pixel) = (J = pixel_to_world_jacobian(wcs, pixel); abs(J[1, 1] * J[2, 2] - J[1, 2] * J[2, 1]) * cosd(pixel_to_world(wcs, pixel)[2]) * deg2rad(1.0)^2)
+    @test GWCS._sphere_rotation_split(roman.forward) !== nothing
+    @test pixel_area(roman, 12.0, 21.0) ≈ general_area(roman, SVector(12.0, 21.0)) rtol=1e-13
+    skewed = WCS(Step(Frame2D(name="pixels"), compose(parallel(Scale(1e-3), Scale(1e-3)), SphericalToCartesian(), Rotation3D([1.0 0.2 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]), CartesianToSpherical())), Step(CelestialFrame(name="world")))
+    @test pixel_area(skewed, 30.0, 40.0) ≈ general_area(skewed, SVector(30.0, 40.0)) rtol=1e-13
+
+    # A grid integrates each pixel from its shared corners, from unit vectors or from the coordinates before a sky rotation.
+    for (wcs, xs, ys) in ((tan, 47:53, 38:42), (roman, 8:13, 18:24), (skewed, 28:31, 38:40))
+        grid = @inferred pixel_area(wcs, xs, ys)
+        @test grid isa Matrix{Float64} && size(grid) == (length(xs), length(ys))
+        @test grid ≈ [pixel_area(wcs, x, y) for x in xs, y in ys] rtol=1e-8
+        @test pixel_area(wcs, (xs .+ 1), (ys .+ 1); origin=1) == grid
+    end
+    @test isnan(pixel_area(boxed, 98:101, 10:11)[3, 1]) && isfinite(pixel_area(boxed, 98:101, 10:11)[2, 1])
+    @test pixel_area(boxed, 98:101, 10:11; fill_value=0.0)[3:4, :] == zeros(2, 2)
+    @test_throws "pixel (100.0, 10.0) is outside the WCS bounding box" pixel_area(boxed, 98:101, 10:11; strict=true)
+    @test isnan(pixel_area(ait, 0:1, 0:1)[1, 1]) && isfinite(pixel_area(ait, 179:181, 89:91)[2, 2])
+    @test_throws r"pixel \(0\.0, 0\.0\) has no world coordinate" pixel_area(ait, 0:1, 0:1; strict=true)
+
     allocated_pixel_area(wcs, coords) = @allocated pixel_area(wcs, coords)
     for (wcs, coords) in ((tan, SVector(3000.0, -2000.0)), (roman, SVector(12.0, 21.0)))
         @test @inferred(pixel_area(wcs, coords)) isa Float64
