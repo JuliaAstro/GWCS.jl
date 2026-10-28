@@ -61,8 +61,10 @@ Labels are dispatch metadata, not numeric coordinates. Keep `AbstractLabelMapper
 
 ## Frames, coordinates, and domains
 
-- Public coordinates use each boundary frame's native axis order.
-- Compile `axes_order` permutations at frame boundaries. Internal pipeline transforms remain in transform order.
+Transform order is the order of a transform's inputs and outputs, and it is the order of every public coordinate. Frame order is the order in which a frame stores its own axes: a `CelestialFrame` is (lon, lat), and a `CompositeFrame` concatenates its constituents. `axes_order[i]` is the one-based transform position of the frame's axis `i`, so it labels coordinates and never reorders them; a constituent's entries are positions in the whole composite. This is Python GWCS's convention.
+
+- Public coordinates, the axis accessors (`axis_names`, `world_axis_physical_types`, and so on), bounding boxes, `pixel_shape`, and `fix_inputs` indices use transform order. Frame fields and constructor arguments use frame order.
+- ASDF per-axis frame lists are in frame order, which is how Python GWCS reads them and, since gwcs#687, writes them.
 - Do not add an implicit zero- or one-based pixel offset. Encode external pixel-origin conventions explicitly at interoperability boundaries.
 - Matrix evaluation uses one coordinate per column.
 - `in_domain` tests finite input coordinates against the input domain.

@@ -1066,11 +1066,6 @@ function _parse_bounding_box(node, transform, path, registry)
     _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
 end
 
-function _metadata_native_order(values, frame::AbstractCoordinateFrame{N}, path) where {N}
-    length(values) == N || _metadata_error(path, "metadata value has length $(length(values)), expected $N")
-    return ntuple(index -> values[frame.axes_order[index]], N)
-end
-
 function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     node, context = _prepare_metadata(node, "wcs", registry)
     metadata_tag(context) == _ASTROPY_WCS_TAG && return _parse_astropy_wcs(node, registry)
@@ -1083,11 +1078,9 @@ function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     first_transform = get(first(raw_steps), "transform", nothing)
     bounding_box = first_transform === nothing ? nothing : get(first_transform, "bounding_box", nothing)
     parsed_box = bounding_box === nothing ? nothing : _parse_bounding_box(bounding_box, first(steps).transform, "wcs/steps/1/transform/bounding_box", registry)
-    input = first(steps).frame
-    parsed_box === nothing || (parsed_box = _remap_bounding_box(parsed_box, input.axes_order))
     name = String(_unwrap(get(node, "name", "")))
     pixel_shape = get(node, "pixel_shape", nothing)
-    pixel_shape === nothing || (pixel_shape = _metadata_native_order(Tuple(Int(_unwrap(value)) for value in pixel_shape), input, "wcs/pixel_shape"))
+    pixel_shape === nothing || (pixel_shape = Tuple(Int(_unwrap(value)) for value in pixel_shape))
     return WCS(steps...; name, pixel_shape, bounding_box=parsed_box)
 end
 

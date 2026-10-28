@@ -184,7 +184,7 @@ end
         original = parse_wcs(bounding_fixture[name])
         reparsed = parse_wcs(to_metadata(original))
         @test typeof(reparsed.bounding_box).name.wrapper == typeof(original.bounding_box).name.wrapper
-        @test in_domain(reparsed, name == "compound" ? (2.0, 3.0, 1.0) : (12.0, 2.0, 100.0))
+        @test in_domain(reparsed, name == "compound" ? (2.0, 3.0, 1.0) : (2.0, 12.0, 100.0))
     end
 
     roman = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))

@@ -55,9 +55,11 @@
     composite = CompositeFrame((sky, spectral, temporal, stokes); name="world")
     @test frame_dimension(composite) == 5
     @test composite.axes_order == (2, 5, 1, 4, 3)
-    @test axis_names(composite) == ("lon", "lat", "spectral", "time", "stokes")
-    @test axis_types(composite) == (SPATIAL, SPATIAL, SPECTRAL, TIME, STOKES)
-    @test axis_units(composite) == ("deg", "deg", "nm", "s", "")
+    # The accessors follow the transform order: axes_order puts the spectral axis first and the latitude last.
+    @test axis_names(composite) == ("spectral", "lon", "stokes", "time", "lat")
+    @test axis_types(composite) == (SPECTRAL, SPATIAL, STOKES, TIME, SPATIAL)
+    @test axis_units(composite) == ("nm", "deg", "", "s", "deg")
+    @test composite.axes_names == ("lon", "lat", "spectral", "time", "stokes")
     @test composite.frames == (sky, spectral, temporal, stokes)
 
     @test_throws "requires at least one constituent" CompositeFrame(())
@@ -82,16 +84,17 @@ end
     world = CompositeFrame((sky, spectral, temporal, stokes); name="world")
     wcs = WCS(Step(input, IdentityTransform{5}()), Step(world))
 
+    # World coordinates are the transform outputs; axes_order only labels them.
     pixels = SVector(1.0, 2.0, 3.0, 4.0, 5.0)
-    coordinates = SVector(2.0, 5.0, 1.0, 4.0, 3.0)
+    coordinates = pixels
     @test pixel_to_world(wcs, pixels) == coordinates
     @test world_to_pixel(wcs, coordinates) == pixels
     @test pixel_axis_names(wcs) == ("a", "b", "c", "d", "e")
-    @test world_axis_names(wcs) == ("lon", "lat", "wave", "time", "stokes")
-    @test world_axis_physical_types(wcs) == ("pos.eq.ra", "pos.eq.dec", "em.wl", "time", "phys.polarization.stokes")
-    @test world_axis_units(wcs) == ("deg", "deg", "nm", "s", "")
-    @test world_axis_types(wcs) == (SPATIAL, SPATIAL, SPECTRAL, TIME, STOKES)
-    @test axis_correlation_matrix(wcs) == @SMatrix [false true false false false; false false false false true; true false false false false; false false false true false; false false true false false]
+    @test world_axis_names(wcs) == ("wave", "lon", "stokes", "time", "lat")
+    @test world_axis_physical_types(wcs) == ("em.wl", "pos.eq.ra", "phys.polarization.stokes", "time", "pos.eq.dec")
+    @test world_axis_units(wcs) == ("nm", "deg", "", "s", "deg")
+    @test world_axis_types(wcs) == (SPECTRAL, SPATIAL, STOKES, TIME, SPATIAL)
+    @test axis_correlation_matrix(wcs) == [i == j for i in 1:5, j in 1:5]
     @test @inferred(pixel_to_world(wcs, pixels)) == coordinates
     allocated_composite_forward(wcs, coords) = @allocated pixel_to_world(wcs, coords)
     allocated_composite_backward(wcs, coords) = @allocated world_to_pixel(wcs, coords)
@@ -103,9 +106,9 @@ end
     sliced = fix_inputs(WCS(Step(world, IdentityTransform{5}()), Step(input)), "wave" => 1.0)
     @test input_frame(sliced) isa CompositeFrame{4}
     @test input_frame(sliced).axes_order == (1, 4, 3, 2)
-    @test axis_names(input_frame(sliced)) == ("lon", "lat", "time", "stokes")
+    @test axis_names(input_frame(sliced)) == ("lon", "stokes", "time", "lat")
     @test length(input_frame(sliced).frames) == 3
-    @test pixel_to_world(sliced, 2.0, 5.0, 4.0, 3.0) == pixels
+    @test pixel_to_world(sliced, 2.0, 3.0, 4.0, 5.0) == SVector(1.0, 2.0, 3.0, 4.0, 5.0)
 
     inner = CompositeFrame((CelestialFrame(; name="nested_sky", axes_order=(1, 2)),); name="inner")
     nested_input = CompositeFrame((inner, SpectralFrame(; name="nested_wave", axes_order=3, axes_names="nested_wave")); name="nested")

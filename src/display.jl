@@ -45,7 +45,7 @@ function Base.show(io::IO, frame::AbstractCoordinateFrame)
     print(io, _display_type(frame), "(")
     show(io, frame.name)
     print(io, ", axes=")
-    show(io, frame.axes_names)
+    show(io, axis_names(frame))
     print(io, ")")
 end
 
