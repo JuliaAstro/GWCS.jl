@@ -151,7 +151,8 @@ function _initial_guess(wcs::WCS{N}, intermediate::StaticVector, ::Type{T}, init
 end
 
 function _longitude_axes(frame::AbstractCoordinateFrame{N}) where {N}
-    return ntuple(i -> endswith(frame.axis_physical_types[i], ".ra") || endswith(frame.axis_physical_types[i], ".lon"), N)
+    types = axis_physical_types(frame)
+    return ntuple(i -> endswith(types[i], ".ra") || endswith(types[i], ".lon"), N)
 end
 
 @inline function _inverse_residual(solve::AbstractTransform{N,N}, pixels::StaticVector{N}, goal::StaticVector{N}, longitude_axes) where {N}

@@ -38,8 +38,7 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
     end
 
     compiled = ntuple(i -> i == length(steps) ? steps[i] : Step(steps[i].frame, _compile_transform_checked(steps[i].transform)), length(steps))
-    kernel = compose(map(step -> _numeric_transform(step.transform), compiled[1:(end - 1)])...)
-    forward = compose(_frame_to_transform(first(compiled).frame), kernel, _transform_to_frame(last(compiled).frame))
+    forward = compose(map(step -> _numeric_transform(step.transform), compiled[1:(end - 1)])...)
     backward = _inverse_transform_checked(forward)
     Nin = frame_dimension(first(compiled).frame)
     Nout = frame_dimension(last(compiled).frame)
@@ -71,19 +70,14 @@ WCS(builder::WCSBuilder) = builder._wcs
 
 function fix_inputs(wcs::WCS{Nin}, fixed; atol=nothing, rtol=nothing) where {Nin}
     frame = input_frame(wcs)
-    input_pairs = _fixed_pairs(fixed)
-    native_indexed = map(input_pairs) do pair
-        _fixed_index(pair.first, frame.axes_names, Nin) => pair.second
-    end
-    transform_indexed = map(native_indexed) do pair
-        frame.axes_order[pair.first] => pair.second
-    end
-    fixed_transform = fix_inputs(first(wcs.steps).transform, transform_indexed; atol, rtol)
+    indexed = map(pair -> _fixed_index(pair.first, axis_names(frame), Nin) => pair.second, _fixed_pairs(fixed))
+    fixed_transform = fix_inputs(first(wcs.steps).transform, indexed; atol, rtol)
 
-    fixed_indices = first.(native_indexed)
+    fixed_indices = first.(indexed)
     free_indices = Tuple(filter(index -> !(index in fixed_indices), 1:Nin))
-    reduced_frame = _subset_frame(frame, free_indices)
-    reduced_box = wcs.bounding_box === nothing ? nothing : _reduce_bounding_box(wcs.bounding_box, native_indexed)
+    fixed_frame_axes = map(index -> _axis_at(frame.axes_order, index), fixed_indices)
+    reduced_frame = _subset_frame(frame, Tuple(filter(index -> !(index in fixed_frame_axes), 1:Nin)))
+    reduced_box = wcs.bounding_box === nothing ? nothing : _reduce_bounding_box(wcs.bounding_box, indexed)
     reduced_shape = wcs.pixel_shape === nothing ? nothing : map(index -> wcs.pixel_shape[index], free_indices)
     steps = (Step(reduced_frame, fixed_transform), Base.tail(wcs.steps)...)
     return WCS(steps...; name=wcs.name, pixel_shape=reduced_shape, bounding_box=reduced_box)
@@ -99,7 +93,7 @@ end
 
 function _named_domain_pairs(frame::AbstractCoordinateFrame{N}, fixed) where {N}
     return map(_domain_pairs(fixed)) do pair
-        _fixed_index(pair.first, frame.axes_names, N) => pair.second
+        _fixed_index(pair.first, axis_names(frame), N) => pair.second
     end
 end
 
@@ -276,17 +270,10 @@ function get_transform(wcs::WCS, from_frame, to_frame)
     to_index = _frame_index(wcs, to_frame)
     from_index == to_index && return IdentityTransform{frame_dimension(wcs.steps[from_index].frame)}()
 
-    kernel = if from_index < to_index
-        compose(map(step -> step.transform, wcs.steps[from_index:(to_index - 1)])...)
-    else
-        transforms = map(step -> _inverse_transform_checked(step.transform), reverse(wcs.steps[to_index:(from_index - 1)]))
-        any(transform -> transform isa NoInverse, transforms) && return NoInverse()
-        compose(transforms...)
-    end
-
-    source = wcs.steps[from_index].frame
-    destination = wcs.steps[to_index].frame
-    return compose(_frame_to_transform(source), kernel, _transform_to_frame(destination))
+    from_index < to_index && return compose(map(step -> step.transform, wcs.steps[from_index:(to_index - 1)])...)
+    transforms = map(step -> _inverse_transform_checked(step.transform), reverse(wcs.steps[to_index:(from_index - 1)]))
+    any(transform -> transform isa NoInverse, transforms) && return NoInverse()
+    return compose(transforms...)
 end
 
 function transform(wcs::WCS, from_frame, to_frame, coords::StaticVector)

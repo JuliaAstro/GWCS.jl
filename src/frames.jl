@@ -11,10 +11,18 @@ abstract type AbstractCoordinateFrame{N} end
 end
 
 frame_dimension(::AbstractCoordinateFrame{N}) where {N} = N
-axis_names(frame::AbstractCoordinateFrame) = frame.axes_names
-axis_physical_types(frame::AbstractCoordinateFrame) = frame.axis_physical_types
-axis_units(frame::AbstractCoordinateFrame) = frame.unit
-axis_types(frame::AbstractCoordinateFrame) = frame.axis_types
+
+# As in Python GWCS, a frame stores its axes in its own order (a CelestialFrame's is lon, lat), and `axes_order[i]` is
+# the transform position of frame axis `i`. Coordinates and the axis accessors follow the transform order. The
+# entries of a composite constituent's `axes_order` are positions in the whole composite, so ranks are used.
+_axis_rank(order, index) = count(<(order[index]), order) + 1
+_axis_at(order, rank) = findfirst(index -> _axis_rank(order, index) == rank, ntuple(identity, length(order)))::Int
+_to_transform_order(values::NTuple{N,Any}, order::NTuple{N,Int}) where {N} = ntuple(rank -> values[_axis_at(order, rank)], Val(N))
+
+axis_names(frame::AbstractCoordinateFrame) = _to_transform_order(frame.axes_names, frame.axes_order)
+axis_physical_types(frame::AbstractCoordinateFrame) = _to_transform_order(frame.axis_physical_types, frame.axes_order)
+axis_units(frame::AbstractCoordinateFrame) = _to_transform_order(frame.unit, frame.axes_order)
+axis_types(frame::AbstractCoordinateFrame) = _to_transform_order(frame.axis_types, frame.axes_order)
 
 _frame_values(values) = values isa Tuple || values isa AbstractVector ? Tuple(values) : (values,)
 
@@ -302,20 +310,6 @@ end
 _rename_frame(frame::CompositeFrame, name) = CompositeFrame(frame.frames; name)
 _rename_frame(::EmptyFrame{N}, name) where {N} = EmptyFrame{N}(name)
 _rename_frame(frame::AbstractCoordinateFrame, name) = throw(ArgumentError("renaming frame type $(typeof(frame)) is not supported"))
-
-_identity_axes_order(order) = all(index -> order[index] == index, eachindex(order))
-
-function _frame_to_transform(frame::AbstractCoordinateFrame{N}) where {N}
-    order = frame.axes_order
-    _identity_axes_order(order) && return IdentityTransform{N}()
-    mapping = ntuple(position -> findfirst(==(position), order)::Int, N)
-    return RemapAxes{N}(mapping)
-end
-
-function _transform_to_frame(frame::AbstractCoordinateFrame{N}) where {N}
-    _identity_axes_order(frame.axes_order) && return IdentityTransform{N}()
-    return RemapAxes{N}(frame.axes_order)
-end
 
 function _subset_axes_order(order, indices)
     selected = map(index -> order[index], indices)

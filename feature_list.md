@@ -81,7 +81,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 ## Coordinate frames, units, and high-level coordinates
 
 - [x] **P1** Resolve the pixel-origin convention across input formats. Pixel coordinates are zero-based everywhere, like Python GWCS and astropy's APE 14 interface; `parse_fits_wcs` shifts FITS one-based pixels at the boundary. The evaluation API takes `origin=1` for one-based pixels on every input axis, like astropy.wcs.
-- [x] **P0** Make `axes_order` operational during evaluation and inverse evaluation rather than storing it only as metadata.
+- [x] **P0** Follow Python GWCS's `axes_order` convention: coordinates in transform order, frame axis accessors in transform order, and ASDF per-axis frame lists read and written in frame order.
 - [x] **P1** Add an `AxisType` representation for spatial, spectral, temporal, Stokes, pixel, undefined, and custom axes.
 - [x] **P1** Add `SpectralFrame` with wavelength, frequency, energy, and velocity physical-type inference.
 - [x] **P1** Add `TemporalFrame` with a reference epoch, time scale, location metadata, and offset conversion.

@@ -17,14 +17,17 @@ using Logging
     @test world_to_pixel(wcs, world) ≈ SVector(11.0, 22.0) atol=1e-10
     @test all(isnan, pixel_to_world(wcs, 21.0, 22.0))
 
+    # As in Python GWCS, axes_order only labels the transform inputs, and the file lists axes_names in the frame's own
+    # order: the pixels, pixel_shape, and bounding box are unchanged, and only the names of the transform inputs swap.
     permuted_metadata = replace(metadata, "axes_order: [0, 1]" => "axes_order: [1, 0]"; count=1)
     permuted_wcs = parse_wcs(permuted_metadata)
-    @test permuted_wcs.pixel_shape == (30, 20)
-    @test permuted_wcs.bounding_box.intervals == ((-0.5, 29.5), (-0.5, 19.5))
-    permuted_world = pixel_to_world(permuted_wcs, 22.0, 11.0)
-    @test permuted_world ≈ world atol=1e-12
-    @test world_to_pixel(permuted_wcs, permuted_world) ≈ SVector(22.0, 11.0) atol=1e-10
-    @test all(isnan, pixel_to_world(permuted_wcs, 11.0, 22.0))
+    @test pixel_axis_names(permuted_wcs) == ("y", "x")
+    @test input_frame(permuted_wcs).axes_names == ("x", "y")
+    @test permuted_wcs.pixel_shape == (20, 30)
+    @test permuted_wcs.bounding_box.intervals == ((-0.5, 19.5), (-0.5, 29.5))
+    @test pixel_to_world(permuted_wcs, 11.0, 22.0) ≈ world atol=1e-12
+    @test world_to_pixel(permuted_wcs, world) ≈ SVector(11.0, 22.0) atol=1e-10
+    @test all(isnan, pixel_to_world(permuted_wcs, 21.0, 22.0))
     permuted_slice = fix_inputs(permuted_wcs, "x" => 22.0)
     @test permuted_slice.pixel_shape == (20,)
     @test permuted_slice.bounding_box.intervals == ((-0.5, 19.5),)
@@ -267,9 +270,10 @@ end
     @test simple.bounding_box isa BoundingBox{3}
     @test bounded_axes(simple.bounding_box) == (1, 2)
     @test ignored_axes(simple.bounding_box) == (3,)
-    @test simple.bounding_box.intervals == ((10.0, 15.0), (0.0, 5.0))
-    @test pixel_to_world(simple, 12.0, 2.0, 100.0) == SVector(2.0, 12.0, 100.0)
-    @test all(isnan, pixel_to_world(simple, 2.0, 12.0, 100.0))
+    # The intervals apply to the transform inputs x and y whatever the input frame's axes_order, as in Python GWCS.
+    @test simple.bounding_box.intervals == ((0.0, 5.0), (10.0, 15.0))
+    @test pixel_to_world(simple, 2.0, 12.0, 100.0) == SVector(2.0, 12.0, 100.0)
+    @test all(isnan, pixel_to_world(simple, 12.0, 2.0, 100.0))
 
     compound = parse_wcs(fixture["compound"])
     @test compound.bounding_box isa CompoundBoundingBox{3}
@@ -591,10 +595,10 @@ end
     @test pixel_axis_types(wcs) == ntuple(_ -> PIXEL, 5)
     @test output isa CompositeFrame{5}
     @test output.axes_order == (2, 5, 1, 4, 3)
-    @test world_axis_names(wcs) == ("lon", "lat", "wave", "time", "stokes")
-    @test world_axis_types(wcs) == (SPATIAL, SPATIAL, SPECTRAL, TIME, STOKES)
-    @test world_axis_physical_types(wcs) == ("pos.eq.ra", "pos.eq.dec", "em.wl", "time", "phys.polarization.stokes")
-    @test world_axis_units(wcs) == ("deg", "deg", "nm", "s", "")
+    @test world_axis_names(wcs) == ("wave", "lon", "stokes", "time", "lat")
+    @test world_axis_types(wcs) == (SPECTRAL, SPATIAL, STOKES, TIME, SPATIAL)
+    @test world_axis_physical_types(wcs) == ("em.wl", "pos.eq.ra", "phys.polarization.stokes", "time", "pos.eq.dec")
+    @test world_axis_units(wcs) == ("nm", "deg", "", "s", "deg")
     @test output.frames[1].reference_frame === :ICRS
     @test output.frames[3].reference_epoch == 100.0
     @test output.frames[3].time_scale == "utc"
@@ -602,13 +606,12 @@ end
     @test output.frames[3].location === nothing
     @test output.frames[3].reference_frame isa AbstractDict
     @test offset_to_time(output.frames[3], 86400.0) == 101.0
-    @test axis_names(GWCS._subset_frame(output, (1, 3))) == ("lon", "wave")
+    @test axis_names(GWCS._subset_frame(output, (1, 3))) == ("wave", "lon")
 
     pixels = SVector(1.0, 2.0, 3.0, 4.0, 5.0)
-    world = SVector(2.0, 5.0, 1.0, 4.0, 3.0)
-    @test pixel_to_world(wcs, pixels) == world
-    @test world_to_pixel(wcs, world) == pixels
-    @test axis_correlation_matrix(wcs) == @SMatrix [false true false false false; false false false false true; true false false false false; false false false true false; false false true false false]
+    @test pixel_to_world(wcs, pixels) == pixels
+    @test world_to_pixel(wcs, pixels) == pixels
+    @test axis_correlation_matrix(wcs) == [i == j for i in 1:5, j in 1:5]
 
     bad_child = replace(metadata, "axes_names: [wave]" => "axes_names: [wave, extra]")
     @test_throws "axes_names has length 2, expected 1 at wcs/steps/2/frame/frames/2" parse_wcs(bad_child)
@@ -674,4 +677,37 @@ end
     @test_throws "astropy FITS WCS attribute keysel is not supported" parse_wcs(astropy_wcs(cards; attrs="{naxis: 2, keysel: [image]}"))
     @test_throws "extension HDUs, which hold lookup distortions and -TAB arrays, are not supported" parse_wcs(astropy_wcs(cards; extra_hdu="- header: [[XTENSION, IMAGE], [EXTNAME, WCSDVARR]]"))
     @test_throws "a FITS card holds a keyword, a value, and a comment" parse_wcs(astropy_wcs("[[CTYPE1, RA---TAN, a, b]]"))
+end
+
+@testset "Python frame axis order" begin
+    # Python GWCS returns coordinates in transform order and labels them through axes_order, reporting the frame's axis
+    # metadata in transform order; the file stores each frame's lists in its own order
+    # (validation/generate_axes_order_fixture.py).
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "axes_order.asdf"); extensions=true)
+    end
+    for (name, node) in fixture["wcs"]
+        wcs = parse_wcs(node)
+        axes = fixture["axes"][name]
+        for candidate in (wcs, parse_wcs(to_metadata(wcs)))
+            @test collect(pixel_axis_names(candidate)) == axes["pixel_axis_names"]
+            @test collect(world_axis_names(candidate)) == axes["world_axis_names"]
+            @test collect(world_axis_physical_types(candidate)) == axes["world_axis_physical_types"]
+            @test collect(world_axis_units(candidate)) == axes["world_axis_units"]
+            @test pixel_to_world(candidate, fixture["wcs_inputs"][name][]) ≈ fixture["wcs_outputs"][name][] atol=1e-14
+        end
+    end
+
+    celestial = parse_wcs(fixture["wcs"]["celestial"])
+    # The bounding box and pixel shape apply to the transform inputs whatever the input frame's order.
+    @test celestial.pixel_shape == (100, 50)
+    @test pixel_to_world(celestial, 99.0, 49.0) ≈ fixture["outside"]["celestial"][][:, 1] atol=1e-14
+    @test all(isnan, pixel_to_world(celestial, 49.0, 99.0)) && all(isnan, fixture["outside"]["celestial"][][:, 2])
+    @test input_frame(celestial).axes_names == ("x", "y") && output_frame(celestial).axes_names == ("lon", "lat")
+    @test pixel_axis_names(celestial) == ("y", "x")
+    # The lists are written back in the frame's own order.
+    written = to_metadata(output_frame(celestial))
+    @test collect(written["axes_names"]) == ["lon", "lat"]
+    @test collect(written["axis_physical_types"]) == ["pos.eq.ra", "pos.eq.dec"]
+    @test written["axes_order"] == [1, 0]
 end

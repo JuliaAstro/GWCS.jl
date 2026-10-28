@@ -469,6 +469,7 @@ function _reference_metadata(value, path, registry)
 end
 
 function _frame_properties(frame, path, registry)
+    # Per-axis lists are in the frame's own order, which Python GWCS reads, and writes since gwcs#687.
     properties = Dict{String,Any}("name" => frame.name, "axes_names" => _metadata_vector(frame.axes_names),
         "axes_order" => [value - 1 for value in frame.axes_order],
         "axis_physical_types" => _metadata_vector(frame.axis_physical_types),
@@ -535,48 +536,44 @@ function _transform_axis_names(transform)
     return something(input_names(transform), _asdf_input_names(transform))
 end
 
-function _metadata_axis_name(names, axes_order, native_axis)
-    return names[axes_order[native_axis]]
-end
-
-function _serialize_bounding_box(box::BoundingBox, names, axes_order, path, registry; include_ignored=true)
+function _serialize_bounding_box(box::BoundingBox, names, path, registry; include_ignored=true)
     intervals = Dict{Any,Any}()
-    for (index, native_axis) in enumerate(box.axes)
-        intervals[_metadata_axis_name(names, axes_order, native_axis)] = _metadata_vector(box.intervals[index])
+    for (index, axis) in enumerate(box.axes)
+        intervals[names[axis]] = _metadata_vector(box.intervals[index])
     end
     properties = Dict{String,Any}("intervals" => intervals, "order" => "F")
     if include_ignored
-        ignored = [_metadata_axis_name(names, axes_order, axis) for axis in ignored_axes(box)]
+        ignored = [names[axis] for axis in ignored_axes(box)]
         isempty(ignored) || (properties["ignore"] = ignored)
     end
     return _tagged_metadata("$_ASDF_TRANSFORM_TAG/property/bounding_box", v"1.2.0", properties)
 end
 
-function _serialize_bounding_box(box::CompoundBoundingBox, names, axes_order, path, registry)
-    selector_args = [Dict("argument" => _metadata_axis_name(names, axes_order, box.selector_axes[index]), "ignore" => box.selector_ignored[index]) for index in eachindex(box.selector_axes)]
+function _serialize_bounding_box(box::CompoundBoundingBox, names, path, registry)
+    selector_args = [Dict("argument" => names[box.selector_axes[index]], "ignore" => box.selector_ignored[index]) for index in eachindex(box.selector_axes)]
     entries = Any[]
     for (index, entry) in enumerate(box.boxes)
-        nested = _serialize_bounding_box(entry.second, names, axes_order, "$path/cbbox/$index/bbox", registry; include_ignored=false)
+        nested = _serialize_bounding_box(entry.second, names, "$path/cbbox/$index/bbox", registry; include_ignored=false)
         push!(entries, Dict("key" => _metadata_vector(entry.first), "bbox" => nested))
     end
     properties = Dict{String,Any}("selector_args" => selector_args, "cbbox" => entries, "order" => "F")
-    ignored = [_metadata_axis_name(names, axes_order, axis) for axis in box.globally_ignored]
+    ignored = [names[axis] for axis in box.globally_ignored]
     isempty(ignored) || (properties["ignore"] = ignored)
     return _tagged_metadata("$_ASDF_TRANSFORM_TAG/property/compound_bounding_box", v"1.2.0", properties)
 end
 
 function _to_metadata(box::AbstractBoundingBox, path, registry)
     names = ntuple(index -> "x$(index - 1)", input_dimension(box))
-    return _serialize_bounding_box(box, names, ntuple(identity, input_dimension(box)), path, registry)
+    return _serialize_bounding_box(box, names, path, registry)
 end
 
-function _serialize_step(step::Step, path, registry; bounding_box=nothing, input_order=nothing)
+function _serialize_step(step::Step, path, registry; bounding_box=nothing)
     properties = Dict{String,Any}("frame" => _to_metadata(step.frame, "$path/frame", registry))
     if step.transform !== nothing
         transform = _metadata_mapping(_to_metadata(step.transform, "$path/transform", registry), "$path/transform")
         if bounding_box !== nothing
             names = _transform_axis_names(step.transform)
-            box = _serialize_bounding_box(bounding_box, names, input_order, "$path/transform/bounding_box", registry)
+            box = _serialize_bounding_box(bounding_box, names, "$path/transform/bounding_box", registry)
             transform = _decorate_metadata(transform, ("bounding_box" => box,))
         end
         properties["transform"] = transform
@@ -588,20 +585,13 @@ function _to_metadata(step::Step, path, registry)
     return _serialize_step(step, path, registry)
 end
 
-function _metadata_pixel_shape(wcs::WCS)
-    order = input_frame(wcs).axes_order
-    return [wcs.pixel_shape[findfirst(==(position), order)::Int] for position in 1:length(order)]
-end
-
 function _to_metadata(wcs::WCS, path, registry)
     steps = Any[]
-    order = input_frame(wcs).axes_order
     for (index, step) in enumerate(wcs.steps)
-        box = index == 1 ? wcs.bounding_box : nothing
-        push!(steps, _serialize_step(step, "$path/steps/$index", registry; bounding_box=box, input_order=order))
+        push!(steps, _serialize_step(step, "$path/steps/$index", registry; bounding_box=index == 1 ? wcs.bounding_box : nothing))
     end
     properties = Dict{String,Any}("name" => wcs.name, "steps" => steps)
-    wcs.pixel_shape === nothing || any(isnothing, wcs.pixel_shape) || (properties["pixel_shape"] = _metadata_pixel_shape(wcs))
+    wcs.pixel_shape === nothing || any(isnothing, wcs.pixel_shape) || (properties["pixel_shape"] = collect(wcs.pixel_shape))
     return _tagged_metadata("$_GWCS_TAG/wcs", v"1.4.0", properties)
 end
 

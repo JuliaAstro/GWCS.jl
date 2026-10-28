@@ -205,18 +205,6 @@ Base.getindex(box::CompoundBoundingBox, selector) = select_bounding_box(box, sel
     return coords in @inbounds(box.boxes.entries[index].second)
 end
 
-function _remap_bounding_box(box::BoundingBox{N}, mapping::NTuple{N,Int}) where {N}
-    axes = map(axis -> findfirst(==(axis), mapping)::Int, bounded_axes(box))
-    return BoundingBox{N}(box.intervals, axes)
-end
-
-function _remap_bounding_box(box::CompoundBoundingBox{N,K}, mapping::NTuple{N,Int}) where {N,K}
-    selectors = map(axis -> findfirst(==(axis), mapping)::Int, selector_axes(box))
-    ignored = map(axis -> findfirst(==(axis), mapping)::Int, ignored_axes(box))
-    entries = Dict(key => _remap_bounding_box(value, mapping) for (key, value) in box.boxes)
-    return CompoundBoundingBox{N}(entries, selectors; selector_ignored=selector_ignored(box), ignored)
-end
-
 function _free_axis_map(count, fixed_axes)
     free = Tuple(filter(axis -> !(axis in fixed_axes), 1:count))
     return free, axis -> findfirst(==(axis), free)

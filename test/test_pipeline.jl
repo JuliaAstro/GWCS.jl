@@ -229,32 +229,39 @@ end
     wcs = WCS(Step(input, first_transform), Step(middle, IdentityTransform{3}()), Step(output);
         pixel_shape=(10, 20, 30), bounding_box=BoundingBox(((0.0, 9.0), (0.0, 19.0), (0.0, 29.0))))
 
+    # As in Python GWCS, coordinates are in transform order and axes_order only labels them: frame axis i is at
+    # transform position axes_order[i], so the accessors report the input's names as (c, a, b).
+    @test axis_names(input) == ("c", "a", "b")
+    @test pixel_axis_names(wcs) == ("c", "a", "b")
+    @test world_axis_names(wcs) == ("v", "u", "w")
     pixels = SVector(1.0, 2.0, 3.0)
-    intermediate = SVector(2000.0, 30.0, 100.0)
-    world = SVector(100.0, 30.0, 2000.0)
+    world = SVector(10.0, 200.0, 3000.0)
     @test pixel_to_world(wcs, pixels) == world
     @test world_to_pixel(wcs, world) == pixels
     @test in_domain(wcs, pixels)
     @test in_image(wcs, world)
     @test !in_domain(wcs, SVector(1.0, 20.0, 3.0))
-    @test transform(wcs, "input", "middle", pixels...) == intermediate
-    @test transform(wcs, "middle", "output", intermediate...) == world
+    @test transform(wcs, "input", "middle", pixels...) == world
+    @test transform(wcs, "middle", "output", world...) == world
     @test transform(wcs, "output", "input", world...) == pixels
-    @test axis_correlation_matrix(wcs) == @SMatrix [true false false; false false true; false true false]
+    @test axis_correlation_matrix(wcs) == [i == j for i in 1:3, j in 1:3]
 
     batch = [1.0 4.0; 2.0 5.0; 3.0 6.0]
     world_batch = pixel_to_world(wcs, batch)
-    @test world_batch == [100.0 400.0; 30.0 60.0; 2000.0 5000.0]
+    @test world_batch == [10.0 40.0; 200.0 500.0; 3000.0 6000.0]
     @test world_to_pixel(wcs, world_batch) == batch
 
+    # "a" is transform input 2, so fixing it removes the second pixel_shape entry and bounding-box interval.
     sliced = fix_inputs(wcs, "a" => 1.0)
     @test input_frame(sliced).axes_names == ("b", "c")
     @test input_frame(sliced).axes_order == (2, 1)
-    @test sliced.pixel_shape == (20, 30)
-    @test sliced.bounding_box.intervals == ((0.0, 19.0), (0.0, 29.0))
-    @test pixel_to_world(sliced, 2.0, 3.0) == world
-    @test world_to_pixel(sliced, world) == SVector(2.0, 3.0)
-    @test_throws "lies outside the WCS bounding box" fix_inputs(wcs, "a" => 10.0)
+    @test pixel_axis_names(sliced) == ("c", "b")
+    @test sliced.pixel_shape == (10, 30)
+    @test sliced.bounding_box.intervals == ((0.0, 9.0), (0.0, 29.0))
+    @test pixel_to_world(sliced, 2.0, 3.0) == SVector(20.0, 100.0, 3000.0)
+    @test world_to_pixel(sliced, SVector(20.0, 100.0, 3000.0)) == SVector(2.0, 3.0)
+    @test fix_inputs(wcs, 2 => 1.0).steps == sliced.steps
+    @test_throws "lies outside the WCS bounding box" fix_inputs(wcs, "a" => 20.0)
 
     allocated_forward(wcs, coords) = @allocated pixel_to_world(wcs, coords)
     allocated_backward(wcs, coords) = @allocated world_to_pixel(wcs, coords)

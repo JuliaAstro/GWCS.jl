@@ -1,0 +1,191 @@
+#ASDF 1.0.0
+#ASDF_STANDARD 1.6.0
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+--- !core/asdf-1.1.0
+asdf_library: !core/software-1.0.0 {author: The ASDF Developers, homepage: 'http://github.com/asdf-format/asdf',
+  name: asdf, version: 5.3.1}
+history:
+  extensions:
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/core/extensions/core-1.6.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf, version: 5.3.1}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://astropy.org/astropy/extensions/units-1.3.0
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/transform/extensions/transform-1.7.0
+    manifest_software: !core/software-1.0.0 {name: asdf_transform_schemas, version: 0.6.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/coordinates/extensions/coordinates-1.0.0
+    manifest_software: !core/software-1.0.0 {name: asdf_coordinates_schemas, version: 0.5.1}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/gwcs/extensions/gwcs-1.4.0
+    manifest_software: !core/software-1.0.0 {name: asdf_wcs_schemas, version: 0.5.0}
+    software: !core/software-1.0.0 {name: gwcs, version: 1.0.3}
+axes:
+  celestial:
+    pixel_axis_names: [y, x]
+    world_axis_names: [lat, lon]
+    world_axis_physical_types: [pos.eq.dec, pos.eq.ra]
+    world_axis_units: [deg, deg]
+  composite:
+    pixel_axis_names: [i, j, k]
+    world_axis_names: [lon, wavelength, lat]
+    world_axis_physical_types: [pos.eq.ra, em.wl, pos.eq.dec]
+    world_axis_units: [deg, um, deg]
+outside:
+  celestial: !core/ndarray-1.1.0
+    data:
+    - [0.109, 0.138]
+    - [.nan, .nan]
+    datatype: float64
+    shape: [2, 2]
+transform_inputs: {}
+transform_outputs: {}
+transforms: {}
+wcs:
+  celestial: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: [100, 50]
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/frame2d-1.2.0>
+        axes_names: [x, y]
+        axes_order: [1, 0]
+        axis_physical_types: ['custom:x', 'custom:y']
+        name: detector
+        unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+      transform: !transform/compose-1.4.0
+        bounding_box: !transform/property/bounding_box-1.2.0
+          ignore: []
+          intervals:
+            x0: [-0.5, 99.5]
+            x1: [-0.5, 49.5]
+          order: F
+        forward:
+        - !transform/concatenate-1.4.0
+          forward:
+          - !transform/shift-1.4.0
+            inputs: [x]
+            offset: 10.0
+            outputs: [y]
+          - !transform/shift-1.4.0
+            inputs: [x]
+            offset: 20.0
+            outputs: [y]
+          inputs: [x0, x1]
+          outputs: [y0, y1]
+        - !transform/concatenate-1.4.0
+          forward:
+          - !transform/scale-1.4.0
+            factor: 0.001
+            inputs: [x]
+            outputs: [y]
+          - !transform/scale-1.4.0
+            factor: 0.002
+            inputs: [x]
+            outputs: [y]
+          inputs: [x0, x1]
+          outputs: [y0, y1]
+        inputs: [x0, x1]
+        outputs: [y0, y1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [1, 0]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>
+          frame_attributes: {}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  composite: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/frame-1.2.0>
+        axes_names: [i, j, k]
+        axes_order: [0, 1, 2]
+        axes_type: [PIXEL, PIXEL, PIXEL]
+        axis_physical_types: ['custom:PIXEL', 'custom:PIXEL', 'custom:PIXEL']
+        name: pixels
+        naxes: 3
+        unit: [!unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel, !unit/unit-1.0.0 pixel]
+      transform: !transform/concatenate-1.4.0
+        forward:
+        - !transform/concatenate-1.4.0
+          forward:
+          - !transform/shift-1.4.0
+            inputs: [x]
+            offset: 1.0
+            outputs: [y]
+          - !transform/shift-1.4.0
+            inputs: [x]
+            offset: 2.0
+            outputs: [y]
+          inputs: [x0, x1]
+          outputs: [y0, y1]
+        - !transform/shift-1.4.0
+          inputs: [x]
+          offset: 3.0
+          outputs: [y]
+        inputs: [x0, x1, x]
+        outputs: [y0, y1, y]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/composite_frame-1.0.0>
+        frames:
+        - !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+          axes_names: [lon, lat]
+          axes_order: [0, 2]
+          axis_physical_types: [pos.eq.ra, pos.eq.dec]
+          name: sky
+          reference_frame: !<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>
+            frame_attributes: {}
+          unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+        - !<tag:stsci.edu:gwcs/spectral_frame-1.2.0>
+          axes_names: [wavelength]
+          axes_order: [1]
+          axis_physical_types: [em.wl]
+          name: spectral
+          unit: [!unit/unit-1.0.0 um]
+        name: world
+      transform: null
+wcs_inputs:
+  celestial: !core/ndarray-1.1.0
+    data:
+    - [0.0, 0.0]
+    - [20.0, 40.0]
+    - [99.0, 3.0]
+    datatype: float64
+    shape: [3, 2]
+  composite: !core/ndarray-1.1.0
+    data:
+    - [0.0, 0.0, 0.0]
+    - [1.5, -2.0, 4.0]
+    datatype: float64
+    shape: [2, 3]
+wcs_outputs:
+  celestial: !core/ndarray-1.1.0
+    data:
+    - [0.01, 0.04]
+    - [0.03, 0.12]
+    - [0.109, 0.046]
+    datatype: float64
+    shape: [3, 2]
+  composite: !core/ndarray-1.1.0
+    data:
+    - [1.0, 2.0, 3.0]
+    - [2.5, 0.0, 7.0]
+    datatype: float64
+    shape: [2, 3]
+...

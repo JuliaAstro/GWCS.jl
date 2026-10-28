@@ -222,7 +222,7 @@ end
 # `given` is the caller's pixel, which differs from the zero-based `pixels` when `origin=1`.
 @noinline function _throw_undefined(wcs::WCS, pixels, given=pixels)
     subject = "pixel $(Tuple(given)) has no world coordinate"
-    coords = _frame_to_transform(first(wcs.steps).frame)(pixels)
+    coords = pixels
     for index in 1:(length(wcs.steps) - 1)
         step = wcs.steps[index]
         next = step.transform(coords)
@@ -237,7 +237,7 @@ end
 
 @noinline function _throw_undefined_inverse(wcs::WCS, world)
     subject = "world coordinate $(Tuple(world)) has no pixel coordinate"
-    coords = _frame_to_transform(last(wcs.steps).frame)(world)
+    coords = world
     for index in (length(wcs.steps) - 1):-1:1
         inverse = _inverse_transform_checked(wcs.steps[index].transform)
         # The numerical inverse only proves undefinedness through analytically invertible steps.
