@@ -57,11 +57,11 @@ export AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransfo
        in_domain, in_image, input_names, inverse_label_mapper, inverse_transform, label_dependencies, label_mapper_name, label_type, map_label, materialize_metadata, metadata_path, metadata_tag,
        metadata_value, metadata_version, output_dimension, output_frame,
        native_fiducial, offset_to_time, output_names, parallel, pixel_axis_names, pixel_axis_physical_types, pixel_axis_types,
-       pixel_area, pixel_axis_units, pixel_n_dim, pixel_to_world, numerical_inverse, NoConvergence,
+       pixel_area, pixel_axis_units, pixel_n_dim, pixel_to_world, pixel_to_world_jacobian, numerical_inverse, NoConvergence,
        parse_fits_wcs, find_all_fits_wcs, parse_transform, parse_wcs, register_transform!, required_metadata, select_bounding_box, selected_transform, selector_axes, selector_ignored,
        register_transform_serializer!,
        prepend_frame, prepend_frame!, prepend_transform, prepend_transform!, remove_frame, remove_frame!, rename_frame, rename_frame!,
        set_transform, set_transform!, time_to_offset, transform, transform_dependencies, transform_jacobian, transform_name,
-       to_metadata, with_bounding_box, with_pixel_shape, world_axis_names, world_axis_physical_types, world_axis_types, world_axis_units, world_n_dim, world_to_pixel, write_asdf
+       to_metadata, with_bounding_box, with_pixel_shape, world_axis_names, world_axis_physical_types, world_axis_types, world_axis_units, world_n_dim, world_to_pixel, world_to_pixel_jacobian, write_asdf
 
 end

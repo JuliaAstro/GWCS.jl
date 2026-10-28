@@ -161,7 +161,7 @@ end
 
 function audit(name, wcs, pixel)
     world = pixel_to_world(wcs, pixel; with_bounding_box=false)
-    all(isfinite, world) || return (name, fill("no finite world", 9))
+    all(isfinite, world) || return (name, fill("no finite world", 10))
     # Without an analytical inverse, a WCS whose pixel and world dimensions differ cannot be inverted at all.
     invertible = !(wcs.backward isa NoInverse) || length(pixel) == length(world)
     inverse(f) = invertible ? f() : "n/a"
@@ -169,7 +169,8 @@ function audit(name, wcs, pixel)
         check(p -> pixel_to_world(wcs, p), pixel),
         check(p -> pixel_to_world(wcs, p...), Tuple(pixel)),
         inverse(() -> check(w -> world_to_pixel(wcs, w; quiet=true), world)),
-        check(p -> transform_jacobian(wcs.forward, p), pixel),
+        check(p -> pixel_to_world_jacobian(wcs, p; with_bounding_box=false), pixel),
+        inverse(() -> check(w -> world_to_pixel_jacobian(wcs, w; with_bounding_box=false, quiet=true), world)),
         check(p -> in_domain(wcs, p), pixel),
         inverse(() -> check(w -> in_image(wcs, w), world)),
         check(p -> pixel_to_world(wcs, p), pixel .+ 1e7),
@@ -179,7 +180,7 @@ function audit(name, wcs, pixel)
     return (name, checks)
 end
 
-const COLUMNS = ("pixel_to_world", "p2w(x, y...)", "world_to_pixel", "jacobian", "in_domain", "in_image", "p2w far/fill", "p2w matrix", "w2p matrix")
+const COLUMNS = ("pixel_to_world", "p2w(x, y...)", "world_to_pixel", "p2w jacobian", "w2p jacobian", "in_domain", "in_image", "p2w far/fill", "p2w matrix", "w2p matrix")
 
 function main(files)
     rows = [audit(name, case...) for (name, case) in cases(files)]

@@ -377,6 +377,14 @@ end
     isnan(x) || isnan(y) ? SVector(oftype(x, NaN), oftype(y, NaN)) : SVector(x, y)
 end
 
+# pi/2 - theta with pi/2 in two parts, so a small colatitude keeps its relative accuracy and agrees with cos(theta),
+# which the sky rotation uses; the differentiated projection and rotation then agree near the pole.
+_half_pi_low(::Type{Float64}) = 6.123233995736766e-17
+_half_pi_low(::Type{Float32}) = -4.371139f-8
+_half_pi_low(::Type{<:ForwardDiff.Dual{<:Any,V}}) where {V} = _half_pi_low(V)
+_half_pi_low(::Type{T}) where {T} = zero(T)
+@inline _colatitude(theta) = (oftype(theta, pi / 2) - theta) + _half_pi_low(typeof(theta))
+
 @inline function _zenithal_phi(x, y)
     iszero(x) && iszero(y) && return zero(promote_type(typeof(x), typeof(y)))
     return atan(x, -y)
@@ -680,10 +688,39 @@ end
 
 function _native_to_intermediate(projection::ZenithalPolynomial, phi, theta)
     theta = _native_latitude(theta, projection)
-    distance = oftype(theta, pi / 2) - theta
+    distance = _colatitude(theta)
     distance <= projection.monotonic_limit + _projection_tolerance(typeof(distance)) || return _nan_pair(phi, theta)
     radius = rad2deg(_projection_polynomial(projection.coefficients, distance))
     return _zenithal_xy(radius, phi)
+end
+
+# The native longitude is undefined at a zenithal projection's reference point, the native pole, so the chain rule
+# through native coordinates gives NaN there although the projection and sky rotation compose smoothly, and near it
+# the projection's Jacobian, taken at the plane point, disagrees with the rotation's, taken at the rounded native
+# latitude. Differentiating the projection's native-to-plane direction and the rotation at the same native point keeps
+# the two consistent: J = J_rotation * inv(J_plane). At the pole both longitude columns vanish, and derivatives along
+# the meridians at native longitudes 0 and 90 take their place.
+_is_native_pair(::Type, ::Type) = false
+_is_native_pair(::Type{<:IntermediateToNative{<:AbstractZenithalProjection}}, ::Type{<:NativeToCelestial}) = true
+_is_native_pair(::Type{<:CelestialToNative}, ::Type{<:NativeToIntermediate{<:AbstractZenithalProjection}}) = true
+
+# Away from the pole along a meridian, so the derivative stays inside the latitude range; the sign cancels in J.
+@inline _meridian_derivative(transform, phi::T) where {T} = ForwardDiff.derivative(colatitude -> transform(SVector(phi, T(90) - colatitude)), zero(T))
+
+@inline function _native_derivatives(plane::NativeToIntermediate, sky::NativeToCelestial, native::StaticVector{2,T}) where {T}
+    native[2] == 90 || return _transform_jacobian_checked(plane, native), _transform_jacobian_checked(sky, native)
+    meridians = (zero(T), T(90))
+    return hcat(map(phi -> _meridian_derivative(plane, phi), meridians)...), hcat(map(phi -> _meridian_derivative(sky, phi), meridians)...)
+end
+
+@inline function _native_pair_jacobian(projection::IntermediateToNative, rotation::NativeToCelestial, native)
+    plane, sky = _native_derivatives(NativeToIntermediate(projection.projection), rotation, native)
+    return sky / plane
+end
+
+@inline function _native_pair_jacobian(rotation::CelestialToNative, projection::NativeToIntermediate, native)
+    plane, sky = _native_derivatives(projection, inverse_transform(rotation), native)
+    return plane / sky
 end
 
 function transform_jacobian(transform::IntermediateToNative{<:ZenithalPolynomial}, coords::StaticVector{2})
@@ -1115,7 +1152,7 @@ end
 
 @inline function _native_to_intermediate(projection::ZenithalEquidistant, phi, theta)
     theta = _native_latitude(theta, projection)
-    return _zenithal_xy(rad2deg(oftype(theta, pi / 2) - theta), phi)
+    return _zenithal_xy(rad2deg(_colatitude(theta)), phi)
 end
 
 @inline function _intermediate_to_native(::ZenithalEqualArea, x, y)
@@ -1129,7 +1166,7 @@ end
 
 @inline function _native_to_intermediate(projection::ZenithalEqualArea, phi, theta)
     theta = _native_latitude(theta, projection)
-    radius = rad2deg(2sin((oftype(theta, pi / 2) - theta) / 2))
+    radius = rad2deg(2sin(_colatitude(theta) / 2))
     return _zenithal_xy(radius, phi)
 end
 
@@ -1333,7 +1370,7 @@ end
 
 @inline function _airy_radius(projection::AiryProjection, theta)
     T = typeof(theta)
-    xi = (oftype(theta, pi / 2) - theta) / 2
+    xi = _colatitude(theta) / 2
     xi >= zero(T) || return oftype(theta, NaN)
     xi < oftype(theta, pi / 2) || return oftype(theta, NaN)
     coefficient = T(projection.coefficient)

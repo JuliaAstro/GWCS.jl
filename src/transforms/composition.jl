@@ -102,7 +102,18 @@ input_names(transform::ComposedTransform) = input_names(first(transform.transfor
 output_names(transform::ComposedTransform) = output_names(last(transform.transforms))
 
 @generated function _apply_composed_jacobian(transforms::Tuple, coords, jacobian)
-    steps = [:(jacobian = _transform_jacobian_checked(transforms[$i], coords) * jacobian; coords = transforms[$i](coords)) for i in 1:fieldcount(transforms)]
+    steps = Expr[]
+    i = 1
+    while i <= fieldcount(transforms)
+        if i < fieldcount(transforms) && _is_native_pair(transforms.parameters[i], transforms.parameters[i + 1])
+            # A projection and a sky rotation are differentiated together through the native point between them.
+            push!(steps, :(native = transforms[$i](coords); jacobian = _native_pair_jacobian(transforms[$i], transforms[$(i + 1)], native) * jacobian; coords = transforms[$(i + 1)](native)))
+            i += 2
+        else
+            push!(steps, :(jacobian = _transform_jacobian_checked(transforms[$i], coords) * jacobian; coords = transforms[$i](coords)))
+            i += 1
+        end
+    end
     return :($(Expr(:meta, :inline)); $(steps...); (coords, jacobian))
 end
 

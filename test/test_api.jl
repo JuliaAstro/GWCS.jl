@@ -209,7 +209,8 @@ end
         return abs(dx[1] * dy[2] - dx[2] * dy[1]) * cosd(pixel_to_world(wcs, x, y)[latitude]) * deg2rad(1.0)^2
     end
     tan = parse_fits_wcs(header("RA--", "DEC-"))
-    # Half a pixel from the reference pixel, the TAN area is |det CD| to well below the tolerance.
+    # At the reference pixel, the TAN area is |det CD|.
+    @test pixel_area(tan, 50.0, 40.0) ≈ abs(cd[1, 1] * cd[2, 2] - cd[1, 2] * cd[2, 1]) * deg2rad(1.0)^2 rtol=1e-14
     @test pixel_area(tan, 50.5, 40.5) ≈ abs(cd[1, 1] * cd[2, 2] - cd[1, 2] * cd[2, 1]) * deg2rad(1.0)^2 rtol=1e-9
     @test pixel_area(tan, 3000.0, -2000.0) ≈ difference_area(tan, 3000.0, -2000.0) rtol=1e-7
     @test pixel_area(tan, (3000.0, -2000.0)) == pixel_area(tan, [3000.0, -2000.0]) == pixel_area(tan, SVector(3000.0, -2000.0))
@@ -250,5 +251,80 @@ end
     for (wcs, coords) in ((tan, SVector(3000.0, -2000.0)), (roman, SVector(12.0, 21.0)))
         @test @inferred(pixel_area(wcs, coords)) isa Float64
         @test allocated_pixel_area(wcs, coords) == 0
+    end
+end
+
+@testset "WCS Jacobians" begin
+    cd = [-2e-4 3e-5; 1e-5 2.5e-4]
+    header(code; extra...) = merge(Dict{String,Any}("NAXIS" => 2, "CTYPE1" => "RA---$code", "CTYPE2" => "DEC--$code", "CRPIX1" => 51.0, "CRPIX2" => 41.0, "CRVAL1" => 30.0, "CRVAL2" => 40.0,
+        "CD1_1" => cd[1, 1], "CD1_2" => cd[1, 2], "CD2_1" => cd[2, 1], "CD2_2" => cd[2, 2]), Dict{String,Any}(String(key) => value for (key, value) in extra))
+    difference(f, point; step=1e-4) = hcat(map(axis -> (f(point + step * SVector(ntuple(==(axis), length(point)))) - f(point - step * SVector(ntuple(==(axis), length(point))))) / 2step, 1:length(point))...)
+    # At a zenithal reference point, intermediate (x, y) are offsets east and north, so d(lon, lat)/d(x, y) = diag(1/cos(lat), 1).
+    expected = [1 / cosd(40.0) 0; 0 1] * cd
+    for (code, extra) in (("TAN", ()), ("SIN", ()), ("ARC", ()), ("STG", ()), ("ZEA", ()), ("ZPN", (PV2_1=1.0, PV2_2=0.1)), ("AIR", ()), ("AZP", (PV2_1=2.0,)))
+        wcs = parse_fits_wcs(header(code; extra...))
+        reference = pixel_to_world_jacobian(wcs, 50.0, 40.0)
+        code == "AIR" || @test reference ≈ expected rtol=1e-14
+        # The native longitude is undefined at the reference point; the Jacobian is finite there and smooth near it.
+        for offset in (1e-12, 1e-9, 1e-6)
+            @test pixel_to_world_jacobian(wcs, 50.0 + offset, 40.0 - offset) ≈ reference rtol=1e-11
+        end
+        # ZPN and AIR invert iteratively to about 1e-12 degrees, so a pixel step keeps that noise out of the difference.
+        @test pixel_to_world_jacobian(wcs, 300.0, -200.0) ≈ difference(pixel -> pixel_to_world(wcs, pixel), SVector(300.0, -200.0); step=1.0) rtol=1e-7
+        world = pixel_to_world(wcs, 50.0, 40.0)
+        @test world_to_pixel_jacobian(wcs, world) * reference ≈ [1 0; 0 1] atol=1e-12
+    end
+
+    tan = parse_fits_wcs(header("TAN"))
+    J = pixel_to_world_jacobian(tan, 300.0, -200.0)
+    @test J isa SMatrix{2,2,Float64}
+    @test pixel_to_world_jacobian(tan, (300.0, -200.0)) == pixel_to_world_jacobian(tan, [300.0, -200.0]) == pixel_to_world_jacobian(tan, SVector(300.0, -200.0)) == J
+    @test pixel_to_world_jacobian(tan, 301.0, -199.0; origin=1) == J
+    @test pixel_to_world_jacobian(tan, [300.0 50.0; -200.0 40.0]) == [J, pixel_to_world_jacobian(tan, 50.0, 40.0)]
+    world = pixel_to_world(tan, 300.0, -200.0)
+    @test world_to_pixel_jacobian(tan, world) ≈ inv(J) rtol=1e-12
+    @test world_to_pixel_jacobian(tan, (world...,)) == world_to_pixel_jacobian(tan, collect(world)) == world_to_pixel_jacobian(tan, world...)
+    @test world_to_pixel_jacobian(tan, hcat(world, world)) == fill(world_to_pixel_jacobian(tan, world), 2)
+    @test_throws DimensionMismatch pixel_to_world_jacobian(tan, [1.0])
+    @test_throws DimensionMismatch world_to_pixel_jacobian(tan, [1.0, 2.0, 3.0])
+
+    # Coordinates without a result give fill_value, or throw with strict=true, as in pixel_to_world and world_to_pixel.
+    boxed = with_bounding_box(tan, BoundingBox(((-0.5, 99.5), (-0.5, 79.5))))
+    @test all(isnan, pixel_to_world_jacobian(boxed, 120.0, 10.0))
+    @test pixel_to_world_jacobian(boxed, 120.0, 10.0; fill_value=0.0) == zeros(2, 2)
+    @test pixel_to_world_jacobian(boxed, 120.0, 10.0; with_bounding_box=false) == pixel_to_world_jacobian(tan, 120.0, 10.0)
+    @test_throws "pixel (120.0, 10.0) is outside the WCS bounding box" pixel_to_world_jacobian(boxed, 120.0, 10.0; strict=true)
+    outside = pixel_to_world(tan, 120.0, 10.0)
+    @test all(isnan, world_to_pixel_jacobian(boxed, outside))
+    @test_throws "outside the WCS bounding box" world_to_pixel_jacobian(boxed, outside; strict=true)
+    @test all(isnan, pixel_to_world_jacobian(tan, NaN, 1.0; strict=true))
+    ait = parse_fits_wcs(Dict("NAXIS" => 2, "CTYPE1" => "RA---AIT", "CTYPE2" => "DEC--AIT", "CRPIX1" => 181.0, "CRPIX2" => 91.0, "CDELT1" => -1.0, "CDELT2" => 1.0))
+    @test all(isnan, pixel_to_world_jacobian(ait, 0.0, 0.0))
+    @test_throws r"pixel \(0\.0, 0\.0\) has no world coordinate: IntermediateToNative\(HammerAitoffProjection\)" pixel_to_world_jacobian(ait, 0.0, 0.0; strict=true)
+    @test all(isnan, world_to_pixel_jacobian(tan, 210.0, -40.0))
+    @test_throws r"world coordinate \(210\.0, -40\.0\) has no pixel coordinate" world_to_pixel_jacobian(tan, 210.0, -40.0; strict=true)
+
+    # With an analytical inverse, the inverse Jacobian is that inverse's; the exact inverse of the forward transform's
+    # Jacobian comes from the numerical inverse. Without one, it is the inverse of the forward Jacobian at the solution.
+    roman = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
+    roman_world = pixel_to_world(roman, 12.0, 21.0)
+    @test world_to_pixel_jacobian(roman, roman_world) ≈ difference(world -> world_to_pixel(roman, world), roman_world; step=1e-7) rtol=1e-6
+    @test numerical_inverse(roman, roman_world) ≈ SVector(12.0, 21.0) atol=1e-5
+    @test inv(pixel_to_world_jacobian(roman, numerical_inverse(roman, roman_world))) ≈ world_to_pixel_jacobian(roman, roman_world) rtol=1e-10
+    distortion = WCS(Step(Frame2D(name="pixels"), parallel(Polynomial1D([0.0, 1.0, 1e-3]), Polynomial1D([0.0, 1.0, -5e-4]))), Step(CoordinateFrame{2}(name="world")))
+    target = SVector(2.5, -3.5)
+    @test world_to_pixel_jacobian(distortion, target) == inv(pixel_to_world_jacobian(distortion, world_to_pixel(distortion, target)))
+    @test_throws NoConvergence world_to_pixel_jacobian(distortion, target; tolerance=1e-15, maxiter=1)
+    nonsquare = WCS(Step(Frame2D(name="pixels"), CallableTransform{2,3}((x, y) -> (x, y, x + y))), Step(CoordinateFrame{3}(name="world")))
+    @test_throws "numerical inversion requires equal pixel and world dimensions, got 2 and 3" world_to_pixel_jacobian(nonsquare, 1.0, 2.0, 3.0)
+
+    allocated_forward(wcs, coords) = @allocated pixel_to_world_jacobian(wcs, coords)
+    allocated_inverse(wcs, coords) = @allocated world_to_pixel_jacobian(wcs, coords)
+    for (wcs, pixel) in ((tan, SVector(50.0, 40.0)), (tan, SVector(300.0, -200.0)), (distortion, SVector(2.0, -3.0)))
+        world = pixel_to_world(wcs, pixel)
+        @test @inferred(pixel_to_world_jacobian(wcs, pixel)) isa SMatrix{2,2,Float64}
+        @test @inferred(world_to_pixel_jacobian(wcs, world)) isa SMatrix{2,2,Float64}
+        @test allocated_forward(wcs, pixel) == 0
+        @test allocated_inverse(wcs, world) == 0
     end
 end

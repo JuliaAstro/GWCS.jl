@@ -713,3 +713,13 @@ end
     @test collect(written["axis_physical_types"]) == ["pos.eq.ra", "pos.eq.dec"]
     @test written["axes_order"] == [1, 0]
 end
+
+@testset "Zenithal Jacobians in Python pipelines" begin
+    # wcs_from_fiducial composes TAN and a sky rotation; plane (0, 0) is the native pole, where the native longitude is
+    # undefined, and the projection and rotation are differentiated together there.
+    fiducial = with_logger(NullLogger()) do
+        parse_wcs(ASDF.load(joinpath(@__DIR__, "fixtures", "quantities.asdf"); extensions=true)["wcs"]["fiducial"])
+    end
+    @test pixel_to_world_jacobian(fiducial, 0.0, 0.0) ≈ [1 / cosd(45.0) 0; 0 1] rtol=1e-14
+    @test world_to_pixel_jacobian(fiducial, pixel_to_world(fiducial, 0.0, 0.0)) ≈ [cosd(45.0) 0; 0 1] rtol=1e-14
+end
