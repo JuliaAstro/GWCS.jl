@@ -92,21 +92,25 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test pixel_to_world(preserved, fits_pixel(512.0, 512.0)) ≈ reference .* 3600 atol=1e-8
     @test world_axis_units(canonical) == ("deg", "deg")
     @test world_axis_units(preserved) == ("arcsec", "arcsec")
-    @test output_frame(tan).reference_frame.radesys == "ICRS"
+    # Celestial reference frames follow astropy's wcs_to_celestial_frame, in the form asdf-astropy writes.
+    @test output_frame(tan) isa CelestialFrame{2}
+    @test output_frame(tan).reference_frame === :ICRS
+    frame_tag(wcs) = GWCS._tag(output_frame(wcs).reference_frame)
+    epoch(wcs, attribute) = (time = output_frame(wcs).reference_frame["frame_attributes"][attribute]; (time["value"], time["format"], time["scale"]))
     fk4 = parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0)))
-    @test output_frame(fk4).reference_frame.radesys == "FK4"
-    @test output_frame(fk4).reference_frame.equinox == 1950.0
-    @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "FK5")))).reference_frame.equinox == 2000.0
-    @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "FK4-NO-E")))).reference_frame.equinox == 1950.0
-    icrs = output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "icrs", "EQUINOX" => 1950.0)))).reference_frame
-    @test icrs.radesys == "ICRS"
-    @test icrs.equinox === nothing
-    gappt = output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "GAPPT", "EQUINOX" => 2000.0)))).reference_frame
-    @test gappt.equinox === nothing
+    @test frame_tag(fk4) == "tag:astropy.org:astropy/coordinates/frames/fk4-1.2.0"
+    @test epoch(fk4, "equinox") == epoch(fk4, "obstime") == (1950.0, "byear", "tt")
+    fk5 = parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "FK5")))
+    @test frame_tag(fk5) == "tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0"
+    @test epoch(fk5, "equinox") == (2000.0, "jyear", "tt")
+    no_e_terms = parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "FK4-NO-E")))
+    @test frame_tag(no_e_terms) == "tag:astropy.org:astropy/coordinates/frames/fk4noeterms-1.2.0"
+    @test epoch(no_e_terms, "equinox") == (1950.0, "byear", "tt")
+    @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "icrs", "EQUINOX" => 1950.0)))).reference_frame === :ICRS
+    # Systems without an astropy frame tag keep their FITS metadata.
+    @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "GAPPT", "EQUINOX" => 2000.0)))).reference_frame == (system=("RA", "DEC"), radesys="GAPPT", equinox=nothing)
     ecliptic_header = merge(tan_header, Dict("CTYPE1" => "ELON-AIT", "CTYPE2" => "ELAT-AIT", "EQUINOX" => 2000.0))
-    ecliptic = output_frame(parse_fits_wcs(ecliptic_header)).reference_frame
-    @test ecliptic.radesys == "FK5"
-    @test ecliptic.equinox == 2000.0
+    @test output_frame(parse_fits_wcs(ecliptic_header)).reference_frame == (system=("ELON", "ELAT"), radesys="FK5", equinox=2000.0)
     generic_header = merge(tan_header, Dict("CTYPE1" => "XLAT-BON", "CTYPE2" => "XLON-BON", "CRVAL1" => 20.0, "CRVAL2" => 120.0, "PV1_1" => 45.0))
     generic = parse_fits_wcs(generic_header)
     generic_world = pixel_to_world(generic, fits_pixel(512.0, 512.0))
@@ -114,17 +118,18 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test world_to_pixel(generic, generic_world) ≈ fits_pixel(512.0, 512.0) atol=1e-10
     @test world_axis_types(generic) == (SPATIAL, SPATIAL)
     @test world_axis_physical_types(generic) == ("custom:xlat", "custom:xlon")
-    @test output_frame(generic).reference_frame.radesys == ""
+    # Latitude first: axes_order places the CelestialFrame's (lon, lat) at header axes (2, 1).
+    @test output_frame(generic) isa CelestialFrame{2} && output_frame(generic).axes_order == (2, 1)
+    @test output_frame(generic).reference_frame == (system=("XLON", "XLAT"), radesys="", equinox=nothing)
     @test_throws "not a matching longitude/latitude pair" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "XLON-TAN", "CTYPE2" => "YLAT-TAN")))
     @test_throws "must be paired" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "XXLN-TAN", "CTYPE2" => "Y")))
 
     galactic_header = merge(tan_header, Dict("CTYPE1" => "GLON-CAR", "CTYPE2" => "GLAT-CAR", "RADESYS" => "FK5", "EQUINOX" => 2000.0))
-    galactic = output_frame(parse_fits_wcs(galactic_header)).reference_frame
-    @test galactic.radesys == ""
-    @test galactic.equinox === nothing
-    linear_reference = output_frame(parse_fits_wcs(merge(linear_header, Dict("RADESYS" => "FK5", "EQUINOX" => 2000.0)))).reference_frame
-    @test linear_reference.radesys == ""
-    @test linear_reference.equinox === nothing
+    galactic = parse_fits_wcs(galactic_header)
+    @test frame_tag(galactic) == "tag:astropy.org:astropy/coordinates/frames/galactic-1.2.0"
+    @test isempty(output_frame(galactic).reference_frame["frame_attributes"])
+    linear_frame = output_frame(parse_fits_wcs(merge(linear_header, Dict("RADESYS" => "FK5", "EQUINOX" => 2000.0))))
+    @test linear_frame isa CoordinateFrame && linear_frame.reference_frame === nothing
 
     log_reference = 10.0
     log_offset = 2.0
@@ -149,7 +154,7 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test pixel_to_world(time_log, fits_pixel(1.0)) ≈ SVector(86400.0)
     @test pixel_to_world(time_log, fits_pixel(2.0)) ≈ SVector(86400.0 * exp(0.5))
     @test world_to_pixel(time_log, 86400.0 * exp(0.5)) ≈ fits_pixel(2.0)
-    time_metadata = output_frame(time).reference_frame.time
+    time_frame = output_frame(time)
     @test pixel_to_world(time, fits_pixel(1.0)) == SVector(86400.0)
     @test pixel_to_world(parse_fits_wcs(time_header; preserve_units=true), fits_pixel(2.0)) == SVector(1.5)
     @test world_axis_units(time) == ("s",)
@@ -160,10 +165,30 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test pixel_to_world(parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "cy"))), fits_pixel(2.0)) == SVector(1.5 * 3155760000.0)
     @test world_axis_units(parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "cy")); preserve_units=true)) == ("cy",)
     @test_throws "unsupported time CUNIT1" parse_fits_wcs(merge(time_header, Dict("CUNIT1" => "fortnight")))
-    @test time_metadata.reference_epoch == 59000.25
-    @test time_metadata.time_scale == "UTC"
-    @test time_metadata.reference_position == "TOPOCENTER"
-    @test time_metadata.location == (1.0, 2.0, 3.0)
+    # The reference time follows astropy's FITS WCS, as an ASDF time.
+    @test time_frame isa TemporalFrame
+    @test (time_frame.reference_epoch, time_frame.time_scale, time_frame.time_format) == (59000.25, "utc", "mjd")
+    @test time_frame.location == (1.0, 2.0, 3.0)
+    @test time_frame.reference_frame === nothing
+    time_of(changes) = output_frame(parse_fits_wcs(merge(time_header, changes)))
+    @test time_of(Dict("TIMESYS" => "TT")).time_scale == "tt"
+    @test time_of(Dict("CTYPE1" => "TDB")).time_scale == "tdb"
+    @test time_of(Dict("TIMESYS" => "TDT")).time_scale == "tt"
+    gps = time_of(Dict("TIMESYS" => "GPS"))
+    @test (gps.time_scale, gps.reference_epoch) == ("tai", 59000.25 + 19 / 86400)
+    @test time_of(Dict("TREFPOS" => "GEOCENTER")).location == (0.0, 0.0, 0.0)
+    # Metadata the ASDF time cannot hold is kept as FITS metadata.
+    @test time_of(Dict("TREFPOS" => "BARYCENTER")).reference_frame == (reference_position="BARYCENTER",)
+    @test time_of(Dict("TIMESYS" => "UTC(NIST)", "TREFDIR" => "TARGET")).reference_frame == (subscale="NIST", reference_direction="TARGET")
+    @test time_of(Dict("TIMESYS" => "LOCAL")).reference_frame == (time_scale="local",)
+    # As in WCSLIB, MJDREF takes precedence over DATEREF, which must agree with it, and defaults to zero.
+    without_reference = filter(pair -> !startswith(pair.first, "MJDREF"), time_header)
+    @test output_frame(parse_fits_wcs(merge(without_reference, Dict("DATEREF" => "2000-01-01T12:00:00")))).reference_epoch == 51544.5
+    @test output_frame(parse_fits_wcs(merge(without_reference, Dict("DATEREF" => "1858-11-17")))).reference_epoch == 0.0
+    @test time_of(Dict("DATEREF" => "2020-05-31T06:00:00")).reference_epoch == 59000.25
+    @test_throws "DATEREF=\"2020-06-01\" is inconsistent with the MJDREF or JDREF reference time 59000.25" parse_fits_wcs(merge(time_header, Dict("DATEREF" => "2020-06-01")))
+    @test_throws "DATEREF=\"31/05/20\" is not an ISO 8601 date" parse_fits_wcs(merge(without_reference, Dict("DATEREF" => "31/05/20")))
+    @test output_frame(parse_fits_wcs(without_reference)).reference_epoch == 0.0
 
     spectral_metadata_header = Dict("NAXIS" => 1, "CTYPE1" => "FREQ", "RESTFRQ" => 1.420405751e9)
     @test output_frame(parse_fits_wcs(spectral_metadata_header)).reference_frame.restfrq == 1.420405751e9
@@ -997,7 +1022,7 @@ end
     @test pixel_to_world(repaired(merge(ncp, Dict("CTYPE1" => "RA", "CTYPE2" => "DEC")), r"no projection code"), fits_pixel(60.0, 43.0)) ≈ SVector(29.0, 39.3) atol=1e-12
 
     # AIPS spectral types: the suffix (or VELREF) gives SPECSYS; VELO is optical unless VELREF/256 == 1.
-    frame(wcs) = output_frame(wcs).reference_frame.spectral.specsys
+    frame(wcs) = output_frame(wcs).reference_frame.specsys
     @test frame(repaired(spectral("FREQ-LSR", 1.42e9, -2e4), r"\"FREQ-LSR\" read as \"FREQ\" with SPECSYS=\"LSRK\"")) == "LSRK"
     velref_freq = repaired(spectral("FREQ-OBS", 1.42e9, -2e4; VELREF=2), r"VELREF=2")
     @test frame(velref_freq) == "BARYCENT"
@@ -1022,14 +1047,14 @@ end
     @test pixel_to_world(repaired(padded_cd, r"CD001001 read as CD1_1"), fits_pixel(60.0, 43.0)) ≈ SVector(28.65581489581939, 39.322300146818115) atol=1e-12
     @test_throws "PC001001 and PC1_1 give conflicting values" parse_fits_wcs(merge(celestial("TAN"), Dict("PC001001" => 0.9, "PC1_1" => 1.0)))
     @test pixel_to_world(repaired(celestial("SIN"; PROJP1=0.1, PROJP2=-0.2), r"PROJP1 read as PV2_1"), fits_pixel(60.0, 43.0)) ≈ SVector(28.70604087434814, 39.29531321986866) atol=1e-12
-    epoch = output_frame(repaired(celestial("TAN"; EPOCH=1950.0), r"EPOCH read as EQUINOX")).reference_frame
-    @test (epoch.radesys, epoch.equinox) == ("FK4", 1950.0)
-    @test output_frame(parse_fits_wcs(celestial("TAN"; EPOCH=1950.0, EQUINOX=2000.0))).reference_frame.equinox == 2000.0
-    @test output_frame(repaired(celestial("TAN"; RADECSYS="FK5"), r"RADECSYS read as RADESYS")).reference_frame.radesys == "FK5"
-    @test output_frame(repaired(spectral("VRAD", 1.5e4, 4e3; VSOURCE=1.5e4), r"VSOURCE read as ZSOURCE")).reference_frame.spectral.zsource ≈ 5.0035866073772084e-5 rtol=1e-12
+    equinox_of(wcs) = (reference = output_frame(wcs).reference_frame; (GWCS._tag(reference), reference["frame_attributes"]["equinox"]["value"]))
+    @test equinox_of(repaired(celestial("TAN"; EPOCH=1950.0), r"EPOCH read as EQUINOX")) == ("tag:astropy.org:astropy/coordinates/frames/fk4-1.2.0", 1950.0)
+    @test equinox_of(parse_fits_wcs(celestial("TAN"; EPOCH=1950.0, EQUINOX=2000.0))) == ("tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0", 2000.0)
+    @test equinox_of(repaired(celestial("TAN"; RADECSYS="FK5"), r"RADECSYS read as RADESYS")) == ("tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0", 2000.0)
+    @test output_frame(repaired(spectral("VRAD", 1.5e4, 4e3; VSOURCE=1.5e4), r"VSOURCE read as ZSOURCE")).reference_frame.zsource ≈ 5.0035866073772084e-5 rtol=1e-12
     time_header = Dict{String,Any}("NAXIS" => 1, "CTYPE1" => "TIME", "CRPIX1" => 1.0, "CRVAL1" => 0.0, "CDELT1" => 1.0)
-    epoch_of(header) = output_frame(parse_fits_wcs(header; legacy=:quiet)).reference_frame.time.reference_epoch
-    @test output_frame(repaired(merge(time_header, Dict("MJD-REF" => 59000.5)), r"MJD-REF read as MJDREF")).reference_frame.time.reference_epoch == 59000.5
+    epoch_of(header) = output_frame(parse_fits_wcs(header; legacy=:quiet)).reference_epoch
+    @test output_frame(repaired(merge(time_header, Dict("MJD-REF" => 59000.5)), r"MJD-REF read as MJDREF")).reference_epoch == 59000.5
     @test epoch_of(merge(time_header, Dict("JDREF" => 2459000.5))) == 59000.0
     @test epoch_of(merge(time_header, Dict("JDREFI" => 2459000, "JDREFF" => 0.75))) == 59000.25
 
@@ -1067,4 +1092,42 @@ end
         "CRVAL1" => 30.0, "CRVAL2" => 40.0, "CDELT1" => -0.1, "CDELT2" => 0.1))
     @test_throws "uses legacy conventions" parse_fits_wcs(legacy_cards; legacy=:error)
     @test pixel_to_world(parse_fits_wcs(legacy_cards; legacy=:quiet), fits_pixel(60.0, 43.0)) ≈ SVector(28.708058345297673, 39.27700409069822) atol=1e-12
+end
+
+@testset "FITS world frames" begin
+    header(ctypes; extra...) = merge(Dict{String,Any}("NAXIS" => length(ctypes), ("CTYPE$i" => ctype for (i, ctype) in enumerate(ctypes))...,
+        ("CRPIX$i" => 1.0 for i in eachindex(ctypes))..., ("CDELT$i" => 1e-3 for i in eachindex(ctypes))...), Dict{String,Any}(String(key) => value for (key, value) in extra))
+    # The world coordinates stay in header order, with each frame's axes placed by axes_order.
+    cube = parse_fits_wcs(header(("RA---TAN", "WAVE", "DEC--TAN", "STOKES", "TIME", "X"); CRVAL1=30.0, CRVAL2=5e-7, CRVAL3=40.0, CRVAL4=1.0, SPECSYS="BARYCENT", MJDREF=59000.0))
+    world = output_frame(cube)
+    @test world isa CompositeFrame{6}
+    @test map(frame -> typeof(frame).name.wrapper, world.frames) == (CelestialFrame, SpectralFrame, StokesFrame, TemporalFrame, CoordinateFrame)
+    @test map(frame -> frame.axes_order, world.frames) == ((1, 3), (2,), (4,), (5,), (6,))
+    @test world_axis_names(cube) == ("RA", "WAVE", "DEC", "STOKES", "TIME", "X")
+    @test world_axis_physical_types(cube) == ("pos.eq.ra", "em.wl", "pos.eq.dec", "phys.polarization.stokes", "time", "custom:x")
+    @test pixel_to_world(cube, zeros(6)...) ≈ SVector(30.0, 5e-7, 40.0, 1.0, 0.0, 0.0)
+    @test world.frames[2].reference_frame.specsys == "BARYCENT"
+    @test world.frames[4].reference_epoch == 59000.0
+    @test output_frame(parse_fits_wcs(header(("WAVE",)))).reference_frame === nothing
+
+    # Frames with an ASDF form are written as Python GWCS reads them; FITS metadata without one raises.
+    for (name, extra) in (("icrs", ()), ("fk5", (RADESYS="FK5", EQUINOX=1984.5)), ("galactic", (CTYPE1="GLON-TAN", CTYPE2="GLAT-TAN")))
+        sky = parse_fits_wcs(merge(header(("RA---TAN", "DEC--TAN"); CRVAL1=30.0, CRVAL2=40.0), Dict{String,Any}(String(key) => value for (key, value) in pairs(extra))))
+        reparsed = parse_wcs(to_metadata(sky))
+        @test output_frame(reparsed).reference_frame == output_frame(sky).reference_frame
+        @test pixel_to_world(reparsed, 3.0, 4.0) ≈ pixel_to_world(sky, 3.0, 4.0) atol=1e-12
+    end
+    @test_throws r"FITS reference metadata \(system = \(\"ELON\", \"ELAT\"\).* has no ASDF representation at metadata/steps/3/frame/reference_frame" to_metadata(parse_fits_wcs(header(("ELON-TAN", "ELAT-TAN"))))
+    @test_throws r"FITS reference metadata \(restfrq = nothing, restwav = nothing, specsys = \"BARYCENT\".* has no ASDF representation" to_metadata(parse_fits_wcs(header(("WAVE",); SPECSYS="BARYCENT")))
+    @test_throws r"FITS reference metadata \(reference_position = \"BARYCENTER\",\) has no ASDF representation" to_metadata(parse_fits_wcs(header(("TIME",); TREFPOS="BARYCENTER")))
+    timed = parse_fits_wcs(header(("TIME",); MJDREF=59000.0, TIMESYS="TT", TREFPOS="TOPOCENTER", var"OBSGEO-X"=1.0, var"OBSGEO-Y"=2.0, var"OBSGEO-Z"=3.0))
+    # A lone temporal frame is written in a composite, which the step schema accepts.
+    @test GWCS._tag(to_metadata(timed)["steps"][3]["frame"]) == "tag:stsci.edu:gwcs/composite_frame-1.0.0"
+    written = to_metadata(timed)["steps"][3]["frame"]["frames"][1]["reference_frame"]
+    @test GWCS._tag(written) == "tag:stsci.edu:asdf/time/time-1.4.0"
+    @test (written["value"], written["format"], written["scale"]) == (59000.0, "mjd", "tt")
+    @test [written["location"][axis]["value"] for axis in ("x", "y", "z")] == [1.0, 2.0, 3.0]
+    @test pixel_to_world(parse_wcs(to_metadata(timed)), 2.0) == pixel_to_world(timed, 2.0)
+    # The frame schemas require a unit tag for an axis without a unit.
+    @test to_metadata(CoordinateFrame{1}(name="plain"))["unit"][1] == GWCS.TaggedScalar("tag:stsci.edu:asdf/unit/unit-1.0.0", "")
 end

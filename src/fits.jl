@@ -968,13 +968,122 @@ function _fits_time_reference(header, suffix)
             reference = (_fits_number(something(integer, 0.0), "JDREFI$suffix") - 2400000.5) + _fits_number(something(fraction, 0.0), "JDREFF$suffix")
         end
     end
+    dateref = value("DATEREF")
+    if dateref !== nothing
+        # As in WCSLIB's datfix, MJDREF or JDREF takes precedence, and DATEREF must agree with it to 0.001 day.
+        from_date = _fits_date_mjd(dateref, "DATEREF$suffix")
+        reference === nothing && (reference = from_date)
+        abs(reference - from_date) <= 0.001 || throw(ArgumentError("FITS DATEREF$suffix=$(repr(dateref)) is inconsistent with the MJDREF or JDREF reference time $reference"))
+    end
+    # WCSLIB defaults MJDREF to zero when no reference date is given.
+    reference === nothing && (reference = 0.0)
     location = if all(keyword -> haskey(header, keyword), ("OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z"))
         ntuple(i -> _fits_number(header[("OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z")[i]], ("OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z")[i]), 3)
     else
         nothing
     end
-    return (reference_epoch=reference, time_scale=String(value("TIMESYS", "")), time_format=reference === nothing ? "" : "mjd",
+    return (reference_epoch=reference, time_scale=String(value("TIMESYS", "")),
         reference_position=String(value("TREFPOS", "")), reference_direction=value("TREFDIR"), location=location)
+end
+
+# DATEREF in the FITS standard's ISO 8601 form YYYY-MM-DD[Thh:mm:ss[.s]], as an MJD by WCSLIB's integer algorithm.
+# WCSLIB's datfix also accepts legacy forms such as DD/MM/YY; those are rejected rather than guessed.
+function _fits_date_mjd(value, keyword)
+    text = strip(String(value))
+    matched = match(r"^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?))?$", text)
+    matched === nothing && throw(ArgumentError("FITS $keyword=$(repr(text)) is not an ISO 8601 date"))
+    year, month, day = parse.(Int, matched.captures[1:3])
+    days = (1461 * (year - (12 - month) ÷ 10 + 4712)) ÷ 4 + (306 * ((month + 9) % 12) + 5) ÷ 10 - (3 * ((year - (12 - month) ÷ 10 + 4900) ÷ 100)) ÷ 4 + day - 2399904
+    matched.captures[4] === nothing && return Float64(days)
+    hour, minute = parse.(Int, matched.captures[4:5])
+    return days + (hour + (minute + parse(Float64, matched.captures[6]) / 60) / 60) / 24
+end
+
+# A reference frame as asdf-astropy writes it, so Python reads it as the astropy frame.
+_fits_astropy_frame(name, attributes...) = _tagged_metadata("tag:astropy.org:astropy/coordinates/frames/$name", v"1.2.0", Dict("frame_attributes" => Dict{Any,Any}(attributes...)))
+_fits_epoch(value, format) = _tagged_metadata(_TIME_TAG, v"1.4.0", Dict("value" => value, "format" => format, "scale" => "tt"))
+
+# Like astropy's wcs_to_celestial_frame, RA/DEC take ICRS, FK5, FK4, or FK4-NO-E from RADESYS and EQUINOX, with FK4's
+# obstime the equinox, and GLON/GLAT is Galactic. astropy also applies RADESYS to other pairs, so that it labels ecliptic
+# coordinates equatorial; here only RA/DEC are. Systems without an astropy frame tag keep their FITS metadata, which has
+# no ASDF representation.
+function _fits_celestial_reference(longitude, latitude, radesys, equinox)
+    if longitude == "RA"
+        radesys == "ICRS" && return :ICRS
+        radesys == "FK5" && return _fits_astropy_frame("fk5", "equinox" => _fits_epoch(equinox, "jyear"))
+        if radesys in ("FK4", "FK4-NO-E")
+            epoch = _fits_epoch(equinox, "byear")
+            return _fits_astropy_frame(radesys == "FK4" ? "fk4" : "fk4noeterms", "equinox" => epoch, "obstime" => epoch)
+        end
+    elseif longitude == "GLON"
+        return _fits_astropy_frame("galactic")
+    end
+    return (system=(longitude, latitude), radesys, equinox)
+end
+
+# FITS spectral reference metadata, which the ASDF spectral frame cannot represent.
+function _fits_spectral_reference(header, suffix, restfrq, restwav)
+    text(keyword) = String(get(header, "$keyword$suffix", ""))
+    number(keyword) = haskey(header, "$keyword$suffix") ? _fits_number(header["$keyword$suffix"], "$keyword$suffix") : nothing
+    reference = (restfrq, restwav, specsys=text("SPECSYS"), ssysobs=text("SSYSOBS"), velosys=number("VELOSYS"), zsource=number("ZSOURCE"), ssyssrc=text("SSYSSRC"))
+    return all(value -> value === nothing || value == "", reference) ? nothing : reference
+end
+
+const _FITS_DEPRECATED_TIME_SCALES = Dict("TDT" => "tt", "ET" => "tt", "GMT" => "utc", "UT" => "utc", "IAT" => "tai")
+const _ASDF_TIME_SCALES = ("utc", "tai", "tcb", "tcg", "tdb", "tt", "ut1")
+
+# The reference time of a FITS time axis as the ASDF time a TemporalFrame holds, following astropy's FITS WCS: the scale
+# is the CTYPE, or TIMESYS for TIME; GPS is TAI shifted by 19 s; TREFPOS TOPOCENTER takes OBSGEO and GEOCENTER the
+# geocenter. Metadata the ASDF time cannot hold, such as a sub-scale, another TREFPOS, or TREFDIR, is kept in
+# `reference_frame` and has no ASDF representation.
+function _fits_temporal_frame(header, suffix, coordinate; kwargs...)
+    reference = _fits_time_reference(header, suffix)
+    written = uppercase(coordinate == "TIME" ? (isempty(reference.time_scale) ? "UTC" : reference.time_scale) : coordinate)
+    scale, subscale = occursin('(', written) ? (written[1:(findfirst('(', written) - 1)], written[(findfirst('(', written) + 1):(end - 1)]) : (written, "")
+    epoch = reference.reference_epoch
+    if scale == "GPS"
+        scale, epoch = "TAI", epoch + 19 / 86400
+    end
+    scale = get(_FITS_DEPRECATED_TIME_SCALES, scale, lowercase(scale))
+    position = uppercase(reference.reference_position)
+    location = startswith(position, "TOPOCENT") ? reference.location : position == "GEOCENTER" ? (0.0, 0.0, 0.0) : nothing
+    leftover = merge(scale in _ASDF_TIME_SCALES ? (;) : (time_scale=scale,), isempty(subscale) ? (;) : (; subscale),
+        isempty(position) || location !== nothing ? (;) : (reference_position=reference.reference_position,),
+        reference.reference_direction === nothing ? (;) : (reference_direction=reference.reference_direction,))
+    return TemporalFrame(; kwargs..., reference_frame=isempty(leftover) ? nothing : leftover, reference_epoch=epoch, time_scale=scale, time_format="mjd", location)
+end
+
+# A CelestialFrame for the celestial pair, a SpectralFrame, TemporalFrame, or StokesFrame for each such axis, and one
+# CoordinateFrame for the linear axes, in a CompositeFrame when there is more than one. axes_order places each frame's
+# axes at their header positions, so the world coordinates stay in header order.
+function _fits_world_frame(header, suffix, parsed, names, descriptions, units, longitude_axis, latitude_axis, restfrq, restwav)
+    kinds = map(item -> item[2], parsed)
+    linear = Tuple(axis for axis in eachindex(kinds) if kinds[axis] == :linear)
+    single = (longitude_axis != 0) + count(in((:spectral, :time, :stokes)), kinds) + !isempty(linear) == 1
+    name(kind) = single ? "world" : kind
+    frames = AbstractCoordinateFrame[]
+    if longitude_axis != 0
+        radesys, equinox = _fits_reference_system(header, suffix, parsed)
+        axes = (longitude_axis, latitude_axis)
+        reference = _fits_celestial_reference(parsed[longitude_axis][1], parsed[latitude_axis][1], radesys, equinox)
+        push!(frames, CelestialFrame{2}(; name=name("celestial"), axes_names=map(i -> names[i], axes), axes_order=axes,
+            axis_physical_types=map(i -> descriptions[i][2], axes), unit=map(i -> units[i], axes), reference_frame=reference))
+    end
+    for (axis, kind) in enumerate(kinds)
+        properties = (axes_names=(names[axis],), axes_order=(axis,), axis_physical_types=(descriptions[axis][2],))
+        if kind == :spectral
+            push!(frames, SpectralFrame(; name=name("spectral"), properties..., unit=(units[axis],), reference_frame=_fits_spectral_reference(header, suffix, restfrq, restwav)))
+        elseif kind == :time
+            push!(frames, _fits_temporal_frame(header, suffix, parsed[axis][1]; name=name("temporal"), properties..., unit=(units[axis],)))
+        elseif kind == :stokes
+            push!(frames, StokesFrame(; name=name("stokes"), properties...))
+        end
+    end
+    if !isempty(linear)
+        push!(frames, CoordinateFrame{length(linear)}(; name=name("linear"), axes_names=map(i -> names[i], linear), axes_order=linear,
+            axis_types=map(i -> descriptions[i][1], linear), axis_physical_types=map(i -> descriptions[i][2], linear), unit=map(i -> units[i], linear)))
+    end
+    return single ? only(frames) : CompositeFrame(Tuple(frames); name="world")
 end
 
 function _fits_reference_system(header, suffix, parsed)
@@ -1237,16 +1346,10 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
 
     detector = CoordinateFrame{count}(; name="detector", axes_names=ntuple(i -> "pixel$i", count), axis_types=ntuple(_ -> PIXEL, count), unit=ntuple(_ -> "pix", count))
     intermediate = CoordinateFrame{count}(; name="intermediate", axes_names=ntuple(i -> "intermediate$i", count), axis_types=ntuple(_ -> SPATIAL, count), unit=Tuple(map(item -> item[3], _fits_axis_metadata.(parsed, cunit, 1:count))))
-    radesys, equinox = _fits_reference_system(header, suffix, parsed)
-    velosys_value, zsource_value = get(header, "VELOSYS$suffix", nothing), get(header, "ZSOURCE$suffix", nothing)
-    spectral_metadata = (specsys=String(get(header, "SPECSYS$suffix", "")), ssysobs=String(get(header, "SSYSOBS$suffix", "")),
-        velosys=velosys_value === nothing ? nothing : _fits_number(velosys_value, "VELOSYS$suffix"),
-        zsource=zsource_value === nothing ? nothing : _fits_number(zsource_value, "ZSOURCE$suffix"), ssyssrc=String(get(header, "SSYSSRC$suffix", "")))
-    metadata = (radesys=radesys, equinox=equinox, restfrq=restfrq, restwav=restwav, spectral=spectral_metadata, time=_fits_time_reference(header, suffix), key=key)
     descriptions = [_fits_axis_metadata(parsed[i], cunit[i], i) for i in 1:count]
     names = ntuple(i -> String(get(header, "CNAME$i$suffix", isempty(parsed[i][1]) ? "world$i" : parsed[i][1])), count)
     units = ntuple(i -> preserve_units && !isempty(strip(cunit[i])) ? cunit[i] : descriptions[i][3], count)
-    world = CoordinateFrame{count}(; name="world", axes_names=names, axis_types=Tuple(first.(descriptions)), axis_physical_types=Tuple(getindex.(descriptions, 2)), unit=units, reference_frame=metadata)
+    world = _fits_world_frame(header, suffix, parsed, names, descriptions, units, longitude_axis, latitude_axis, restfrq, restwav)
     tpv_models = projection_code == "TPV" ? _fits_tpv_models(header, count, suffix, longitude_axis, latitude_axis) : ntuple(_ -> nothing, count)
     projection_code == "TPV" && any(model -> model !== nothing, sequent_tpd_models) && throw(ArgumentError("TPV cannot be combined with a CQDIS sequent distortion"))
     sequent_models = projection_code == "TPV" ? tpv_models : sequent_tpd_models
