@@ -2,9 +2,15 @@
 struct Step{F<:AbstractCoordinateFrame,T}
     frame::F
     transform::T
+    # Unmodeled metadata of the step and its frame, by path below the step: "", "frame", "frame/frames/2", and so on.
+    pass_through::_PassThrough
 end
 
+Step(frame::AbstractCoordinateFrame, transform) = Step(frame, transform, _NO_PASS_THROUGH)
 Step(frame::AbstractCoordinateFrame) = Step(frame, nothing)
+
+# An edit that keeps a step's frame keeps the step's unmodeled metadata.
+_with_transform(step::Step, transform) = Step(step.frame, transform, step.pass_through)
 
 """
     WCS(steps...; name="", pixel_shape=nothing, bounding_box=nothing)
@@ -19,6 +25,7 @@ struct WCS{Nin,Nout,S,F,B,BB,PS,IS}
     pixel_shape::PS
     bounding_box::BB
     inverse_split::IS
+    pass_through::_PassThrough
 end
 
 function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
@@ -37,7 +44,7 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
         output_dimension(step.transform) == frame_dimension(next_step.frame) || throw(DimensionMismatch("transform from frame $(step.frame.name) has $(output_dimension(step.transform)) outputs but frame $(next_step.frame.name) has $(frame_dimension(next_step.frame)) axes"))
     end
 
-    compiled = ntuple(i -> i == length(steps) ? steps[i] : Step(steps[i].frame, _compile_transform_checked(steps[i].transform)), length(steps))
+    compiled = ntuple(i -> i == length(steps) ? steps[i] : _with_transform(steps[i], _compile_transform_checked(steps[i].transform)), length(steps))
     forward = compose(map(step -> _numeric_transform(step.transform), compiled[1:(end - 1)])...)
     backward = _inverse_transform_checked(forward)
     Nin = frame_dimension(first(compiled).frame)
@@ -51,8 +58,11 @@ function WCS(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing)
         value === nothing ? nothing : Int(value)
     end)
     inverse_split = backward isa NoInverse && Nin == Nout ? _numerical_inverse_split(forward, bounding_box, shape) : nothing
-    return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape),typeof(inverse_split)}(compiled, forward, backward, String(name), shape, bounding_box, inverse_split)
+    return WCS{Nin,Nout,typeof(compiled),typeof(forward),typeof(backward),typeof(bounding_box),typeof(shape),typeof(inverse_split)}(compiled, forward, backward, String(name), shape, bounding_box, inverse_split, _NO_PASS_THROUGH)
 end
+
+# Edits that keep the WCS keep its unmodeled metadata.
+_with_pass_through(wcs::WCS, pass_through) = typeof(wcs)(wcs.steps, wcs.forward, wcs.backward, wcs.name, wcs.pixel_shape, wcs.bounding_box, wcs.inverse_split, pass_through)
 
 """
     WCSBuilder(wcs)
@@ -80,15 +90,15 @@ function fix_inputs(wcs::WCS{Nin}, fixed; atol=nothing, rtol=nothing) where {Nin
     reduced_box = wcs.bounding_box === nothing ? nothing : _reduce_bounding_box(wcs.bounding_box, indexed)
     reduced_shape = wcs.pixel_shape === nothing ? nothing : map(index -> wcs.pixel_shape[index], free_indices)
     steps = (Step(reduced_frame, fixed_transform), Base.tail(wcs.steps)...)
-    return WCS(steps...; name=wcs.name, pixel_shape=reduced_shape, bounding_box=reduced_box)
+    return _with_pass_through(WCS(steps...; name=wcs.name, pixel_shape=reduced_shape, bounding_box=reduced_box), wcs.pass_through)
 end
 
 function with_bounding_box(wcs::WCS, bounding_box)
-    return WCS(wcs.steps...; name=wcs.name, pixel_shape=wcs.pixel_shape, bounding_box)
+    return _with_pass_through(WCS(wcs.steps...; name=wcs.name, pixel_shape=wcs.pixel_shape, bounding_box), wcs.pass_through)
 end
 
 function with_pixel_shape(wcs::WCS, pixel_shape)
-    return WCS(wcs.steps...; name=wcs.name, pixel_shape, bounding_box=wcs.bounding_box)
+    return _with_pass_through(WCS(wcs.steps...; name=wcs.name, pixel_shape, bounding_box=wcs.bounding_box), wcs.pass_through)
 end
 
 function _named_domain_pairs(frame::AbstractCoordinateFrame{N}, fixed) where {N}
@@ -145,7 +155,7 @@ _insert_step(steps::Tuple, index, step) = (steps[1:(index - 1)]..., step, steps[
 _remove_step(steps::Tuple, index) = (steps[1:(index - 1)]..., steps[(index + 1):end]...)
 
 function _rebuild_wcs(wcs::WCS, steps::Tuple; pixel_shape=wcs.pixel_shape, bounding_box=wcs.bounding_box)
-    return WCS(steps...; name=wcs.name, pixel_shape, bounding_box)
+    return _with_pass_through(WCS(steps...; name=wcs.name, pixel_shape, bounding_box), wcs.pass_through)
 end
 
 """Return a new WCS with the transform between adjacent frames replaced."""
@@ -153,7 +163,7 @@ function set_transform(wcs::WCS, from_frame, to_frame, transform::AbstractTransf
     from_index = _frame_index(wcs, from_frame)
     to_index = _frame_index(wcs, to_frame)
     from_index + 1 == to_index || throw(ArgumentError("frames $(_frame_name(from_frame)) and $(_frame_name(to_frame)) are not adjacent in forward order"))
-    steps = _replace_step(wcs.steps, from_index, Step(wcs.steps[from_index].frame, transform))
+    steps = _replace_step(wcs.steps, from_index, _with_transform(wcs.steps[from_index], transform))
     return _rebuild_wcs(wcs, steps)
 end
 
@@ -170,7 +180,7 @@ function insert_transform(wcs::WCS, frame, transform::AbstractTransform; after=f
     edge < length(wcs.steps) || throw(ArgumentError("a transform cannot be inserted after the last frame"))
     current = wcs.steps[edge].transform
     combined = after ? compose(transform, current) : compose(current, transform)
-    steps = _replace_step(wcs.steps, edge, Step(wcs.steps[edge].frame, combined))
+    steps = _replace_step(wcs.steps, edge, _with_transform(wcs.steps[edge], combined))
     return _rebuild_wcs(wcs, steps)
 end
 
@@ -215,7 +225,7 @@ function insert_frame(wcs::WCS, input, transform::AbstractTransform, output; pix
     pixel_shape === _UNSPECIFIED_PIPELINE_METADATA || throw(ArgumentError("pixel_shape can only be changed when prepending an input frame"))
     bounding_box === _UNSPECIFIED_PIPELINE_METADATA || throw(ArgumentError("bounding_box can only be changed when prepending an input frame"))
     current = wcs.steps[input_index].transform
-    replaced = _replace_step(wcs.steps, input_index, Step(wcs.steps[input_index].frame, transform))
+    replaced = _replace_step(wcs.steps, input_index, _with_transform(wcs.steps[input_index], transform))
     step = current === nothing ? Step(output) : Step(output, current)
     steps = _insert_step(replaced, input_index + 1, step)
     return _rebuild_wcs(wcs, steps)
@@ -228,7 +238,7 @@ function remove_frame(wcs::WCS, frame)
     incoming = wcs.steps[index - 1].transform
     outgoing = wcs.steps[index].transform
     combined = compose(incoming, outgoing)
-    replaced = _replace_step(wcs.steps, index - 1, Step(wcs.steps[index - 1].frame, combined))
+    replaced = _replace_step(wcs.steps, index - 1, _with_transform(wcs.steps[index - 1], combined))
     return _rebuild_wcs(wcs, _remove_step(replaced, index))
 end
 
@@ -239,7 +249,7 @@ function rename_frame(wcs::WCS, frame, name)
     isempty(new_name) && throw(ArgumentError("frame name must not be empty"))
     any(==(new_name), available_frames(wcs)) && new_name != wcs.steps[index].frame.name && throw(ArgumentError("frame name $new_name is already in the pipeline"))
     renamed = _rename_frame(wcs.steps[index].frame, new_name)
-    steps = _replace_step(wcs.steps, index, Step(renamed, wcs.steps[index].transform))
+    steps = _replace_step(wcs.steps, index, Step(renamed, wcs.steps[index].transform, wcs.steps[index].pass_through))
     return _rebuild_wcs(wcs, steps)
 end
 

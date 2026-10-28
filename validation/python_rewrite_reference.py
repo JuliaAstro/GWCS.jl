@@ -17,6 +17,16 @@ def axis_metadata(wcs):
     return tuple(getattr(frame, "axes_names", None) for frame in (wcs.input_frame, wcs.output_frame)) + (wcs.world_axis_physical_types,)
 
 
+def constraints(model):
+    return [{"fixed": {k: v for k, v in leaf.fixed.items() if v}, "bounds": {k: list(v) for k, v in leaf.bounds.items() if any(b is not None for b in v)}}
+        for leaf in model.traverse_postorder() if leaf.n_submodels == 1]
+
+
+def frames_match(rewrite, original):
+    # A two-axis spatial frame is written as a frame2d, whose Frame2D subclasses CoordinateFrame.
+    return all(isinstance(getattr(rewrite, name), type(getattr(original, name))) for name in original.available_frames)
+
+
 def main():
     warnings.simplefilter("ignore")
     rewrite, fixture = asdf.open(sys.argv[1]), asdf.open(sys.argv[2])
@@ -28,6 +38,9 @@ def main():
             record = {"name": f"{group}/{name}", "error": float(np.max(np.abs(computed - fixture[outputs][name]))), "units": parameter_units(model)}
             if group == "wcs":
                 record["axes_match"] = axis_metadata(value) == axis_metadata(fixture[group][name])
+                record["frames_match"] = frames_match(value, fixture[group][name])
+            if name in fixture.tree.get("constraints", {}):
+                record["constraints_match"] = constraints(model) == fixture["constraints"][name]
             if group == "wcs" and getattr(value.output_frame, "reference_frame", None) is not None:
                 frame = value.output_frame.reference_frame
                 record["reference_frame"] = type(frame).__name__
