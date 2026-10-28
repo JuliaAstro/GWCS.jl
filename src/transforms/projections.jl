@@ -1095,9 +1095,8 @@ end
 
 @inline function _intermediate_to_native(::StereographicProjection, x, y)
     T = promote_type(typeof(x), typeof(y))
-    radius = deg2rad(hypot(x, y)) / 2
-    sine = (one(T) - radius^2) / (one(T) + radius^2)
-    return _zenithal_phi(x, y), asin(clamp(sine, -one(T), one(T)))
+    # WCSLIB's 90 - 2 atan(R / 2r0); the equivalent asin((1 - r^2) / (1 + r^2)) loses the latitude near the pole.
+    return _zenithal_phi(x, y), T(pi / 2) - 2atan(deg2rad(hypot(x, y)) / 2)
 end
 
 @inline function _native_to_intermediate(projection::StereographicProjection, phi, theta)

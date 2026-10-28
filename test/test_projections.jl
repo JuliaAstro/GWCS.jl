@@ -108,6 +108,8 @@ end
     @test eltype(pco_jacobian) === Float32
     transform_jacobian(pco_to_native, SVector(1.0, 2.0))
     @test _projection_jacobian_allocated(pco_to_native, SVector(1.0, 2.0)) == 0
+    # The stereographic latitude stays accurate near the pole, where asin((1 - r^2) / (1 + r^2)) would round it to 90.
+    @test IntermediateToNative(StereographicProjection())(SVector(0.0, -1e-7))[2] ≈ 90 - 1e-7 atol=2e-14
 end
 
 @testset "WCSLIB projection boundaries" begin
