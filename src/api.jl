@@ -106,23 +106,122 @@ function _celestial_area_scales(wcs::WCS)
     return latitude, radians[1] * radians[2], radians[latitude]
 end
 
-@inline function _pixel_area(wcs::WCS{2,2}, coords::StaticVector{2}, scales; with_bounding_box=true, fill_value=NaN, strict=false, origin=0)
-    T = _coordinate_float_type(eltype(coords))
-    given = SVector{2,T}(coords)
+# The world coordinate and Jacobian at a pixel, or `nothing` where there is no result: outside the bounding box, or an
+# undefined coordinate or Jacobian. strict=true throws instead, and NaN input propagates, as in pixel_to_world.
+@inline function _world_and_jacobian(wcs::WCS{Nin}, given::SVector{Nin}; with_bounding_box=true, strict=false, origin=0) where {Nin}
     pixels = given .- _origin_offset(origin)
     finite = all(isfinite, pixels)
     if with_bounding_box && wcs.bounding_box !== nothing && finite && !(pixels in wcs.bounding_box)
         strict && _throw_outside_box(given)
-        return T(fill_value)
+        return nothing
     end
     world, jacobian = _value_and_jacobian(wcs.forward, pixels)
-    latitude, solid_angle, latitude_radians = scales
-    area = abs(det(jacobian)) * solid_angle * cos(world[latitude] * latitude_radians)
-    isnan(area) || return area
-    strict || return T(fill_value)
-    finite || return area
+    any(isnan, world) || any(isnan, jacobian) || return world, jacobian
+    strict || return nothing
+    finite || return world, jacobian
     any(isnan, world) && _throw_undefined(wcs, pixels, given)
     throw(DomainError(Tuple(given), "the Jacobian at pixel $(Tuple(given)) is undefined"))
+end
+
+_filled_matrix(::Val{M}, ::Val{N}, ::Type{T}, fill_value) where {M,N,T} = SMatrix{M,N,T}(ntuple(_ -> T(fill_value), Val(M * N)))
+
+@inline function _pixel_to_world_jacobian(wcs::WCS{Nin,Nout}, coords::StaticVector{Nin}; fill_value=NaN, kwargs...) where {Nin,Nout}
+    T = _coordinate_float_type(eltype(coords))
+    result = _world_and_jacobian(wcs, SVector{Nin,T}(coords); kwargs...)
+    return result === nothing ? _filled_matrix(Val(Nout), Val(Nin), T, fill_value) : last(result)
+end
+
+"""
+    pixel_to_world_jacobian(wcs, pixels...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> SMatrix
+    pixel_to_world_jacobian(wcs, pixels::AbstractMatrix; kwargs...) -> Vector{<:SMatrix}
+
+Return the Jacobian of `pixel_to_world` at a pixel, the `world_n_dim × pixel_n_dim` matrix of `∂world_i/∂pixel_j`.
+World coordinates are in transform order and in their frame's units, so a celestial WCS gives degrees per pixel with no
+cos(latitude) factor. The coordinate forms and keywords act as in `pixel_to_world`: a pixel without a result, including
+one whose Jacobian is undefined, gives a matrix of `fill_value`, or a `DomainError` with `strict=true`. Matrix columns
+are pixels.
+"""
+function pixel_to_world_jacobian(wcs::WCS{Nin}, coords::AbstractVector; kwargs...) where {Nin}
+    length(coords) == Nin || throw(DimensionMismatch("pixel has length $(length(coords)), expected $Nin"))
+    return _pixel_to_world_jacobian(wcs, SVector{Nin,_coordinate_float_type(eltype(coords))}(coords); kwargs...)
+end
+
+pixel_to_world_jacobian(wcs::WCS, coords::Tuple{Vararg{Real}}; kwargs...) = _pixel_to_world_jacobian(wcs, _coordinate_vector(coords); kwargs...)
+pixel_to_world_jacobian(wcs::WCS, coords::Real...; kwargs...) = pixel_to_world_jacobian(wcs, coords; kwargs...)
+
+function pixel_to_world_jacobian(wcs::WCS{Nin}, pixels::AbstractMatrix; kwargs...) where {Nin}
+    size(pixels, 1) == Nin || throw(DimensionMismatch("pixel matrix has $(size(pixels, 1)) rows, expected $Nin"))
+    T = _coordinate_float_type(eltype(pixels))
+    return map(column -> _pixel_to_world_jacobian(wcs, SVector{Nin,T}(view(pixels, :, column)); kwargs...), axes(pixels, 2))
+end
+
+# The Jacobian of the map world_to_pixel computes: the analytical inverse's, or the inverse of the forward Jacobian at
+# the numerical inverse's pixel. Undefined results are thrown or filled before the bounding box applies, as there.
+@inline function _world_to_pixel_jacobian(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout}; with_bounding_box=true, fill_value=NaN, strict=false, origin=0, kwargs...) where {Nin,Nout}
+    T = _coordinate_float_type(eltype(coords))
+    world = SVector{Nout,T}(coords)
+    offset = _origin_offset(origin)
+    pixels, jacobian = if wcs.backward isa NoInverse
+        solution = _numerical_solve(wcs, world; offset, kwargs...)
+        solution, inv(_transform_jacobian_checked(wcs.forward, solution))
+    else
+        _value_and_jacobian(wcs.backward, world)
+    end
+    filled = _filled_matrix(Val(Nin), Val(Nout), T, fill_value)
+    if any(isnan, pixels)
+        strict || return filled
+        all(isfinite, world) && _throw_undefined_inverse(wcs, world)
+        return jacobian
+    end
+    if with_bounding_box && wcs.bounding_box !== nothing && !(pixels in wcs.bounding_box)
+        strict && _throw_outside_box_inverse(world, pixels .+ offset)
+        return filled
+    end
+    any(isnan, jacobian) || return jacobian
+    strict || return filled
+    throw(DomainError(Tuple(world), "the inverse Jacobian at world coordinate $(Tuple(world)) is undefined"))
+end
+
+"""
+    world_to_pixel_jacobian(wcs, world...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0, kwargs...) -> SMatrix
+    world_to_pixel_jacobian(wcs, world::AbstractMatrix; kwargs...) -> Vector{<:SMatrix}
+
+Return the Jacobian of `world_to_pixel` at a world coordinate, the `pixel_n_dim × world_n_dim` matrix of
+`∂pixel_i/∂world_j`, with the coordinate forms, keywords, and units of `world_to_pixel`. With an analytical inverse it is
+that inverse's Jacobian. Without one it is the inverse of the forward Jacobian at the pixel the numerical inverse finds,
+which takes `world_to_pixel`'s solver keywords.
+
+An analytical inverse that approximates the forward transform, such as a fitted polynomial, has a Jacobian that differs
+from the inverse of the forward Jacobian by that approximation. The Jacobian of the exact inverse of the forward
+transform is `inv(pixel_to_world_jacobian(wcs, numerical_inverse(wcs, world)))`.
+"""
+function world_to_pixel_jacobian(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
+    length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))
+    return _world_to_pixel_jacobian(wcs, SVector{Nout,_coordinate_float_type(eltype(coords))}(coords); kwargs...)
+end
+
+world_to_pixel_jacobian(wcs::WCS, coords::Tuple{Vararg{Real}}; kwargs...) = _world_to_pixel_jacobian(wcs, _coordinate_vector(coords); kwargs...)
+world_to_pixel_jacobian(wcs::WCS, coords::Real...; kwargs...) = world_to_pixel_jacobian(wcs, coords; kwargs...)
+
+function world_to_pixel_jacobian(wcs::WCS{Nin,Nout}, worlds::AbstractMatrix; kwargs...) where {Nin,Nout}
+    size(worlds, 1) == Nout || throw(DimensionMismatch("world matrix has $(size(worlds, 1)) rows, expected $Nout"))
+    T = _coordinate_float_type(eltype(worlds))
+    return map(column -> _world_to_pixel_jacobian(wcs, SVector{Nout,T}(view(worlds, :, column)); kwargs...), axes(worlds, 2))
+end
+
+@inline function _pixel_area(wcs::WCS{2,2}, coords::StaticVector{2}, scales; fill_value=NaN, strict=false, kwargs...)
+    T = _coordinate_float_type(eltype(coords))
+    given = SVector{2,T}(coords)
+    result = _world_and_jacobian(wcs, given; strict, kwargs...)
+    result === nothing && return T(fill_value)
+    world, jacobian = result
+    latitude, solid_angle, latitude_radians = scales
+    area = abs(det(jacobian)) * solid_angle * cos(world[latitude] * latitude_radians)
+    # A defined Jacobian can still give no finite area, as at a celestial pole, where the longitude derivative is infinite.
+    isfinite(area) && return area
+    strict || return T(fill_value)
+    all(isfinite, given) || return area
+    throw(DomainError(Tuple(given), "the pixel area at pixel $(Tuple(given)) is undefined"))
 end
 
 """
