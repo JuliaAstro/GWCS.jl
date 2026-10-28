@@ -197,3 +197,58 @@ end
         @test @inferred(pixel_to_world(ait, coords)) isa SVector{2,Float64}
     end
 end
+
+@testset "Pixel area" begin
+    cd = [-2e-4 3e-5; 1e-5 2.5e-4]
+    header(lon, lat, code="TAN") = Dict("NAXIS" => 2, "CTYPE1" => "$lon-$code", "CTYPE2" => "$lat-$code", "CRPIX1" => 51.0, "CRPIX2" => 41.0, "CRVAL1" => 30.0, "CRVAL2" => 40.0,
+        "CD1_1" => cd[1, 1], "CD1_2" => cd[1, 2], "CD2_1" => cd[2, 1], "CD2_2" => cd[2, 2])
+    # |det J| cos(lat) from central differences of pixel_to_world, with the latitude on world axis `latitude`.
+    function difference_area(wcs, x, y; latitude=2, step=1e-3)
+        dx = (pixel_to_world(wcs, x + step, y) - pixel_to_world(wcs, x - step, y)) / 2step
+        dy = (pixel_to_world(wcs, x, y + step) - pixel_to_world(wcs, x, y - step)) / 2step
+        return abs(dx[1] * dy[2] - dx[2] * dy[1]) * cosd(pixel_to_world(wcs, x, y)[latitude]) * deg2rad(1.0)^2
+    end
+    tan = parse_fits_wcs(header("RA--", "DEC-"))
+    # Half a pixel from the reference pixel, the TAN area is |det CD| to well below the tolerance.
+    @test pixel_area(tan, 50.5, 40.5) ≈ abs(cd[1, 1] * cd[2, 2] - cd[1, 2] * cd[2, 1]) * deg2rad(1.0)^2 rtol=1e-9
+    @test pixel_area(tan, 3000.0, -2000.0) ≈ difference_area(tan, 3000.0, -2000.0) rtol=1e-7
+    @test pixel_area(tan, (3000.0, -2000.0)) == pixel_area(tan, [3000.0, -2000.0]) == pixel_area(tan, SVector(3000.0, -2000.0))
+    @test pixel_area(tan, 3001.0, -1999.0; origin=1) == pixel_area(tan, 3000.0, -2000.0)
+    @test pixel_area(tan, [3000.0 50.5; -2000.0 40.5]) == [pixel_area(tan, 3000.0, -2000.0), pixel_area(tan, 50.5, 40.5)]
+    @test pixel_area(tan, Matrix{Float64}(undef, 2, 0)) == Float64[]
+    @test pixel_area(tan, NaN, 1.0) === NaN
+    # FITS celestial axes become a CelestialFrame, in any order and coordinate system.
+    @test pixel_area(parse_fits_wcs(header("GLON", "GLAT")), 3000.0, -2000.0) ≈ pixel_area(tan, 3000.0, -2000.0) rtol=1e-12
+    swapped = parse_fits_wcs(header("DEC-", "RA--"))
+    @test pixel_area(swapped, 3000.0, -2000.0) ≈ difference_area(swapped, 3000.0, -2000.0; latitude=1) rtol=1e-7
+    # A CelestialFrame's latitude is its second axis; its units may be radians.
+    roman = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
+    @test output_frame(roman) isa CelestialFrame
+    @test pixel_area(roman, 12.0, 21.0) ≈ difference_area(roman, 12.0, 21.0) rtol=1e-7
+    to_radians = parallel(Scale(deg2rad(1.0)), Scale(deg2rad(1.0)))
+    radians = WCS(Step(input_frame(tan), get_transform(tan, "detector", "world") | to_radians), Step(CelestialFrame(name="world", unit=("rad", "rad"))))
+    @test pixel_area(radians, 3000.0, -2000.0) ≈ pixel_area(tan, 3000.0, -2000.0) rtol=1e-12
+
+    # Pixels outside the bounding box or off the sky are filled, or throw with strict=true.
+    boxed = with_bounding_box(tan, BoundingBox(((-0.5, 99.5), (-0.5, 79.5))))
+    @test isnan(pixel_area(boxed, 120.0, 10.0))
+    @test pixel_area(boxed, 120.0, 10.0; fill_value=0.0) == 0.0
+    @test pixel_area(boxed, 120.0, 10.0; with_bounding_box=false) == pixel_area(tan, 120.0, 10.0)
+    @test_throws "pixel (120.0, 10.0) is outside the WCS bounding box" pixel_area(boxed, 120.0, 10.0; strict=true)
+    ait = parse_fits_wcs(Dict("NAXIS" => 2, "CTYPE1" => "RA---AIT", "CTYPE2" => "DEC--AIT", "CRPIX1" => 181.0, "CRPIX2" => 91.0, "CDELT1" => -1.0, "CDELT2" => 1.0))
+    @test isnan(pixel_area(ait, 0.0, 0.0))
+    @test_throws r"pixel \(0\.0, 0\.0\) has no world coordinate: IntermediateToNative\(HammerAitoffProjection\)" pixel_area(ait, 0.0, 0.0; strict=true)
+    @test pixel_area(ait, 180.5, 90.5) ≈ deg2rad(1.0)^2 rtol=1e-4
+
+    affine = WCS(Step(Frame2D(name="pixels"), AffineTransform(SMatrix{2,2}(2.0, 0.0, 0.0, 3.0), SVector(1.0, -1.0))), Step(CoordinateFrame{2}(name="world")))
+    @test_throws "pixel_area requires 2 pixel axes and a 2D CelestialFrame output frame, got 2 pixel axes and a CoordinateFrame{2}" pixel_area(affine, 1.0, 2.0)
+    arcsec = WCS(Step(input_frame(tan), get_transform(tan, "detector", "world")), Step(CelestialFrame(name="world", unit=("arcsec", "arcsec"))))
+    @test_throws "pixel_area requires celestial axes in deg or rad, got \"arcsec\"" pixel_area(arcsec, 1.0, 2.0)
+    @test_throws DimensionMismatch pixel_area(tan, [1.0])
+
+    allocated_pixel_area(wcs, coords) = @allocated pixel_area(wcs, coords)
+    for (wcs, coords) in ((tan, SVector(3000.0, -2000.0)), (roman, SVector(12.0, 21.0)))
+        @test @inferred(pixel_area(wcs, coords)) isa Float64
+        @test allocated_pixel_area(wcs, coords) == 0
+    end
+end

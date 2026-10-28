@@ -106,12 +106,13 @@ output_names(transform::ComposedTransform) = output_names(last(transform.transfo
     return :($(Expr(:meta, :inline)); $(steps...); (coords, jacobian))
 end
 
-function transform_jacobian(transform::ComposedTransform{Nin}, coords::StaticVector{Nin}) where {Nin}
+# The chain rule evaluates every step anyway, so the composed value comes with the Jacobian.
+function _value_and_jacobian(transform::ComposedTransform{Nin}, coords::StaticVector{Nin}) where {Nin}
     T = _evaluation_type(eltype(coords))
-    inputs = SVector{Nin,T}(coords)
-    _, jacobian = _apply_composed_jacobian(transform.transforms, inputs, SMatrix{Nin,Nin,T}(I))
-    return jacobian
+    return _apply_composed_jacobian(transform.transforms, SVector{Nin,T}(coords), SMatrix{Nin,Nin,T}(I))
 end
+
+transform_jacobian(transform::ComposedTransform{Nin}, coords::StaticVector{Nin}) where {Nin} = last(_value_and_jacobian(transform, coords))
 
 """Independent transforms evaluated over consecutive input slices."""
 struct ParallelTransform{Nin,Nout,Ts<:Tuple} <: AbstractTransform{Nin,Nout}

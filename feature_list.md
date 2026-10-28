@@ -102,6 +102,9 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 - [x] **P1** Add `get_frame(wcs, name)` as a public frame lookup.
 - [ ] **P1** Add `pixel_to_world_values` and `world_to_pixel_values` aliases for explicitly numeric results.
+- [x] **P1** Add `pixel_area` for 2D celestial WCSs from the Jacobian at the pixel center.
+- [ ] **P1** Make the Jacobian finite at a zenithal projection's reference point, where native longitude is undefined and the chain rule gives `NaN`.
+- [ ] **P1** Provide a public, efficient Jacobian API for a WCS, rather than `transform_jacobian(wcs.forward, ...)` on internal fields.
 - [x] **P1** Add array-index APIs that reverse Cartesian/array axis order and round world-to-index results consistently. Covered by `origin=1`: APE 14's array-index methods reverse NumPy's row-major order, but FITSIO.jl and ASDF.jl already return Julia arrays in pixel-axis order, so only the one-based offset remains; `round.(Int, world_to_pixel(wcs, world; origin=1))` indexes the data.
 - [ ] **P1** Add broadcasted coordinate-array evaluation where each axis is supplied as a scalar or array with compatible shapes.
 - [ ] **P1** Add allocation-conscious in-place batch APIs for large coordinate arrays.
