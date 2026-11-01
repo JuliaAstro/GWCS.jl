@@ -3,8 +3,23 @@ const _TIME_TAG = "tag:stsci.edu:asdf/time/time"
 const _ICRS_TAG = "tag:astropy.org:astropy/coordinates/frames/icrs"
 
 _tagged_metadata(tag, version, properties) = TaggedMapping("$tag-$version", Dict{Any,Any}(properties))
-_metadata_rows(matrix) = [collect(row) for row in eachrow(matrix)]
 _metadata_vector(values) = collect(values)
+
+# An array Python GWCS writes as an ASDF ndarray, indexed in the file's row-major axis order. `to_metadata` returns it as
+# nested lists, and `write_asdf` writes it as an ndarray.
+struct _MetadataArray
+    array::Array
+    _MetadataArray(array::AbstractArray) = new(collect(array))
+end
+
+_nested_lists(array::AbstractArray) = ndims(array) == 0 ? array[] : ndims(array) == 1 ? collect(array) : [_nested_lists(slice) for slice in eachslice(array; dims=1)]
+
+_plain_metadata(value::TaggedMapping) = TaggedMapping(value.tag, Dict{Any,Any}(key => _plain_metadata(item) for (key, item) in value))
+_plain_metadata(value::TaggedSequence) = TaggedSequence(value.tag, map(_plain_metadata, value.value))
+_plain_metadata(value::AbstractDict) = Dict{Any,Any}(key => _plain_metadata(item) for (key, item) in value)
+_plain_metadata(value::AbstractArray) = map(_plain_metadata, value)
+_plain_metadata(value::_MetadataArray) = _nested_lists(value.array)
+_plain_metadata(value) = value
 
 function _metadata_mapping(node, path)
     node isa TaggedMapping || _metadata_error(path, "serializer produced $(typeof(node)), expected tagged mapping")
@@ -61,7 +76,7 @@ end
 Return a canonical tagged metadata tree for a supported transform, frame,
 domain, pipeline, or nested document value.
 """
-to_metadata(value; registry=default_transform_registry()) = _to_metadata(value, "metadata", registry)
+to_metadata(value; registry=default_transform_registry()) = _plain_metadata(_to_metadata(value, "metadata", registry))
 
 function to_metadata(value, context::TransformWriteContext; path=metadata_path(context))
     return _to_metadata(value, path, context.registry)
@@ -74,6 +89,7 @@ _to_metadata(value::Union{Bool,Number}, path, registry) = value
 _to_metadata(value::AbstractString, path, registry) = _has_tag(value) ? TaggedScalar(_tag(value), String(value)) : value
 _to_metadata(value::Symbol, path, registry) = String(value)
 _to_metadata(value::AxisType, path, registry) = string(value)
+_to_metadata(value::_MetadataArray, path, registry) = value
 
 function _to_metadata(value::TaggedMapping, path, registry)
     properties = Dict{Any,Any}()
@@ -105,6 +121,9 @@ function _to_metadata(value::Tuple, path, registry)
 end
 
 function _to_metadata(value::AbstractArray, path, registry)
+    # A numeric matrix is in row-major order, as `materialize_metadata` reads one, so a registered serializer can write
+    # back the matrix its parser read.
+    value isa AbstractMatrix && eltype(value) <: Number && return _MetadataArray(value)
     items = map(CartesianIndices(value)) do index
         indices = join(Tuple(index), "/")
         _to_metadata(value[index], "$path/$indices", registry)
@@ -292,7 +311,7 @@ _serialize_scale(transform, context) = Dict("factor" => transform.factor)
 _serialize_rotate2d(transform, context) = Dict("angle" => transform.angle)
 
 function _serialize_affine(transform, context)
-    return Dict("matrix" => _metadata_rows(transform.matrix), "translation" => _metadata_vector(transform.offset))
+    return Dict("matrix" => _MetadataArray(transform.matrix), "translation" => _MetadataArray(transform.offset))
 end
 
 function _serialize_constant(transform, context)
@@ -306,7 +325,7 @@ function _serialize_remap(transform, context)
 end
 
 function _serialize_polynomial(transform::Polynomial1D, context)
-    properties = Dict{String,Any}("coefficients" => _metadata_vector(transform.coefficients))
+    properties = Dict{String,Any}("coefficients" => _MetadataArray(transform.coefficients))
     if transform.domain !== nothing
         properties["domain"] = _metadata_vector(transform.domain)
         properties["window"] = _metadata_vector(transform.window)
@@ -315,7 +334,7 @@ function _serialize_polynomial(transform::Polynomial1D, context)
 end
 
 function _serialize_polynomial(transform::Polynomial2D, context)
-    properties = Dict{String,Any}("coefficients" => _metadata_rows(transform.coefficients))
+    properties = Dict{String,Any}("coefficients" => _MetadataArray(transform.coefficients))
     if transform.domain !== nothing
         properties["domain"] = [_metadata_vector(interval) for interval in transform.domain]
         properties["window"] = [_metadata_vector(interval) for interval in transform.window]
@@ -501,7 +520,7 @@ end
 
 function _to_metadata(mapper::ArrayLabelMapper, path, registry)
     properties = _label_mapper_properties(mapper, path, registry)
-    properties["mapper"] = _metadata_rows(mapper.labels)
+    properties["mapper"] = _MetadataArray(mapper.labels)
     properties["inputs_mapping"] = _mapper_input_mapping(mapper, path, registry)
     mapper.no_label === nothing || (properties["no_label"] = mapper.no_label)
     return _tagged_metadata("$_GWCS_TAG/label_mapper", v"1.3.0", properties)
@@ -715,6 +734,18 @@ function _to_metadata(value, path, registry)
     _metadata_error(path, "value of type $(typeof(value)) cannot be serialized canonically")
 end
 
+"""
+    write_asdf(filename, wcs::WCS; key="wcs", array_inline_threshold=nothing, all_array_storage=nothing, all_array_compression=nothing)
+    write_asdf(filename, document::AbstractDict; array_inline_threshold=nothing, all_array_storage=nothing, all_array_compression=nothing)
+
+Write a WCS, or a document containing WCS objects and other values, to an ASDF file. Requires loading ASDF.jl.
+
+The keywords match Python asdf's options of the same names. Arrays are written as binary blocks by default.
+`all_array_storage` (`:internal` or `:inline`) sets the storage of every array, and `array_inline_threshold`, when
+set, writes arrays with fewer elements inline and the rest as blocks, overriding `all_array_storage`.
+`all_array_compression` (`:zlib`, `:bzp2`, `:lz4`, or `:zstd`) compresses every block; by default, blocks GWCS.jl
+creates are uncompressed and an `ASDF.NDArrayWrapper` keeps its own compression.
+"""
 function write_asdf(filename, value; kwargs...)
     throw(ArgumentError("load ASDF.jl before calling write_asdf"))
 end

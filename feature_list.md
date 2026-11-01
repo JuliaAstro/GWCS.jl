@@ -192,7 +192,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P2** Keep unmodeled properties inside untagged sub-mappings (a region selector's `selector`, a label mapper's label/model mapping), inside bounding-box nodes, and on a label mapper's `inputs_mapping` transform, which are still dropped.
 - [x] **P1** Add canonical WCS, frame, transform, inverse, bounding-box, and pixel-shape serialization.
 - [x] **P1** Add writing of canonical inline metadata through ASDF.jl.
-- [ ] **P1** Add lazy, external, compressed, and explicit ASDF array-block writing policies.
+- [x] **P1** Write ASDF arrays as ndarrays with Python asdf's `array_inline_threshold`, `all_array_storage`, and `all_array_compression` options. Inline storage of matrices needs the ASDF.jl release with JuliaAstro/ASDF.jl#81; raise the `ASDF` compat bound to it before releasing GWCS.jl.
+- [ ] **P3** Write external ASDF array blocks once ASDF.jl supports them.
 - [x] **P1** Add canonical round-trip tests for the supported Python-produced YAML fixtures and ASDF.jl files.
 - [ ] **P1** Add round-trip tests against Python-produced ASDF files for every supported tag.
 - [ ] **P1** Add an extension API for observatory- or instrument-specific ASDF schemas.
