@@ -238,6 +238,50 @@ end
     end
 end
 
+@testset "ASDF array storage" begin
+    affine = AffineTransform([1.0 0.2; -0.1 2.0], [3.0, 4.0])
+    polynomial = Polynomial2D([0.1 0.2 0.3; 1.0 0.01 0.0; 0.02 0.0 0.0])
+    labels = ArrayLabelMapper(Int16[9 1; 2 9]; no_label=9)
+    image = reshape(Float32.(1:6), 2, 3)
+    # A matrix a registered serializer returns is written in row-major order, as `materialize_metadata` reads it back.
+    @test to_metadata(Dict("matrix" => [1.0 2.0; 3.0 4.0]))["matrix"] == [[1.0, 2.0], [3.0, 4.0]]
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "arrays.asdf")
+        function written(; kwargs...)
+            write_asdf(filename, Dict("affine" => affine, "polynomial" => polynomial, "labels" => labels, "image" => image, "strings" => ArrayLabelMapper(["" "right"; "left" ""]; no_label=""),
+                "wrapped" => ASDF.NDArrayWrapper(zeros(1000); compression=ASDF.C_Zlib)); kwargs...)
+            return with_logger(() -> ASDF.load(filename; extensions=true), NullLogger())
+        end
+        arrays(file) = (file["affine"]["matrix"], file["affine"]["translation"], file["polynomial"]["coefficients"], file["labels"]["mapper"], file["image"])
+        storage(file) = map(array -> array.source === nothing ? :inline : :block, arrays(file))
+
+        # Python asdf's defaults: every array in an uncompressed block, except that an NDArrayWrapper keeps its compression.
+        file = written()
+        @test storage(file) == (:block, :block, :block, :block, :block)
+        @test parse_transform(file["affine"])(SVector(1.0, 2.0)) == affine(SVector(1.0, 2.0))
+        @test parse_transform(file["polynomial"])(SVector(1.0, 2.0)) == polynomial(SVector(1.0, 2.0))
+        parsed_labels = GWCS._parse_label_mapper(file["labels"], "labels", default_transform_registry())
+        @test parsed_labels.labels == labels.labels && eltype(parsed_labels.labels) == Int16
+        @test file["image"][] == image && file["wrapped"][] == zeros(1000)
+        # ASDF.jl cannot store strings as an ndarray, so string labels stay nested lists.
+        @test file["strings"]["mapper"] == [["", "right"], ["left", ""]]
+        @test count("zlib", String(read(filename))) == 1
+
+        @test storage(written(; all_array_storage=:inline)) == (:inline, :inline, :inline, :inline, :inline)
+        # The threshold wins over all_array_storage, as in Python asdf.
+        @test storage(written(; all_array_storage=:inline, array_inline_threshold=5)) == (:inline, :inline, :block, :inline, :block)
+        @test storage(written(; all_array_storage=:internal, array_inline_threshold=100)) == (:inline, :inline, :inline, :inline, :inline)
+        @test written(; array_inline_threshold=1001)["wrapped"].source === nothing
+        file = written(; all_array_compression=:bzp2)
+        @test storage(file) == (:block, :block, :block, :block, :block)
+        @test file["wrapped"][] == zeros(1000) && occursin("bzp2", String(read(filename))) && !occursin("zlib", String(read(filename)))
+
+        @test_throws "ASDF.jl cannot write external array blocks" write_asdf(filename, Dict("affine" => affine); all_array_storage=:external)
+        @test_throws "all_array_storage must be nothing, :internal, or :inline" write_asdf(filename, Dict("affine" => affine); all_array_storage=:streamed)
+        @test_throws "all_array_compression must be nothing, :zlib, :bzp2, :lz4, or :zstd" write_asdf(filename, Dict("affine" => affine); all_array_compression=:gzip)
+    end
+end
+
 @testset "Step frames given as names" begin
     # validation/generate_named_frames_fixture.py: Python GWCS writes these step frames as bare names (its EmptyFrame).
     fixture = with_logger(NullLogger()) do
@@ -296,8 +340,16 @@ end
     @test steps[1]["transform"]["note"] == "concatenate"
     shift = steps[1]["transform"]["forward"][1]
     @test shift["fixed"] == Dict("offset" => true) && shift["bounds"] == Dict("offset" => [0.0, 10.0])
-    # The block array is read while parsing, so it outlives the file, and is written inline in the file's axis order.
+    # The block array is read while parsing, so it outlives the file; `to_metadata` gives it as nested lists in the
+    # file's axis order, and `write_asdf` writes it back as an ndarray with its element type.
     @test shift["note"] == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "fidelity.asdf")
+        write_asdf(filename, wcs)
+        note = with_logger(() -> ASDF.load(filename; extensions=true), NullLogger())["wcs"]["steps"][1]["transform"]["forward"][1]["note"]
+        original = fixture["wcs"]["constrained"]["steps"][1]["transform"]["forward"][1]["note"]
+        @test note[] == original[] && eltype(note[]) == eltype(original[]) && note.shape == original.shape
+    end
     scale = steps[2]["transform"]["forward"][1]
     @test scale["bounds"] == Dict("factor" => [1.0, nothing])
     @test GWCS._tag(scale["input_units_equivalencies"]["x"]) == "tag:astropy.org:astropy/units/equivalency-1.2.0"
