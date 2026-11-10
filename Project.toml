@@ -21,7 +21,7 @@ GWCSFITSFilesExt = "FITSFiles"
 GWCSFITSIOExt = "FITSIO"
 
 [compat]
-ASDF = "2"
+ASDF = "2.1.1"
 FITSFiles = "0.3"
 FITSIO = "0.17"
 ForwardDiff = "0.10, 1"

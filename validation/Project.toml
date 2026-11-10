@@ -10,7 +10,7 @@ ASDF = {path = "../../ASDF.jl"}
 GWCS = {path = ".."}
 
 [compat]
-ASDF = "2"
+ASDF = "2.1.1"
 GWCS = "0.1"
 JSON = "1"
 OrderedCollections = "1"
