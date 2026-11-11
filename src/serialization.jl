@@ -6,7 +6,7 @@ _tagged_metadata(tag, version, properties) = TaggedMapping("$tag-$version", Dict
 _metadata_vector(values) = collect(values)
 
 # An array Python GWCS writes as an ASDF ndarray, indexed in the file's row-major axis order. `to_metadata` returns it as
-# nested lists, and `write_asdf` writes it as an ndarray.
+# nested lists, and the ASDF extension writes it as an ndarray.
 struct _MetadataArray
     array::Array
     _MetadataArray(array::AbstractArray) = new(collect(array))
@@ -735,16 +735,10 @@ function _to_metadata(value, path, registry)
 end
 
 """
-    write_asdf(filename, wcs::WCS; key="wcs", array_inline_threshold=nothing, all_array_storage=nothing, all_array_compression=nothing)
-    write_asdf(filename, document::AbstractDict; array_inline_threshold=nothing, all_array_storage=nothing, all_array_compression=nothing)
+    write_asdf(filename, wcs::WCS; key="wcs")
 
-Write a WCS, or a document containing WCS objects and other values, to an ASDF file. Requires loading ASDF.jl.
-
-The keywords match Python asdf's options of the same names. Arrays are written as binary blocks by default.
-`all_array_storage` (`:internal` or `:inline`) sets the storage of every array, and `array_inline_threshold`, when
-set, writes arrays with fewer elements inline and the rest as blocks, overriding `all_array_storage`.
-`all_array_compression` (`:zlib`, `:bzp2`, `:lz4`, or `:zstd`) compresses every block; by default, blocks GWCS.jl
-creates are uncompressed and an `ASDF.NDArrayWrapper` keeps its own compression.
+Write `wcs` to an ASDF file under `key`. Requires loading ASDF.jl. This is `ASDF.write_file(filename, Dict(key => wcs))`;
+to write GWCS objects alongside other values, pass a document to `ASDF.write_file` or `save`.
 """
 function write_asdf(filename, value; kwargs...)
     throw(ArgumentError("load ASDF.jl before calling write_asdf"))

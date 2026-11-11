@@ -20,7 +20,7 @@ function compare(fixture_name)
     max_error = 0.0
     mktempdir() do directory
         filename = joinpath(directory, fixture_name)
-        write_asdf(filename, Dict("wcs" => wcss, "transforms" => transforms))
+        ASDF.write_file(filename, Dict("wcs" => wcss, "transforms" => transforms))
         records = JSON.parse(read(`$(validation_python()) $(joinpath(@__DIR__, "python_rewrite_reference.py")) $filename $fixture_path`, String))
         for record in sort(records; by=record -> record["name"])
             max_error = max(max_error, record["error"])
