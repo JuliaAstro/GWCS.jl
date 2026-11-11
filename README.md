@@ -351,16 +351,17 @@ Serialization represents the compiled Julia object, not the exact source tree. A
 
 Properties GWCS.jl does not model are kept and written back unchanged: Python GWCS's parameter constraints (`fixed` and `bounds`) and `input_units_equivalencies`, a `bounding_box` on any transform but the first step's, whose box is the WCS's, and unknown properties of transforms, label mappers, frames, steps, and the WCS. They stay with the object they were read on. An edit that keeps a step's frame keeps the step's and the frame's properties, a replaced transform takes its own with it, and `fix_inputs`, which reduces the input frame, drops those of the first step. A transform written with another tag family than it was read with, such as an Euler `rotate3d` written as a composition, is written without them, since they describe the original tag's parameters. An unmodeled array stored in an ASDF block is read while parsing, so the WCS does not keep the file open, and is written back as an ndarray with its element type. A composite frame with other properties is rejected, as in Python GWCS.
 
-Loading ASDF.jl adds `write_asdf`. It converts canonical tagged nodes to ASDF.jl's container representation and delegates file and block handling to ASDF.jl:
+Loading ASDF.jl lets `ASDF.write_file` and `save` write GWCS objects (WCSs, steps, transforms, frames, bounding boxes, and label mappers) anywhere in a document, through `ASDF.to_tree`. It also adds `write_asdf`, which writes a WCS under a key and takes Python asdf's array storage options. ASDF.jl handles the file and its blocks:
 
 ```julia
 using ASDF
 
+save("product.asdf", Dict("meta" => Dict("wcs" => wcs), "data" => ASDF.NDArrayWrapper(image)))
 write_asdf("calibration.asdf", wcs)
 write_asdf("product.asdf", Dict("meta" => Dict("wcs" => wcs), "data" => image))
 ```
 
-The WCS form writes under the key `"wcs"` by default; use `key` to choose another key. Arrays are written as Python GWCS writes them: affine matrices and translations, polynomial coefficients, label maps, and unmodeled arrays are ndarrays, as are arrays of two or more dimensions in a document, while vectors in a document are YAML lists, as ASDF.jl writes them. By default every ndarray is an uncompressed binary block. The keywords `array_inline_threshold`, `all_array_storage`, and `all_array_compression` are Python asdf's options of the same names, with the same precedence:
+The WCS form writes under the key `"wcs"` by default; use `key` to choose another key. Arrays are written as Python GWCS writes them: affine matrices and translations, polynomial coefficients, label maps, and unmodeled arrays are ndarrays. `write_asdf` also wraps arrays of two or more dimensions in a document as ndarrays, which `save` requires to be `ASDF.NDArrayWrapper`s; vectors in a document are YAML lists, as ASDF.jl writes them. By default every ndarray is an uncompressed binary block. The keywords `array_inline_threshold`, `all_array_storage`, and `all_array_compression` are Python asdf's options of the same names, with the same precedence:
 
 ```julia
 write_asdf("calibration.asdf", wcs; array_inline_threshold=100)
