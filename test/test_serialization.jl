@@ -229,7 +229,9 @@ end
         @test !occursin("Polynomial2D", string(typeof(original.forward)))
 
         document_filename = joinpath(directory, "document.asdf")
-        write_asdf(document_filename, Dict("model" => Dict("wcs" => original), "name" => "canonical"))
+        write_asdf(document_filename, original; key="model")
+        @test pixel_to_world(parse_wcs(with_logger(() -> ASDF.load(document_filename; extensions=true), NullLogger())["model"]), 11.0, 22.0) ≈ pixel_to_world(original, 11.0, 22.0) atol=1e-12
+        ASDF.write_file(document_filename, Dict("model" => Dict("wcs" => original), "name" => "canonical"))
         document = with_logger(NullLogger()) do
             ASDF.load(document_filename; extensions=true)
         end
@@ -238,63 +240,28 @@ end
     end
 end
 
-@testset "ASDF array storage" begin
+@testset "ASDF to_tree" begin
+    original = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
     affine = AffineTransform([1.0 0.2; -0.1 2.0], [3.0, 4.0])
     polynomial = Polynomial2D([0.1 0.2 0.3; 1.0 0.01 0.0; 0.02 0.0 0.0])
     labels = ArrayLabelMapper(Int16[9 1; 2 9]; no_label=9)
-    image = reshape(Float32.(1:6), 2, 3)
+    @test ASDF.to_tree(original).tag == "tag:stsci.edu:gwcs/wcs-1.4.0"
     # A matrix a registered serializer returns is written in row-major order, as `materialize_metadata` reads it back.
     @test to_metadata(Dict("matrix" => [1.0 2.0; 3.0 4.0]))["matrix"] == [[1.0, 2.0], [3.0, 4.0]]
     mktempdir(@__DIR__) do directory
-        filename = joinpath(directory, "arrays.asdf")
-        function written(; kwargs...)
-            write_asdf(filename, Dict("affine" => affine, "polynomial" => polynomial, "labels" => labels, "image" => image, "strings" => ArrayLabelMapper(["" "right"; "left" ""]; no_label=""),
-                "wrapped" => ASDF.NDArrayWrapper(zeros(1000); compression=ASDF.C_Zlib)); kwargs...)
-            return with_logger(() -> ASDF.load(filename; extensions=true), NullLogger())
-        end
-        arrays(file) = (file["affine"]["matrix"], file["affine"]["translation"], file["polynomial"]["coefficients"], file["labels"]["mapper"], file["image"])
-        storage(file) = map(array -> array.source === nothing ? :inline : :block, arrays(file))
-
-        # Python asdf's defaults: every array in an uncompressed block, except that an NDArrayWrapper keeps its compression.
-        file = written()
-        @test storage(file) == (:block, :block, :block, :block, :block)
-        @test parse_transform(file["affine"])(SVector(1.0, 2.0)) == affine(SVector(1.0, 2.0))
-        @test parse_transform(file["polynomial"])(SVector(1.0, 2.0)) == polynomial(SVector(1.0, 2.0))
-        parsed_labels = GWCS._parse_label_mapper(file["labels"], "labels", default_transform_registry())
-        @test parsed_labels.labels == labels.labels && eltype(parsed_labels.labels) == Int16
-        @test file["image"][] == image && file["wrapped"][] == zeros(1000)
-        # ASDF.jl cannot store strings as an ndarray, so string labels stay nested lists.
-        @test file["strings"]["mapper"] == [["", "right"], ["left", ""]]
-        @test count("zlib", String(read(filename))) == 1
-
-        @test storage(written(; all_array_storage=:inline)) == (:inline, :inline, :inline, :inline, :inline)
-        # The threshold wins over all_array_storage, as in Python asdf.
-        @test storage(written(; all_array_storage=:inline, array_inline_threshold=5)) == (:inline, :inline, :block, :inline, :block)
-        @test storage(written(; all_array_storage=:internal, array_inline_threshold=100)) == (:inline, :inline, :inline, :inline, :inline)
-        @test written(; array_inline_threshold=1001)["wrapped"].source === nothing
-        file = written(; all_array_compression=:bzp2)
-        @test storage(file) == (:block, :block, :block, :block, :block)
-        @test file["wrapped"][] == zeros(1000) && occursin("bzp2", String(read(filename))) && !occursin("zlib", String(read(filename)))
-
-        @test_throws "ASDF.jl cannot write external array blocks" write_asdf(filename, Dict("affine" => affine); all_array_storage=:external)
-        @test_throws "all_array_storage must be nothing, :internal, or :inline" write_asdf(filename, Dict("affine" => affine); all_array_storage=:streamed)
-        @test_throws "all_array_compression must be nothing, :zlib, :bzp2, :lz4, or :zstd" write_asdf(filename, Dict("affine" => affine); all_array_compression=:gzip)
-    end
-end
-
-@testset "ASDF to_tree" begin
-    original = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
-    labels = ArrayLabelMapper(Int16[9 1; 2 9]; no_label=9)
-    @test ASDF.to_tree(original).tag == "tag:stsci.edu:gwcs/wcs-1.4.0"
-    mktempdir(@__DIR__) do directory
         filename = joinpath(directory, "to_tree.asdf")
-        ASDF.write_file(filename, Dict("meta" => Dict("wcs" => original), "labels" => labels, "strings" => ArrayLabelMapper(["" "right"; "left" ""]; no_label=""), "steps" => [original.steps[1]]))
+        ASDF.write_file(filename, Dict("meta" => Dict("wcs" => original), "affine" => affine, "polynomial" => polynomial, "labels" => labels, "steps" => [original.steps[1]]))
         file = with_logger(() -> ASDF.load(filename; extensions=true), NullLogger())
         @test pixel_to_world(parse_wcs(file["meta"]["wcs"]), 11.0, 22.0) ≈ pixel_to_world(original, 11.0, 22.0) atol=1e-12
-        @test file["labels"]["mapper"].source !== nothing && eltype(file["labels"]["mapper"][]) == Int16
+        # Python GWCS's ndarrays are written as blocks, as Python asdf writes them by default.
+        @test all(array -> array.source !== nothing, (file["affine"]["matrix"], file["affine"]["translation"], file["polynomial"]["coefficients"], file["labels"]["mapper"]))
+        @test parse_transform(file["affine"])(SVector(1.0, 2.0)) == affine(SVector(1.0, 2.0))
+        @test parse_transform(file["polynomial"])(SVector(1.0, 2.0)) == polynomial(SVector(1.0, 2.0))
+        @test eltype(file["labels"]["mapper"][]) == Int16
         @test GWCS._parse_label_mapper(file["labels"], "labels", default_transform_registry()).labels == labels.labels
-        @test file["strings"]["mapper"] == [["", "right"], ["left", ""]]
         @test file["steps"][1].tag == "tag:stsci.edu:gwcs/step-1.3.0"
+        # ASDF.jl 2.1.1 cannot write an array of strings as the ndarray Python GWCS requires for a label map.
+        @test_broken (ASDF.write_file(filename, Dict("strings" => ArrayLabelMapper(["" "right"; "left" ""]; no_label=""))); true)
     end
 end
 
@@ -316,7 +283,7 @@ end
     @test to_metadata(named)["steps"][2]["frame"] == "focal"
     mktempdir(@__DIR__) do directory
         filename = joinpath(directory, "named.asdf")
-        write_asdf(filename, Dict("celestial" => celestial, "named" => named))
+        ASDF.write_file(filename, Dict("celestial" => celestial, "named" => named))
         loaded = with_logger(NullLogger()) do
             ASDF.load(filename; extensions=true)
         end
@@ -357,7 +324,7 @@ end
     shift = steps[1]["transform"]["forward"][1]
     @test shift["fixed"] == Dict("offset" => true) && shift["bounds"] == Dict("offset" => [0.0, 10.0])
     # The block array is read while parsing, so it outlives the file; `to_metadata` gives it as nested lists in the
-    # file's axis order, and `write_asdf` writes it back as an ndarray with its element type.
+    # file's axis order, and writing it gives an ndarray with its element type.
     @test shift["note"] == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
     mktempdir(@__DIR__) do directory
         filename = joinpath(directory, "fidelity.asdf")
@@ -458,7 +425,7 @@ end
 
     mktempdir(@__DIR__) do directory
         filename = joinpath(directory, "quantities.asdf")
-        write_asdf(filename, Dict("wcs" => wcss, "transforms" => transforms))
+        ASDF.write_file(filename, Dict("wcs" => wcss, "transforms" => transforms))
         written = read(filename, String)
         # Quantities come back in their units, the fiducial ICRS frame keeps its position, and Galactic keeps its tag.
         for unit in ("arcmin", "arcsec", "rad", "")
@@ -520,7 +487,7 @@ end
     end
     mktempdir(@__DIR__) do directory
         filename = joinpath(directory, "projections.asdf")
-        write_asdf(filename, Dict("wcs" => wcss, "transforms" => transforms))
+        ASDF.write_file(filename, Dict("wcs" => wcss, "transforms" => transforms))
         loaded = with_logger(NullLogger()) do
             ASDF.load(filename; extensions=true)
         end

@@ -46,7 +46,7 @@ function main()
     wcss = Dict(name => parse_fits_wcs(cards) for (name, cards) in headers)
     mktempdir() do directory
         filename, header_file = joinpath(directory, "fits_asdf.asdf"), joinpath(directory, "headers.json")
-        write_asdf(filename, Dict("wcs" => wcss))
+        ASDF.write_file(filename, Dict("wcs" => wcss))
         write(header_file, JSON.json(headers))
         records = JSON.parse(read(`$(validation_python()) $(joinpath(@__DIR__, "python_fits_asdf_reference.py")) $filename $header_file`, String))
         for record in sort(records; by=record -> record["name"])

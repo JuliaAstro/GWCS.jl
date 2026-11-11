@@ -351,24 +351,16 @@ Serialization represents the compiled Julia object, not the exact source tree. A
 
 Properties GWCS.jl does not model are kept and written back unchanged: Python GWCS's parameter constraints (`fixed` and `bounds`) and `input_units_equivalencies`, a `bounding_box` on any transform but the first step's, whose box is the WCS's, and unknown properties of transforms, label mappers, frames, steps, and the WCS. They stay with the object they were read on. An edit that keeps a step's frame keeps the step's and the frame's properties, a replaced transform takes its own with it, and `fix_inputs`, which reduces the input frame, drops those of the first step. A transform written with another tag family than it was read with, such as an Euler `rotate3d` written as a composition, is written without them, since they describe the original tag's parameters. An unmodeled array stored in an ASDF block is read while parsing, so the WCS does not keep the file open, and is written back as an ndarray with its element type. A composite frame with other properties is rejected, as in Python GWCS.
 
-Loading ASDF.jl lets `ASDF.write_file` and `save` write GWCS objects (WCSs, steps, transforms, frames, bounding boxes, and label mappers) anywhere in a document, through `ASDF.to_tree`. It also adds `write_asdf`, which writes a WCS under a key and takes Python asdf's array storage options. ASDF.jl handles the file and its blocks:
+Loading ASDF.jl lets `ASDF.write_file` and `save` write GWCS objects (WCSs, steps, transforms, frames, bounding boxes, and label mappers) anywhere in a document, through `ASDF.to_tree`. `write_asdf(filename, wcs; key="wcs")` is `ASDF.write_file(filename, Dict(key => wcs))`. ASDF.jl handles the file, its blocks, and every other value in the document, so a matrix there must be an `ASDF.NDArrayWrapper`:
 
 ```julia
 using ASDF
 
-save("product.asdf", Dict("meta" => Dict("wcs" => wcs), "data" => ASDF.NDArrayWrapper(image)))
 write_asdf("calibration.asdf", wcs)
-write_asdf("product.asdf", Dict("meta" => Dict("wcs" => wcs), "data" => image))
+save("product.asdf", Dict("meta" => Dict("wcs" => wcs), "data" => ASDF.NDArrayWrapper(image)))
 ```
 
-The WCS form writes under the key `"wcs"` by default; use `key` to choose another key. Arrays are written as Python GWCS writes them: affine matrices and translations, polynomial coefficients, label maps, and unmodeled arrays are ndarrays. `write_asdf` also wraps arrays of two or more dimensions in a document as ndarrays, which `save` requires to be `ASDF.NDArrayWrapper`s; vectors in a document are YAML lists, as ASDF.jl writes them. By default every ndarray is an uncompressed binary block. The keywords `array_inline_threshold`, `all_array_storage`, and `all_array_compression` are Python asdf's options of the same names, with the same precedence:
-
-```julia
-write_asdf("calibration.asdf", wcs; array_inline_threshold=100)
-write_asdf("product.asdf", Dict("wcs" => wcs, "data" => image); all_array_compression=:zlib)
-```
-
-`all_array_storage` (`:internal` or `:inline`) sets the storage of every array. `array_inline_threshold`, when set, overrides it: arrays with fewer elements are written inline and the rest as blocks. `all_array_compression` (`:zlib`, `:bzp2`, `:lz4`, or `:zstd`) compresses every block; Python asdf reads `:zstd` only with a compression plugin. Without these keywords, an `ASDF.NDArrayWrapper` in a document keeps its own storage and compression. ASDF.jl cannot write external blocks, so `all_array_storage=:external` raises an error, and it writes a block uncompressed when compression would enlarge it. Label maps of strings, which ASDF.jl cannot store as ndarrays, are written as lists. ASDF.jl's writer keeps global state, so `write_asdf` must not be called from several threads at once.
+Arrays are written as Python GWCS writes them: affine matrices and translations, polynomial coefficients, label maps, and unmodeled arrays are ndarrays in uncompressed binary blocks, the default of Python asdf. ASDF.jl 2.1.1 cannot write an array of `String`s as an ndarray, so writing a label map of strings fails. ASDF.jl's writer keeps global state, so files must not be written from several threads at once.
 
 ### Registering external transforms
 
