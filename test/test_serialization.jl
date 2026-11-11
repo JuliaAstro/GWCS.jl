@@ -282,6 +282,22 @@ end
     end
 end
 
+@testset "ASDF to_tree" begin
+    original = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
+    labels = ArrayLabelMapper(Int16[9 1; 2 9]; no_label=9)
+    @test ASDF.to_tree(original).tag == "tag:stsci.edu:gwcs/wcs-1.4.0"
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "to_tree.asdf")
+        ASDF.write_file(filename, Dict("meta" => Dict("wcs" => original), "labels" => labels, "strings" => ArrayLabelMapper(["" "right"; "left" ""]; no_label=""), "steps" => [original.steps[1]]))
+        file = with_logger(() -> ASDF.load(filename; extensions=true), NullLogger())
+        @test pixel_to_world(parse_wcs(file["meta"]["wcs"]), 11.0, 22.0) ≈ pixel_to_world(original, 11.0, 22.0) atol=1e-12
+        @test file["labels"]["mapper"].source !== nothing && eltype(file["labels"]["mapper"][]) == Int16
+        @test GWCS._parse_label_mapper(file["labels"], "labels", default_transform_registry()).labels == labels.labels
+        @test file["strings"]["mapper"] == [["", "right"], ["left", ""]]
+        @test file["steps"][1].tag == "tag:stsci.edu:gwcs/step-1.3.0"
+    end
+end
+
 @testset "Step frames given as names" begin
     # validation/generate_named_frames_fixture.py: Python GWCS writes these step frames as bare names (its EmptyFrame).
     fixture = with_logger(NullLogger()) do

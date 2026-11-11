@@ -39,6 +39,14 @@ end
 
 _storable(array) = haskey(ASDF.type_datatype_dict, eltype(array))
 
+# `ASDF.write_file` and `save` write GWCS objects anywhere in a document, with every array in an uncompressed block.
+const _GWCSObject = Union{GWCS.WCS,GWCS.Step,GWCS.AbstractTransform,GWCS.AbstractCoordinateFrame,GWCS.AbstractBoundingBox,GWCS.AbstractLabelMapper}
+ASDF.to_tree(value::_GWCSObject) = GWCS._to_metadata(value, "metadata", GWCS.default_transform_registry())
+ASDF.to_tree(value::GWCS.TaggedMapping) = ASDF.TaggedMapping(value.tag, value.value)
+ASDF.to_tree(value::GWCS.TaggedSequence) = ASDF.TaggedSequence(value.tag, value.value)
+ASDF.to_tree(value::GWCS.TaggedScalar) = ASDF.TaggedScalar(value.tag, String(value.value))
+ASDF.to_tree(value::GWCS._MetadataArray) = _storable(value.array) ? ASDF.NDArrayWrapper(_reverse_axes(value.array); compression=ASDF.C_None) : GWCS._nested_lists(value.array)
+
 _asdf_metadata(value::GWCS.TaggedMapping, policy) = ASDF.TaggedMapping(value.tag, Dict{Any,Any}(_asdf_metadata(key, policy) => _asdf_metadata(item, policy) for (key, item) in value))
 _asdf_metadata(value::GWCS.TaggedSequence, policy) = ASDF.TaggedSequence(value.tag, [_asdf_metadata(item, policy) for item in value.value])
 _asdf_metadata(value::GWCS.TaggedScalar, policy) = ASDF.TaggedScalar(value.tag, String(value.value))
@@ -50,7 +58,7 @@ _asdf_metadata(value::Tuple, policy) = map(item -> _asdf_metadata(item, policy),
 _asdf_metadata(value::GWCS._MetadataArray, policy) = _storable(value.array) ? _ndarray(_reverse_axes(value.array), policy) : _asdf_metadata(GWCS._nested_lists(value.array), policy)
 _asdf_metadata(value::Union{ASDF.NDArray,ASDF.ChunkedNDArray}, policy) = _ndarray(value[], policy)
 _asdf_metadata(value::ASDF.NDArrayWrapper, policy) = _ndarray(value.array, policy; value.inline, value.compression, value.lz4_layout)
-_asdf_metadata(value::Union{GWCS.WCS,GWCS.Step,GWCS.AbstractTransform,GWCS.AbstractCoordinateFrame,GWCS.AbstractBoundingBox,GWCS.AbstractLabelMapper}, policy) = _asdf_metadata(GWCS._to_metadata(value, "metadata", GWCS.default_transform_registry()), policy)
+_asdf_metadata(value::_GWCSObject, policy) = _asdf_metadata(GWCS._to_metadata(value, "metadata", GWCS.default_transform_registry()), policy)
 _asdf_metadata(value, policy) = value
 
 function GWCS.write_asdf(filename, wcs::GWCS.WCS; key="wcs", array_inline_threshold=nothing, all_array_storage=nothing, all_array_compression=nothing)
