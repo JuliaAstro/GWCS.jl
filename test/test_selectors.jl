@@ -1,3 +1,9 @@
+using GWCS: AffineTransform, ArrayLabelMapper, BoundingBox, CallableLabelMapper, CallableTransform, ConstantTransform, DictionaryLabelMapper,
+            Frame2D, NoInverse, RangeLabelMapper, RegionSelector, Scale, Shift, Step, TransformLabelMapper, WithInverseLabelMapper,
+            annotate_transform, compile_label_mapper, compile_transform, input_dimension, input_names, inverse_label_mapper, inverse_transform,
+            label_dependencies, label_mapper_name, label_type, map_label, output_dimension, output_names, selected_transform, transform,
+            transform_dependencies, transform_jacobian, transform_name
+
 allocated_selector(transform, coords) = @allocated transform(coords)
 
 @testset "Label mappers" begin

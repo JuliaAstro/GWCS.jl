@@ -1,5 +1,7 @@
 using ASDF
 using GWCS
+using GWCS: AffineTransform, ArrayLabelMapper, Polynomial1D, Polynomial2D, RegionSelector, RemapAxes, Rotation2D, Scale, Shift, compose,
+            input_dimension, parallel, transform
 using JSON
 using StaticArrays
 

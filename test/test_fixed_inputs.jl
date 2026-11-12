@@ -1,3 +1,6 @@
+using GWCS: AffineTransform, AnnotatedTransform, CallableTransform, FixedInputsTransform, Polynomial2D, Shift, compile_transform, fix_inputs,
+            has_inverse, input_dimension, input_names, inverse_transform, output_names, parallel, transform, transform_jacobian, transform_name
+
 @testset "Fixed-input transforms" begin
     affine = AffineTransform(SMatrix{2,2}(1.0, 1.0, 1.0, -1.0), SVector(0.0, 0.0))
     named = AnnotatedTransform(affine; name="sumdiff", inputs=("x", "y"), outputs=("u", "v"))

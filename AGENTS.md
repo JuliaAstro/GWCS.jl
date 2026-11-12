@@ -151,5 +151,6 @@ Python GWCS reference work uses:
 ## Documentation and feature tracking
 
 - Update the README for new public APIs, conventions, restrictions, and compatibility differences.
+- End a public docstring with ``Python equivalent: `<full public path>`.`` when Python GWCS or astropy has one, naming any behavior difference in the same sentence; omit the line when there is none. Describe the Julia behavior in its own terms above it, and mention Python in the body only where it defines the behavior.
 - Update `feature_list.md` when completing or splitting checklist items.
 - Keep deferred work explicit, especially when correctness depends on future geometry, units, batching, or serialization design.

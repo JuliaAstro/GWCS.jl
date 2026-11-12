@@ -1,4 +1,5 @@
 using GWCS
+using GWCS: inverse_transform, parse_transform, transform
 using JSON
 using StaticArrays
 

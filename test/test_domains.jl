@@ -1,3 +1,7 @@
+using GWCS: BoundingBox, CallableLabelMapper, CallableTransform, CompoundBoundingBox, CoordinateFrame, IdentityTransform, RegionSelector, Shift,
+            Step, WithInverseLabelMapper, bounded_axes, bounds, fix_inputs, grid_from_bounding_box, ignored_axes, input_dimension,
+            select_bounding_box, selector_axes, selector_ignored
+
 @testset "Bounding-box domains" begin
     dense = BoundingBox(((-0.5, 9.5), (-0.5, 19.5)))
     @test input_dimension(dense) == 2

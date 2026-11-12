@@ -13,10 +13,13 @@ GWCS.jl implements composable generalized world coordinate systems in Julia. Pip
 
 ## Constructing a WCS
 
+GWCS.jl exports what loading, evaluating, and inspecting a WCS needs: `WCS`, `parse_wcs`, `parse_fits_wcs`, `pixel_to_world`, `world_to_pixel`, the APE 14 axis accessors, and a few others. Transforms, frames, bounding boxes, label mappers, pipeline editors, and the extension API are public but not exported, so the examples below import them by name.
+
 Transforms compose left to right with `|`. Independent transforms combine with `&`.
 
 ```julia
 using GWCS
+using GWCS: AffineTransform, Frame2D, Shift, Step
 
 detector = Frame2D(name="detector", axes_names=("x", "y"), unit=("pixel", "pixel"))
 world = Frame2D(name="world", axes_names=("u", "v"))
@@ -40,7 +43,7 @@ world = pixel_to_world(wcs, pixel; strict=true)    # throw instead, e.g. while d
 
 With `strict=true`, any coordinate without a result throws `DomainError`. For an undefined coordinate the message names the coordinate, the pipeline step, and the transform that is undefined there, for example `pixel (0.0, 0.0) has no world coordinate: IntermediateToNative(HammerAitoffProjection) in the step from frame "intermediate" to "world" is undefined at (180.0, -90.0)`. Non-finite input propagates as `NaN` in both modes, and `NoConvergence` from the numerical inverse (controlled by `quiet`) always propagates. Internally every transform returns `NaN` where a coordinate has no image rather than throwing, so the default and strict modes share one compiled pipeline; the step-by-step diagnosis runs only when a strict error is reported.
 
-`pixel_to_world_jacobian(wcs, pixels...)` returns the Jacobian of `pixel_to_world`, the `world_n_dim × pixel_n_dim` `SMatrix` of world-coordinate derivatives with respect to the pixel, in transform order and the world frame's units (degrees per pixel for a celestial WCS, with no cos(latitude) factor). `world_to_pixel_jacobian(wcs, world...)` returns the Jacobian of `world_to_pixel`: an analytical inverse's Jacobian, or the inverse of the forward Jacobian at the numerical inverse's pixel. An analytical inverse that approximates the forward transform, such as a fitted polynomial, has a Jacobian that differs from the inverse of the forward Jacobian by that approximation; `inv(pixel_to_world_jacobian(wcs, numerical_inverse(wcs, world)))` gives the exact one. Both take the coordinate forms and keywords of `pixel_to_world` and `world_to_pixel`, fill coordinates without a result with `fill_value`, and evaluate the compiled pipeline in one allocation-free pass. A zenithal projection and the sky rotation after it are differentiated together, so the Jacobian is finite and accurate at and near the reference point, where the native longitude is undefined. `transform_jacobian(transform, coords)` gives the Jacobian of a bare transform, and external transforms extend it to supply analytical Jacobians, which every WCS Jacobian uses.
+`pixel_to_world_jacobian(wcs, pixels...)` returns the Jacobian of `pixel_to_world`, the `world_n_dim × pixel_n_dim` `SMatrix` of world-coordinate derivatives with respect to the pixel, in transform order and the world frame's units (degrees per pixel for a celestial WCS, with no cos(latitude) factor). `world_to_pixel_jacobian(wcs, world...)` returns the Jacobian of `world_to_pixel`: an analytical inverse's Jacobian, or the inverse of the forward Jacobian at the numerical inverse's pixel. An analytical inverse that approximates the forward transform, such as a fitted polynomial, has a Jacobian that differs from the inverse of the forward Jacobian by that approximation; `inv(pixel_to_world_jacobian(wcs, numerical_inverse(wcs, world)))` gives the exact one. Both take the coordinate forms and keywords of `pixel_to_world` and `world_to_pixel`, fill coordinates without a result with `fill_value`, and evaluate the compiled pipeline in one allocation-free pass. A zenithal projection and the sky rotation after it are differentiated together, so the Jacobian is finite and accurate at and near the reference point, where the native longitude is undefined. `transform_jacobian(t, coords)` gives the Jacobian of a bare transform `t`, and external transforms extend it to supply analytical Jacobians, which every WCS Jacobian uses.
 
 `pixel_area(wcs, pixels...)` returns the solid angle in steradians that a pixel covers on the sky, `|det J| cos(lat)` with `J` the Jacobian of the world coordinates at the pixel center, computed in one pass with the world coordinate. It needs 2 pixel axes and a 2D `CelestialFrame` output frame in `deg` or `rad`, with the latitude at whatever transform position its `axes_order` gives it. It takes the same coordinate forms and keywords as `pixel_to_world`, and a matrix gives one area per column. Given ranges of integer pixel coordinates, `pixel_area(wcs, xs, ys)` returns the areas of the grid `xs × ys` as a matrix indexed like `data[x, y]` (`pixel_area(wcs, axes(data)...; origin=1)` covers an image), each integrated over the pixel from its four corners, which neighboring pixels share, so a full Roman map takes about 0.2 s; it differs from the area at the pixel center by the variation of the area across the pixel, about 1e-10 for Roman.
 
@@ -49,17 +52,21 @@ With `strict=true`, any coordinate without a result throws `DomainError`. For an
 `WCS` values are immutable. Editing functions return a newly validated and compiled WCS, leaving the source unchanged:
 
 ```julia
+using GWCS: Frame2D, IdentityTransform, insert_frame, insert_transform, rename_frame, set_transform
+
 recalibrated = set_transform(wcs, "detector", "world", new_transform)
 with_extra_step = insert_transform(recalibrated, "world", correction)
 with_frame = insert_frame(with_extra_step, "detector", IdentityTransform{2}(), Frame2D(name="corrected"))
 renamed = rename_frame(with_frame, "corrected", "focal")
 ```
 
-`set_transform` requires adjacent frames. `insert_transform` composes before the named frame by default or after it with `after=true`; it changes coordinate values without changing frame metadata. `insert_frame(input, transform, output)` requires exactly one endpoint to already exist and injects a new edge, so it does not preserve the overall mapping unless the added transform is an identity. `remove_frame` removes an intermediate frame while composing its adjacent transforms. `prepend_transform`, `append_transform`, `prepend_frame`, and `append_frame` provide boundary conveniences. Use `get_frame(wcs, name)` to retrieve the canonical frame stored in the pipeline.
+`set_transform` requires adjacent frames. `insert_transform` composes before the named frame by default or after it with `after=true`; it changes coordinate values without changing frame metadata. `insert_frame(wcs, input, new_transform, output)` requires exactly one endpoint to already exist and injects a new edge, so it does not preserve the overall mapping unless the added transform is an identity. `remove_frame` removes an intermediate frame while composing its adjacent transforms. `prepend_transform`, `append_transform`, `prepend_frame`, and `append_frame` provide boundary conveniences. Use `get_frame(wcs, name)` to retrieve the canonical frame stored in the pipeline. `get_transform(wcs, from_frame, to_frame)` returns the compiled transform between any two frames, inverting the steps between them when `to_frame` comes first, and `GWCS.transform(wcs, from_frame, to_frame, coords...)` evaluates it. Unlike `pixel_to_world`, `GWCS.transform` applies no bounding box and no `fill_value`.
 
 For several edits, use `WCSBuilder`. Every bang operation constructs a complete candidate WCS before committing it, so a failed edit leaves the builder unchanged:
 
 ```julia
+using GWCS: Frame2D, IdentityTransform, WCSBuilder, insert_frame!, set_transform!
+
 builder = WCSBuilder(wcs)
 set_transform!(builder, "detector", "world", new_transform)
 insert_frame!(builder, "detector", IdentityTransform{2}(), Frame2D(name="focal"))
@@ -83,8 +90,10 @@ mask = in_domain(wcs, pixel_matrix)
 `BoundingBox` constrains all input axes by default. Use the dimensioned constructor to leave selected axes unconstrained:
 
 ```julia
+using GWCS: BoundingBox, Step, bounded_axes, ignored_axes
+
 box = BoundingBox{3}(((0.0, 4095.0), (0.0, 4095.0)), (1, 2))
-wcs = WCS(Step(detector, transform), Step(world); bounding_box=box)
+wcs = WCS(Step(detector, cube_to_world), Step(world); bounding_box=box)
 
 bounded_axes(box) # (1, 2)
 ignored_axes(box) # (3,)
@@ -93,6 +102,8 @@ ignored_axes(box) # (3,)
 `CompoundBoundingBox` selects a simple box from exact values of one or more input axes. This represents detector regions, slices, and orders whose valid spatial bounds differ:
 
 ```julia
+using GWCS: BoundingBox, CompoundBoundingBox
+
 boxes = Dict(
     (1,) => BoundingBox{3}(((0.0, 2047.0), (0.0, 2047.0)), (1, 2)),
     (2,) => BoundingBox{3}(((2048.0, 4095.0), (0.0, 2047.0)), (1, 2))
@@ -107,6 +118,8 @@ Use `with_bounding_box(wcs, box)` to return a newly validated WCS with a replace
 `grid_from_bounding_box` returns a coordinate matrix whose columns can be passed directly to `pixel_to_world`. Scalar or per-axis steps are supported; `center=true` uses pixel-center rounding. Compound boxes require `selector`, and other ignored axes require fixed values:
 
 ```julia
+using GWCS: grid_from_bounding_box
+
 pixels = grid_from_bounding_box(wcs; selector=1, fixed=("order" => 2), step=4)
 world = pixel_to_world(wcs, pixels)
 ```
@@ -120,6 +133,8 @@ These predicates test the input domain, not an axis-aligned approximation of the
 Frames classify axes with the standard `AxisType` values `SPATIAL`, `SPECTRAL`, `TIME`, `STOKES`, `PIXEL`, and `UNDEFINED`; generic frames may also use custom strings. `SpectralFrame`, `TemporalFrame`, and `StokesFrame` provide one-dimensional defaults, while `CompositeFrame` combines heterogeneous outputs without changing the compiled numeric kernel:
 
 ```julia
+using GWCS: CelestialFrame, CompositeFrame, SpectralFrame, TemporalFrame
+
 sky = CelestialFrame(name="sky", axes_order=(2, 4))
 wave = SpectralFrame(name="wave", axes_order=1, axes_names="lambda", unit="nm")
 time = TemporalFrame(name="time", axes_order=3, unit="s", reference_epoch=2460000.5, time_format="jd")
@@ -139,6 +154,8 @@ The initial transform set includes identity, shift, scale, affine, constant-outp
 Projection algorithms are separate from transform direction. `IntermediateToNative(projection)` converts projection-plane coordinates to native spherical longitude and latitude, while `NativeToIntermediate(projection)` provides the inverse direction. Both sides use degrees:
 
 ```julia
+using GWCS: IntermediateToNative, ZenithalPerspective, inverse_transform
+
 projection = ZenithalPerspective(1.5, 15.0)
 pix2sky = IntermediateToNative(projection)
 sky2pix = inverse_transform(pix2sky)
@@ -149,6 +166,8 @@ Parameterized projections use the ASDF parameter names corresponding to the FITS
 `celestial_transform` combines a projection with the Paper II native-to-celestial rotation derived from a reference longitude and latitude. It computes the default `LONPOLE` when omitted and uses `LATPOLE` to disambiguate general pole solutions:
 
 ```julia
+using GWCS: GnomonicProjection, celestial_transform
+
 using StaticArrays
 
 sky = celestial_transform(GnomonicProjection(), (83.8221, -5.3911))
@@ -160,6 +179,8 @@ This constructor returns a transform rather than a complete WCS or frame. It is 
 Compatible transforms can also be combined elementwise with `+`, `-`, `*`, `/`, and `^`. Both operands receive the same coordinates and must have matching input and output dimensions:
 
 ```julia
+using GWCS: Scale, Shift
+
 correction = Shift(1.0) * Scale(2.0)
 correction(SVector(3.0)) # [24.0]
 ```
@@ -183,6 +204,8 @@ By default (`quiet=false`), nonconvergence throws `NoConvergence`, which records
 `CallableTransform` is a low-boilerplate entry point for programmatic transforms. Declare the input and output dimensions, then provide functions that accept positional scalar coordinates:
 
 ```julia
+using GWCS: CallableTransform, Step
+
 using StaticArrays
 
 forward(x, y) = (x + y, x - y)
@@ -190,8 +213,8 @@ backward(u, v) = ((u + v) / 2, (u - v) / 2)
 jacobian(x, y) = SMatrix{2,2}(1, 1, 1, -1)
 
 dependencies = SMatrix{2,2,Bool}(true, true, true, true)
-transform = CallableTransform{2,2}(forward; inverse=backward, jacobian, dependencies)
-wcs = WCS(Step(detector, transform), Step(world))
+callable = CallableTransform{2,2}(forward; inverse=backward, jacobian, dependencies)
+wcs = WCS(Step(detector, callable), Step(world))
 ```
 
 A one-output function may return a scalar. Multi-output functions return a tuple or vector of the declared length, and Jacobians return an output-by-input matrix. Optional `dependencies` and `inverse_dependencies` matrices declare structural axis correlations; omitted declarations conservatively assume every output depends on every input. The callable, inverse, Jacobian, and dependency declarations are stored in concrete type parameters, so named functions and type-stable closures can remain inferred and allocation-free. Supplied Jacobians are propagated through composed and parallel transforms and used by numerical inversion; otherwise GWCS.jl uses ForwardDiff. Like built-in transforms, a callable transform returns `NaN` where it is undefined: a `DomainError` thrown by the user function (for example Base `sqrt` of a negative number during a numerical-inverse step) is converted to `NaN`, while other errors propagate.
@@ -203,6 +226,8 @@ Use `CallableTransform` for local functions, prototypes, and closures over calib
 `RegionSelector` implements discontinuous transforms such as IFU slices, detector regions, and spectral orders. A label mapper chooses a label from the full input coordinate, then the selector evaluates the transform registered for that label:
 
 ```julia
+using GWCS: ArrayLabelMapper, RegionSelector, Scale, Shift
+
 labels = [0 2; 1 0]
 mapper = ArrayLabelMapper(labels; no_label=0)
 regions = RegionSelector(mapper, (
@@ -227,20 +252,24 @@ Region selection and compound bounding boxes remain separate. The compound box d
 A closure is sufficient for one-off partial application, but `fix_inputs` creates a lower-dimensional transform that remains visible to composition, Jacobian propagation, metadata parsing, and inversion:
 
 ```julia
-transform = AnnotatedTransform(AffineTransform([1.0 1.0; 1.0 -1.0]); inputs=("x", "y"), outputs=("u", "v"))
-slice = fix_inputs(transform, "y" => 2.0)
+using GWCS: AffineTransform, AnnotatedTransform, fix_inputs, inverse_transform
+
+annotated = AnnotatedTransform(AffineTransform([1.0 1.0; 1.0 -1.0]); inputs=("x", "y"), outputs=("u", "v"))
+slice = fix_inputs(annotated, "y" => 2.0)
 
 slice(SVector(3.0))                    # [5.0, 1.0]
 inverse_transform(slice)(SVector(5.0, 1.0))
 ```
 
-Programmatic integer indices are one-based. String and symbol keys use `input_names(transform)`. `annotate_transform` attaches an optional transform name and input/output names without changing the numerical transform:
+Programmatic integer indices are one-based. String and symbol keys use `input_names(annotated)`. `annotate_transform` attaches an optional transform name and input/output names without changing the numerical transform:
 
 ```julia
-transform = annotate_transform(transform; name="sum_and_difference")
-transform_name(transform)
-input_names(transform)
-output_names(transform)
+using GWCS: annotate_transform, input_names, output_names, transform_name
+
+annotated = annotate_transform(annotated; name="sum_and_difference")
+transform_name(annotated)
+input_names(annotated)
+output_names(annotated)
 ```
 
 When the original transform has an inverse, the fixed-input inverse verifies both the recovered fixed coordinates and the complete forward round trip. It returns `NaN` for an output outside the fixed slice instead of a misleading coordinate; when no inputs remain free, the zero-dimensional result cannot carry `NaN`, so it throws `DomainError`. `atol` and `rtol` keywords on `fix_inputs` control this validation.
@@ -248,6 +277,8 @@ When the original transform has an inverse, the fixed-input inverse verifies bot
 `fix_inputs(wcs, ...)` also projects the input frame, bounding box, and pixel shape. Fixing every input produces a zero-dimensional WCS evaluated with `pixel_to_world(wcs)`:
 
 ```julia
+using GWCS: fix_inputs
+
 detector_slice = fix_inputs(wcs, "y" => 20.0)
 constant_wcs = fix_inputs(wcs, ("x" => 11.0, "y" => 20.0))
 pixel_to_world(constant_wcs)
@@ -257,11 +288,13 @@ pixel_to_world(constant_wcs)
 
 ### Axis dependencies
 
-`axis_correlation_matrix(wcs)` returns a static boolean matrix with world axes on rows and pixel axes on columns, both in transform order. `axis_correlation_matrix(transform)` reports the same output-by-input relationship for a transform:
+`axis_correlation_matrix(wcs)` returns a static boolean matrix with world axes on rows and pixel axes on columns, both in transform order. `axis_correlation_matrix(linear)` reports the same output-by-input relationship for a transform:
 
 ```julia
+using GWCS: transform_dependencies
+
 axis_correlation_matrix(wcs)
-transform_dependencies(transform)
+transform_dependencies(linear)
 ```
 
 Composition uses boolean dependency propagation, parallel transforms produce block-diagonal correlations, and fixed inputs remove the corresponding columns. FITS polynomial, lookup, and `-TAB` distortions depend only on the axes their models read, so unrelated spectral or time axes stay separable. Unknown external transforms use a conservative dense matrix. External transform packages may specialize `transform_dependencies`; a false entry must guarantee independence for every valid coordinate and parameter value rather than describe a Jacobian that happens to be zero at one point.
@@ -340,6 +373,8 @@ Unknown tags, unsupported schema versions, malformed dimensions, and missing req
 `to_metadata` returns a canonical tagged tree for supported transforms, frames, bounding boxes, steps, WCS pipelines, label mappers, and region selectors. The result can be inspected directly, rendered with YAML.jl, or parsed back through the same validated readers:
 
 ```julia
+using GWCS: to_metadata
+
 using YAML
 
 tree = to_metadata(wcs)
@@ -370,6 +405,7 @@ External packages can add metadata support for native `AbstractTransform` subtyp
 module ExampleTransforms
 
 using GWCS
+using GWCS: AbstractTransform, Shift, metadata_value, register_transform!, register_transform_serializer!, required_metadata
 using StaticArrays
 import GWCS: compile_transform, inverse_transform, transform_dependencies, transform_jacobian
 
@@ -377,18 +413,18 @@ struct OffsetTransform{T<:Real} <: AbstractTransform{1,1}
     offset::T
 end
 
-@inline (transform::OffsetTransform)(coords::StaticVector{1}) = SVector(coords[1] + transform.offset)
-inverse_transform(transform::OffsetTransform) = OffsetTransform(-transform.offset)
-transform_jacobian(transform::OffsetTransform, coords::StaticVector{1}) = SMatrix{1,1}(one(eltype(coords)))
+@inline (t::OffsetTransform)(coords::StaticVector{1}) = SVector(coords[1] + t.offset)
+inverse_transform(t::OffsetTransform) = OffsetTransform(-t.offset)
+transform_jacobian(t::OffsetTransform, coords::StaticVector{1}) = SMatrix{1,1}(one(eltype(coords)))
 transform_dependencies(::OffsetTransform) = SMatrix{1,1,Bool}(true)
-compile_transform(transform::OffsetTransform) = Shift(transform.offset)
+compile_transform(t::OffsetTransform) = Shift(t.offset)
 
 function parse_offset(node, context)
     offset = metadata_value(required_metadata(node, "offset", context))
     return OffsetTransform(offset)
 end
 
-serialize_offset(transform, context) = Dict("offset" => transform.offset)
+serialize_offset(t, context) = Dict("offset" => t.offset)
 
 function __init__()
     register_transform!("tag:example.org:gwcs/offset", parse_offset; versions=(v"1.0.0", v"1.1.0"), properties=("offset",))

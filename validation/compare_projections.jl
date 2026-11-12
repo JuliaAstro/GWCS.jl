@@ -1,4 +1,6 @@
 using GWCS
+using GWCS: AiryProjection, GnomonicProjection, IntermediateToNative, NativeToIntermediate, SlantOrthographic, SlantZenithalPerspective,
+            StereographicProjection, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective
 using JSON
 using StaticArrays
 

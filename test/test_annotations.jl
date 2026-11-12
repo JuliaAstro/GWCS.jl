@@ -1,6 +1,7 @@
 module AnnotationFixture
 
 using GWCS
+using GWCS: AbstractTransform, Shift
 using StaticArrays
 import GWCS: compile_transform
 
@@ -12,6 +13,9 @@ end
 compile_transform(transform::OffsetTransform) = Shift(transform.offset)
 
 end
+
+using GWCS: AnnotatedTransform, ComposedTransform, CoordinateFrame, IdentityTransform, Scale, Shift, Step, annotate_transform, compile_transform,
+            compose, input_names, inverse_transform, output_names, parallel, transform_jacobian, transform_name
 
 @testset "Transform annotations" begin
     annotated = AnnotatedTransform(Shift(2.0); name="offset", inputs=("x",), outputs=("u",))

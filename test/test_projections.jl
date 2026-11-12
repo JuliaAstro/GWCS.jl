@@ -1,3 +1,10 @@
+using GWCS: AiryProjection, BonneProjection, COBESphericalCube, CelestialFrame, ConicEqualArea, ConicEquidistant, ConicOrthomorphic,
+            ConicPerspective, CylindricalEqualArea, CylindricalPerspective, Frame2D, GnomonicProjection, HEALPixPolarProjection, HEALPixProjection,
+            HammerAitoffProjection, IntermediateToNative, MercatorProjection, MollweideProjection, NativeToIntermediate, ParabolicProjection,
+            PlateCarreeProjection, PolyconicProjection, QuadrilateralizedSphericalCube, SansonFlamsteedProjection, SlantOrthographic,
+            SlantZenithalPerspective, Step, StereographicProjection, TangentialSphericalCube, ZenithalEqualArea, ZenithalEquidistant,
+            ZenithalPerspective, ZenithalPolynomial, celestial_transform, default_lonpole, inverse_transform, transform, transform_jacobian
+
 function _projection_allocated(transform::T, coords::C) where {T,C}
     return @allocated transform(coords)
 end

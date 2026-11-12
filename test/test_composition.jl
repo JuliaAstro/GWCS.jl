@@ -1,3 +1,8 @@
+using GWCS: AbstractTransform, AffineTransform, AnnotatedTransform, ArithmeticTransform, CartesianToSpherical, ComposedTransform, ConstantTransform,
+            IdentityTransform, ParallelTransform, Polynomial2D, RemapAxes, Rotation3D, Scale, Shift, SphericalToCartesian, annotate_transform,
+            compile_transform, compose, elementwise, has_inverse, input_names, inverse_transform, output_names, parallel, transform,
+            transform_jacobian
+
 struct ArithmeticUncompiled <: AbstractTransform{1,1} end
 struct ArithmeticCompiled <: AbstractTransform{1,1} end
 

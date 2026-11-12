@@ -1,3 +1,10 @@
+using GWCS: AbstractTransform, AffineTransform, AnnotatedTransform, BoundingBox, CartesianToSpherical, CelestialFrame, CompositeFrame,
+            CoordinateFrame, Frame2D, IdentityTransform, Rotation3D, Scale, Shift, SpectralFrame, SphericalToCartesian, Step, StokesFrame,
+            TemporalFrame, WCSBuilder, append_frame, append_frame!, append_transform, append_transform!, axis_names, axis_units, compose, fix_inputs,
+            frame_dimension, get_frame, get_transform, has_inverse, insert_frame, insert_frame!, insert_transform, insert_transform!, parallel,
+            prepend_frame, prepend_frame!, prepend_transform, prepend_transform!, remove_frame, remove_frame!, rename_frame, rename_frame!,
+            set_transform, set_transform!, transform
+
 struct PipelineCompileFailure <: AbstractTransform{2,2} end
 
 (::PipelineCompileFailure)(coords::StaticVector{2}) = coords

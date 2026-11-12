@@ -1,4 +1,5 @@
 using GWCS
+using GWCS: BoundingBox, CompoundBoundingBox, CoordinateFrame, IdentityTransform, Scale, Step, grid_from_bounding_box, parallel
 using JSON
 using StaticArrays
 
