@@ -21,4 +21,5 @@ using Test
     include("test_metadata.jl")
     include("test_registration.jl")
     include("test_serialization.jl")
+    include("test_documentation.jl")
 end
