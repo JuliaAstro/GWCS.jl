@@ -15,9 +15,9 @@ using GWCS: AffineTransform, AiryProjection, ArrayLabelMapper, BilinearLookupTab
             IntermediateToNative, MercatorProjection, MollweideProjection, NativeToCelestial, NativeToIntermediate, ParabolicProjection,
             PlateCarreeProjection, PolyconicProjection, Polynomial2D, QuadrilateralizedSphericalCube, RegionSelector, RemapAxes, Rotation3D,
             SansonFlamsteedProjection, Scale, Shift, SlantOrthographic, SlantZenithalPerspective, SphericalToCartesian, Step,
-            StereographicProjection, TangentialSphericalCube, WCSBuilder, WithInverse, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective,
-            ZenithalPolynomial, compose, fix_inputs, grid_from_bounding_box, insert_frame, insert_frame!, inverse_transform, map_label, parallel,
-            remove_frame, remove_frame!, set_transform, set_transform!, transform_jacobian
+            StereographicProjection, TangentialSphericalCube, WithInverse, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective,
+            ZenithalPolynomial, compose, fix_inputs, grid_from_bounding_box, insert_frame, inverse_transform, map_label, parallel, remove_frame,
+            set_transform, transform_jacobian
 using PrettyTables
 using StaticArrays
 
@@ -202,11 +202,9 @@ const EDIT_FRAME = Frame2D(name="edit")
 const EDIT_INSERTED_WCS = insert_frame(GWCS_LINEAR, PIXEL_FRAME, IdentityTransform{2}(), EDIT_FRAME)
 
 function edit_sequence(wcs)
-    builder = WCSBuilder(wcs)
-    insert_frame!(builder, input_frame(wcs), IdentityTransform{2}(), EDIT_FRAME)
-    set_transform!(builder, input_frame(wcs), EDIT_FRAME, Shift(0.0) & Shift(0.0))
-    remove_frame!(builder, EDIT_FRAME)
-    return GWCS.WCS(builder)
+    edited = insert_frame(wcs, input_frame(wcs), IdentityTransform{2}(), EDIT_FRAME)
+    edited = set_transform(edited, input_frame(wcs), EDIT_FRAME, Shift(0.0) & Shift(0.0))
+    return remove_frame(edited, EDIT_FRAME)
 end
 
 const PIXEL = SVector(400.0, 300.0)
@@ -312,7 +310,6 @@ SUITE["construction"]["RA-DEC-FREQ-STOKES/FITSWCS"] = @benchmarkable FITSWCS.WCS
 SUITE["construction"]["RA-DEC-FREQ-STOKES/GWCS"] = @benchmarkable parse_fits_wcs($CUBE_HEADER) evals=1
 SUITE["construction"]["ASDF Roman fixture/GWCS"] = @benchmarkable parse_wcs($ROMAN_TREE) evals=1
 SUITE["construction"]["ASDF mixed-frame fixture/GWCS"] = @benchmarkable parse_wcs($MIXED_TREE) evals=1
-SUITE["construction"]["editing/builder"] = @benchmarkable WCSBuilder($GWCS_LINEAR) evals=1
 SUITE["construction"]["editing/set_transform"] = @benchmarkable set_transform($GWCS_LINEAR, $PIXEL_FRAME, $LINEAR_FRAME, AffineTransform($(FITS_LINEAR.cd))) evals=1
 SUITE["construction"]["editing/insert_frame"] = @benchmarkable insert_frame($GWCS_LINEAR, $PIXEL_FRAME, IdentityTransform{2}(), $EDIT_FRAME) evals=1
 SUITE["construction"]["editing/remove_frame"] = @benchmarkable remove_frame($EDIT_INSERTED_WCS, $EDIT_FRAME) evals=1

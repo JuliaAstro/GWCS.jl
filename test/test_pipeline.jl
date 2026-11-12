@@ -1,9 +1,8 @@
 using GWCS: AbstractTransform, AffineTransform, AnnotatedTransform, BoundingBox, CartesianToSpherical, CelestialFrame, CompositeFrame,
             CoordinateFrame, Frame2D, IdentityTransform, Rotation3D, Scale, Shift, SpectralFrame, SphericalToCartesian, Step, StokesFrame,
-            TemporalFrame, WCSBuilder, append_frame, append_frame!, append_transform, append_transform!, axis_names, axis_units, compose, fix_inputs,
-            frame_dimension, get_frame, get_transform, has_inverse, insert_frame, insert_frame!, insert_transform, insert_transform!, parallel,
-            prepend_frame, prepend_frame!, prepend_transform, prepend_transform!, remove_frame, remove_frame!, rename_frame, rename_frame!,
-            set_transform, set_transform!, transform
+            TemporalFrame, append_frame, append_transform, axis_names, axis_units, compose, fix_inputs, frame_dimension, get_frame, get_transform,
+            has_inverse, insert_frame, insert_transform, parallel, prepend_frame, prepend_transform, remove_frame, rename_frame, set_transform,
+            transform
 
 struct PipelineCompileFailure <: AbstractTransform{2,2} end
 
@@ -184,39 +183,14 @@ end
     @test appended.bounding_box === box
     @test pixel_to_world(appended, pixel) == world
 
-    builder = WCSBuilder(wcs)
-    @test WCS(builder) === wcs
-    set_transform!(builder, "input", "middle", IdentityTransform{2}())
-    @test pixel_to_world(WCS(builder), pixel) == SVector(2.0, 6.0)
-    rename_frame!(builder, "middle", "focal")
-    insert_frame!(builder, "focal", IdentityTransform{2}(), Frame2D(name="temporary"))
-    remove_frame!(builder, "temporary")
-    @test available_frames(WCS(builder)) == ("input", "focal", "output")
-
-    snapshot = WCS(builder)
-    @test_throws DimensionMismatch set_transform!(builder, "input", "focal", Shift(1.0))
-    @test WCS(builder) === snapshot
-    @test_throws "pipeline compilation failed" set_transform!(builder, "input", "focal", PipelineCompileFailure())
-    @test WCS(builder) === snapshot
-
-    insert_builder = WCSBuilder(wcs)
-    insert_transform!(insert_builder, "middle", Scale(10.0) & Scale(10.0))
-    @test pixel_to_world(WCS(insert_builder), pixel) == pixel_to_world(before_middle, pixel)
-    prepend_builder = WCSBuilder(wcs)
-    prepend_transform!(prepend_builder, Scale(10.0) & Scale(10.0))
-    @test pixel_to_world(WCS(prepend_builder), pixel) == pixel_to_world(prepend_transform(wcs, Scale(10.0) & Scale(10.0)), pixel)
-    append_builder = WCSBuilder(wcs)
-    append_transform!(append_builder, Shift(1.0) & Shift(1.0))
-    @test pixel_to_world(WCS(append_builder), pixel) == SVector(5.0, 13.0)
-    prepend_frame_builder = WCSBuilder(wcs)
-    prepend_frame!(prepend_frame_builder, Frame2D(name="builder_input"), IdentityTransform{2}(); pixel_shape=nothing, bounding_box=nothing)
-    @test available_frames(WCS(prepend_frame_builder)) == ("builder_input", "input", "middle", "output")
-    append_frame_builder = WCSBuilder(wcs)
-    append_frame!(append_frame_builder, IdentityTransform{2}(), Frame2D(name="builder_output"))
-    @test available_frames(WCS(append_frame_builder)) == ("input", "middle", "output", "builder_output")
-
-    constructed = WCSBuilder(Step(input, first_transform), Step(middle, second_transform), Step(output); name="built")
-    @test WCS(constructed).name == "built"
+    # Edits chain by rebinding, and a failed edit leaves the WCS it was given unchanged.
+    edited = set_transform(wcs, "input", "middle", IdentityTransform{2}())
+    @test pixel_to_world(edited, pixel) == SVector(2.0, 6.0)
+    edited = rename_frame(edited, "middle", "focal")
+    edited = insert_frame(edited, "focal", IdentityTransform{2}(), Frame2D(name="temporary"))
+    edited = remove_frame(edited, "temporary")
+    @test available_frames(edited) == ("input", "focal", "output")
+    @test_throws "pipeline compilation failed" set_transform(edited, "input", "focal", PipelineCompileFailure())
 
     allocated_forward(edited, coords) = @allocated pixel_to_world(edited, coords)
     allocated_backward(edited, coords) = @allocated world_to_pixel(edited, coords)

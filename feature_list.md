@@ -140,7 +140,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 ## Pipeline construction and mutation
 
-- [x] **P1** Add a checked pipeline builder that can be edited and then compiled into an immutable `WCS`.
+- [x] **P1** Edit pipelines with checked, non-mutating operations that each return a validated, compiled `WCS`. A mutable builder was removed: it repeated every edit's work and added only mutation syntax.
 - [x] **P1** Add `set_transform` for replacing the transform between adjacent frames.
 - [x] **P1** Add `insert_transform` before or after an existing frame.
 - [x] **P1** Add `insert_frame` for splitting an existing pipeline edge with a new intermediate frame.
@@ -283,7 +283,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - **Do not duplicate APE 14's Python-specific inheritance and object-description protocol verbatim.** Accessors for dimensions, names, units, physical types, bounds, and correlations are useful, but `world_axis_object_classes`, Python class import strings, and `serialized_classes` exist primarily for Astropy interoperability.
 - **Do not recreate `SkyCoord`, `SpectralCoord`, `Time`, or `StokesCoord` inside GWCS.jl.** Optional extensions should interoperate with established Julia packages. The numeric WCS core should remain independent of any one high-level coordinate representation.
 - **Do not thread dynamically interpreted units through every scalar transform.** Unitful inputs should be validated and converted at pipeline boundaries, while the compiled inner kernel remains unit-free and allocation-free.
-- **Do not expose an unchecked mutable pipeline vector.** Python GWCS acknowledges that direct access can bypass validation. GWCS.jl should use a checked builder or persistent edit operations and produce an immutable compiled WCS.
+- **Do not expose an unchecked mutable pipeline vector.** Python GWCS acknowledges that direct access can bypass validation. GWCS.jl uses persistent edit operations that each produce an immutable compiled WCS.
 - **Do not port `EmptyFrame` or legacy string-frame compatibility.** New Julia pipelines should require explicit frame dimensions and metadata, avoiding deprecated behavior that guesses frame structure from transforms.
 - **Do not copy Python GWCS's deprecated aliases, indexing shims, warning classes, or historical serialization quirks unless they are required to read real files.**
 - **Do not copy Python GWCS's exact fixed-point numerical-inverse algorithm or SciPy fallback.** The ForwardDiff-based damped Newton solver is more idiomatic in Julia. We should add the useful batch diagnostics and initialization strategies while retaining a Julia-native solver architecture.

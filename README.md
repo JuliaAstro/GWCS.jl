@@ -52,28 +52,29 @@ With `strict=true`, any coordinate without a result throws `DomainError`. For an
 `WCS` values are immutable. Editing functions return a newly validated and compiled WCS, leaving the source unchanged:
 
 ```julia
-using GWCS: Frame2D, IdentityTransform, insert_frame, insert_transform, rename_frame, set_transform
+using GWCS: Frame2D, Scale, Shift, insert_frame, insert_transform, remove_frame, rename_frame, set_transform
 
-recalibrated = set_transform(wcs, "detector", "world", new_transform)
-with_extra_step = insert_transform(recalibrated, "world", correction)
-with_frame = insert_frame(with_extra_step, "detector", IdentityTransform{2}(), Frame2D(name="corrected"))
-renamed = rename_frame(with_frame, "corrected", "focal")
+# Split the first example's detector-to-world step at a new frame. The new edge gets `shift`, and the next edge
+# keeps `shift | linear`, so `set_transform` restores the original mapping.
+split = insert_frame(wcs, "detector", shift, Frame2D(name="centered"))
+split = set_transform(split, "centered", "world", linear)
+available_frames(split)            # ("detector", "centered", "world")
+pixel_to_world(split, 11.0, 22.0)  # ≈ [1.12, 2.38], as for wcs
+
+recalibrated = insert_transform(split, "world", Scale(1.01) & Scale(1.01))
+pixel_to_world(recalibrated, 11.0, 22.0)  # ≈ [1.1312, 2.4038]
+
+renamed = rename_frame(recalibrated, "centered", "focal")
+merged = remove_frame(renamed, "focal")
+available_frames(merged)            # ("detector", "world")
+pixel_to_world(merged, 11.0, 22.0)  # ≈ [1.1312, 2.4038]
+
+set_transform(merged, "detector", "world", Shift(1.0))  # DimensionMismatch; merged is unchanged
 ```
 
 `set_transform` requires adjacent frames. `insert_transform` composes before the named frame by default or after it with `after=true`; it changes coordinate values without changing frame metadata. `insert_frame(wcs, input, new_transform, output)` requires exactly one endpoint to already exist and injects a new edge, so it does not preserve the overall mapping unless the added transform is an identity. `remove_frame` removes an intermediate frame while composing its adjacent transforms. `prepend_transform`, `append_transform`, `prepend_frame`, and `append_frame` provide boundary conveniences. Use `get_frame(wcs, name)` to retrieve the canonical frame stored in the pipeline. `get_transform(wcs, from_frame, to_frame)` returns the compiled transform between any two frames, inverting the steps between them when `to_frame` comes first, and `GWCS.transform(wcs, from_frame, to_frame, coords...)` evaluates it. Unlike `pixel_to_world`, `GWCS.transform` applies no bounding box and no `fill_value`.
 
-For several edits, use `WCSBuilder`. Every bang operation constructs a complete candidate WCS before committing it, so a failed edit leaves the builder unchanged:
-
-```julia
-using GWCS: Frame2D, IdentityTransform, WCSBuilder, insert_frame!, set_transform!
-
-builder = WCSBuilder(wcs)
-set_transform!(builder, "detector", "world", new_transform)
-insert_frame!(builder, "detector", IdentityTransform{2}(), Frame2D(name="focal"))
-edited = WCS(builder)
-```
-
-The builder is a construction-time object whose stored WCS type may change after each edit. Extract the immutable result with `WCS(builder)` before performance-critical evaluation. Edits that keep the input frame preserve `pixel_shape` and `bounding_box`. Prepending a new input frame requires explicit replacements, or explicit `nothing` values to clear existing input-domain metadata because GWCS cannot infer that metadata in the new coordinate system.
+Each edit validates and compiles a complete WCS before returning it, so a failed edit throws rather than returning a partial pipeline. Several edits chain by passing each result to the next, as above. Edits that keep the input frame preserve `pixel_shape` and `bounding_box`. Prepending a new input frame requires explicit replacements, or explicit `nothing` values to clear existing input-domain metadata because GWCS cannot infer that metadata in the new coordinate system.
 
 Use `in_domain(wcs, pixels...)` when only the validity decision is needed. It returns `true` for finite input coordinates accepted by the WCS domain; the matrix form returns one Boolean per coordinate column. `in_image(wcs, world...)` performs the corresponding world-side test by requiring a successful finite inverse in the input domain:
 

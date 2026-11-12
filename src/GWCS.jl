@@ -56,16 +56,15 @@ export WCS, parse_wcs, parse_fits_wcs, find_all_fits_wcs, write_asdf, pixel_to_w
                RangeLabelMapper, RegionSelector, RemapAxes, Rotation2D, Rotation3D, SPATIAL, SPECTRAL, STOKES, SansonFlamsteedProjection, Scale,
                Shift, SlantOrthographic, SlantZenithalPerspective, SpectralFrame, SphericalToCartesian, Step, StereographicProjection, StokesFrame,
                TIME, TangentialSphericalCube, TemporalFrame, TransformLabelMapper, TransformParseContext, TransformRegistry, TransformWriteContext,
-               UNDEFINED, WCSBuilder, WithInverse, WithInverseLabelMapper, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective,
-               ZenithalPolynomial, annotate_transform, append_frame, append_frame!, append_transform, append_transform!, axis_names,
-               axis_physical_types, axis_types, axis_units, bounded_axes, bounds, celestial_transform, compile_transform, compose,
-               default_transform_registry, degree, elementwise, fix_inputs, frame_dimension, get_frame, get_transform, grid_from_bounding_box,
-               has_inverse, ignored_axes, input_dimension, input_names, insert_frame, insert_frame!, insert_transform, insert_transform!,
-               inverse_transform, map_label, materialize_metadata, metadata_path, metadata_tag, metadata_value, metadata_version, numerical_inverse,
-               offset_to_time, output_dimension, output_names, parallel, parse_transform, prepend_frame, prepend_frame!, prepend_transform,
-               prepend_transform!, register_transform!, register_transform_serializer!, remove_frame, remove_frame!, rename_frame, rename_frame!,
-               required_metadata, select_bounding_box, selected_transform, selector_axes, selector_ignored, set_transform, set_transform!,
-               time_to_offset, to_metadata, transform, transform_dependencies, transform_jacobian, transform_name
+               UNDEFINED, WithInverse, WithInverseLabelMapper, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective, ZenithalPolynomial,
+               annotate_transform, append_frame, append_transform, axis_names, axis_physical_types, axis_types, axis_units, bounded_axes, bounds,
+               celestial_transform, compile_transform, compose, default_transform_registry, degree, elementwise, fix_inputs, frame_dimension,
+               get_frame, get_transform, grid_from_bounding_box, has_inverse, ignored_axes, input_dimension, input_names, insert_frame,
+               insert_transform, inverse_transform, map_label, materialize_metadata, metadata_path, metadata_tag, metadata_value, metadata_version,
+               numerical_inverse, offset_to_time, output_dimension, output_names, parallel, parse_transform, prepend_frame, prepend_transform,
+               register_transform!, register_transform_serializer!, remove_frame, rename_frame, required_metadata, select_bounding_box,
+               selected_transform, selector_axes, selector_ignored, set_transform, time_to_offset, to_metadata, transform, transform_dependencies,
+               transform_jacobian, transform_name
         """))
 end
 
