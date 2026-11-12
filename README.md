@@ -1,6 +1,10 @@
 # GWCS.jl
 
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://juliaastro.org/GWCS.jl/stable/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://juliaastro.org/GWCS.jl/dev/)
 [![CI](https://github.com/JuliaAstro/GWCS.jl/actions/workflows/Test.yml/badge.svg?branch=main)](https://github.com/JuliaAstro/GWCS.jl/actions/workflows/Test.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/JuliaAstro/GWCS.jl/graph/badge.svg)](https://codecov.io/gh/JuliaAstro/GWCS.jl)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 GWCS.jl implements generalized world coordinate systems in Julia. A WCS is a pipeline of coordinate frames joined by
 transforms, from detector pixels to world coordinates such as sky positions, wavelengths, and times. Pipelines are
@@ -29,7 +33,8 @@ FITS and ASDF support load automatically with FITSIO.jl, FITSFiles.jl, or ASDF.j
 - **Exports**: GWCS.jl exports what loading and evaluating a WCS needs. Transforms, frames, and the other building
   blocks are public but not exported; import them by name, as in `using GWCS: Shift`.
 
-The documentation describes these conventions and the differences from Python GWCS in detail.
+The [documentation](https://juliaastro.org/GWCS.jl/dev/) describes these conventions and the differences from Python
+GWCS in detail.
 
 ## Usage
 
