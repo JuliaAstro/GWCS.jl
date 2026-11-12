@@ -1,0 +1,3 @@
+# Fixtures are reference bytes from Python GWCS, asdf, and WCSLIB: check them out unconverted so CRLF
+# checkouts (Windows core.autocrlf) do not change the text tests edit or compare.
+test/fixtures/** -text
