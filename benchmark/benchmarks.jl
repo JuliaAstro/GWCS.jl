@@ -8,6 +8,16 @@ Usage:
 using BenchmarkTools
 using FITSWCS
 using GWCS
+using GWCS: AffineTransform, AiryProjection, ArrayLabelMapper, BilinearLookupTable, BonneProjection, BoundingBox, COBESphericalCube,
+            CallableTransform, CartesianToSpherical, CelestialFrame, CompoundBoundingBox, ConicEqualArea, ConicEquidistant, ConicOrthomorphic,
+            ConicPerspective, ConstantTransform, CoordinateFrame, CylindricalEqualArea, CylindricalPerspective, FITSTabularTable,
+            FITSTabularTransform, Frame2D, GnomonicProjection, HEALPixPolarProjection, HEALPixProjection, HammerAitoffProjection, IdentityTransform,
+            IntermediateToNative, MercatorProjection, MollweideProjection, NativeToCelestial, NativeToIntermediate, ParabolicProjection,
+            PlateCarreeProjection, PolyconicProjection, Polynomial2D, QuadrilateralizedSphericalCube, RegionSelector, RemapAxes, Rotation3D,
+            SansonFlamsteedProjection, Scale, Shift, SlantOrthographic, SlantZenithalPerspective, SphericalToCartesian, Step,
+            StereographicProjection, TangentialSphericalCube, WCSBuilder, WithInverse, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective,
+            ZenithalPolynomial, compose, fix_inputs, grid_from_bounding_box, insert_frame, insert_frame!, inverse_transform, map_label, parallel,
+            remove_frame, remove_frame!, set_transform, set_transform!, transform_jacobian
 using PrettyTables
 using StaticArrays
 
