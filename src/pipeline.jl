@@ -64,20 +64,6 @@ end
 # Edits that keep the WCS keep its unmodeled metadata.
 _with_pass_through(wcs::WCS, pass_through) = typeof(wcs)(wcs.steps, wcs.forward, wcs.backward, wcs.name, wcs.pixel_shape, wcs.bounding_box, wcs.inverse_split, pass_through)
 
-"""
-    WCSBuilder(wcs)
-    WCSBuilder(steps...; name="", pixel_shape=nothing, bounding_box=nothing)
-
-Checked construction-time wrapper whose state is always a valid immutable
-`WCS`. Use `WCS(builder)` to obtain the current compiled snapshot.
-"""
-mutable struct WCSBuilder
-    _wcs::WCS
-end
-
-WCSBuilder(steps::Step...; name="", pixel_shape=nothing, bounding_box=nothing) = WCSBuilder(WCS(steps...; name, pixel_shape, bounding_box))
-WCS(builder::WCSBuilder) = builder._wcs
-
 function fix_inputs(wcs::WCS{Nin}, fixed; atol=nothing, rtol=nothing) where {Nin}
     frame = input_frame(wcs)
     indexed = map(pair -> _fixed_index(pair.first, axis_names(frame), Nin) => pair.second, _fixed_pairs(fixed))
@@ -258,22 +244,6 @@ function prepend_frame(wcs::WCS, frame::AbstractCoordinateFrame, transform::Abst
 end
 
 append_frame(wcs::WCS, transform::AbstractTransform, frame::AbstractCoordinateFrame) = insert_frame(wcs, output_frame(wcs), transform, frame)
-
-function _commit!(builder::WCSBuilder, operation, args...; kwargs...)
-    candidate = operation(builder._wcs, args...; kwargs...)
-    builder._wcs = candidate
-    return builder
-end
-
-set_transform!(builder::WCSBuilder, args...) = _commit!(builder, set_transform, args...)
-insert_transform!(builder::WCSBuilder, args...; kwargs...) = _commit!(builder, insert_transform, args...; kwargs...)
-prepend_transform!(builder::WCSBuilder, args...) = _commit!(builder, prepend_transform, args...)
-append_transform!(builder::WCSBuilder, args...) = _commit!(builder, append_transform, args...)
-insert_frame!(builder::WCSBuilder, args...; kwargs...) = _commit!(builder, insert_frame, args...; kwargs...)
-remove_frame!(builder::WCSBuilder, args...) = _commit!(builder, remove_frame, args...)
-rename_frame!(builder::WCSBuilder, args...) = _commit!(builder, rename_frame, args...)
-prepend_frame!(builder::WCSBuilder, args...; kwargs...) = _commit!(builder, prepend_frame, args...; kwargs...)
-append_frame!(builder::WCSBuilder, args...) = _commit!(builder, append_frame, args...)
 
 function get_transform(wcs::WCS, from_frame, to_frame)
     from_index = _frame_index(wcs, from_frame)
