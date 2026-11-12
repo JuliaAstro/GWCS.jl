@@ -19,10 +19,13 @@ const _NO_PASS_THROUGH = _PassThrough()
 
 """
     AnnotatedTransform(transform; name=nothing, inputs=nothing, outputs=nothing)
-    annotate_transform(transform; name, inputs, outputs)
 
-Attach an optional transform name and input/output axis names without changing
-the wrapped transform's numerical behavior.
+A transform that evaluates `transform` unchanged and carries optional `name`, `inputs`, and `outputs` annotations, each
+`nothing` when absent. Supplied names are nonempty, and the input and output names are each unique, with one per input
+or output; otherwise construction throws. The inverse swaps the input and output names. [`compose`](@ref) and [`parallel`](@ref) never fuse an annotated transform into its neighbors.
+[`annotate_transform`](@ref) changes some annotations and keeps the rest.
+
+Python equivalent: the `name`, `inputs`, and `outputs` of `astropy.modeling.Model`.
 """
 struct AnnotatedTransform{Nin,Nout,T<:AbstractTransform{Nin,Nout},N,IN,OUT} <: AbstractTransform{Nin,Nout}
     transform::T
@@ -57,6 +60,13 @@ function AnnotatedTransform(@nospecialize(transform::AbstractTransform{Nin,Nout}
     return AnnotatedTransform{Nin,Nout,typeof(transform),typeof(transform_name_value),typeof(input_name_values),typeof(output_name_values)}(transform, transform_name_value, input_name_values, output_name_values, parameter_units, pass_through)
 end
 
+"""
+    annotate_transform(transform; name=transform_name(transform), inputs=input_names(transform),
+                       outputs=output_names(transform)) -> AnnotatedTransform
+
+Return `transform` as an [`AnnotatedTransform`](@ref) with the annotations given. An omitted keyword keeps the existing
+[`transform_name`](@ref), [`input_names`](@ref), or [`output_names`](@ref), and `nothing` removes it.
+"""
 function annotate_transform(@nospecialize(transform::AbstractTransform); name=transform_name(transform), inputs=input_names(transform), outputs=output_names(transform), parameter_units=_parameter_units(transform), pass_through=_pass_through(transform))
     parent = transform isa AnnotatedTransform ? transform.transform : transform
     return AnnotatedTransform(parent; name, inputs, outputs, parameter_units, pass_through)

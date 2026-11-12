@@ -1,4 +1,19 @@
+"""
+    pixel_n_dim(wcs) -> Int
+
+Return the number of pixel axes, the dimension of the WCS input frame.
+
+Python equivalent: `gwcs.WCS.pixel_n_dim`.
+"""
 pixel_n_dim(::WCS{Nin}) where {Nin} = Nin
+
+"""
+    world_n_dim(wcs) -> Int
+
+Return the number of world axes, the dimension of the WCS output frame.
+
+Python equivalent: `gwcs.WCS.world_n_dim`.
+"""
 world_n_dim(::WCS{Nin,Nout}) where {Nin,Nout} = Nout
 
 _coordinate_float_type(::Type{T}) where {T<:AbstractFloat} = T
@@ -30,8 +45,9 @@ end
     in_domain(wcs, pixels...; origin=0) -> Bool
     in_domain(wcs, pixels::AbstractMatrix; origin=0) -> BitVector
 
-Test whether finite pixel coordinates belong to the WCS input domain. Matrix columns are coordinates. Pixels are
-zero-based; `origin=1` takes them one-based instead, on every input axis.
+Return whether a pixel is finite and inside the WCS bounding box. Without a bounding box, every finite pixel is in the
+domain. Pixels are zero-based unless `origin=1`, as in [`pixel_to_world`](@ref), and a matrix holds one pixel per
+column.
 """
 function in_domain(wcs::WCS{N}, coords::AbstractVector; origin=0) where {N}
     length(coords) == N || throw(DimensionMismatch("pixel has length $(length(coords)), expected $N"))
@@ -72,6 +88,34 @@ end
     _throw_undefined(wcs, pixels, given)
 end
 
+"""
+    pixel_to_world(wcs, pixels...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> SVector
+    pixel_to_world(wcs, pixels::AbstractMatrix; kwargs...) -> Matrix
+
+Return the world coordinate of a pixel, in transform order and in the output frame's units. The pixel is given as
+separate numbers, a vector, or a tuple; a matrix holds one pixel per column and returns one world coordinate per column.
+
+Pixels are zero-based: the center of the first pixel is 0 on every axis. `origin=1` takes one-based pixels, as Julia
+array indices and FITS number them, by shifting every pixel axis by one; world coordinates are never shifted.
+
+A pixel outside the bounding box, or one without a world coordinate, gives `fill_value` on every world axis.
+`with_bounding_box=false` ignores the bounding box. `strict=true` throws a `DomainError` for these pixels instead, and
+the error names the step and transform where the coordinate is undefined. With `strict=true`, a pixel that is already
+`NaN` gives `NaN` rather than an error.
+
+# Examples
+```julia
+using GWCS
+using GWCS: Frame2D, Scale, Shift, Step
+
+wcs = WCS(Step(Frame2D(name="detector"), Shift(1.0) & Scale(2.0)), Step(Frame2D(name="world")))
+pixel_to_world(wcs, 1.0, 2.0)            # [2.0, 4.0]
+pixel_to_world(wcs, 2.0, 3.0; origin=1)  # [2.0, 4.0]
+```
+
+Python equivalent: `gwcs.WCS.pixel_to_world_values`; Python's `pixel_to_world` returns astropy coordinate objects
+instead.
+"""
 function pixel_to_world(wcs::WCS{Nin}, coords::AbstractVector; kwargs...) where {Nin}
     length(coords) == Nin || throw(DimensionMismatch("pixel has length $(length(coords)), expected $Nin"))
     T = _coordinate_float_type(eltype(coords))
@@ -137,10 +181,11 @@ end
     pixel_to_world_jacobian(wcs, pixels::AbstractMatrix; kwargs...) -> Vector{<:SMatrix}
 
 Return the Jacobian of `pixel_to_world` at a pixel, the `world_n_dim × pixel_n_dim` matrix of `∂world_i/∂pixel_j`.
-World coordinates are in transform order and in their frame's units, so a celestial WCS gives degrees per pixel with no
-cos(latitude) factor. The coordinate forms and keywords act as in `pixel_to_world`: a pixel without a result, including
-one whose Jacobian is undefined, gives a matrix of `fill_value`, or a `DomainError` with `strict=true`. Matrix columns
-are pixels.
+World coordinates are in transform order and in their frame's units, so celestial axes in degrees give degrees per
+pixel, with no cos(latitude) factor.
+
+Coordinate forms and keywords act as in [`pixel_to_world`](@ref). A pixel without a result, including one whose
+Jacobian is undefined, gives a matrix of `fill_value`, or a `DomainError` with `strict=true`.
 """
 function pixel_to_world_jacobian(wcs::WCS{Nin}, coords::AbstractVector; kwargs...) where {Nin}
     length(coords) == Nin || throw(DimensionMismatch("pixel has length $(length(coords)), expected $Nin"))
@@ -291,15 +336,14 @@ end
     pixel_area(wcs, pixels::AbstractMatrix; kwargs...) -> Vector
     pixel_area(wcs, xs::AbstractUnitRange, ys::AbstractUnitRange; kwargs...) -> Matrix
 
-Return the solid angle in steradians that a pixel covers on the sky, `|det J| cos(lat)`, with `J` the Jacobian of
-the world coordinates with respect to the pixel at its center. The WCS needs 2 pixel axes and a 2D `CelestialFrame`
-output frame in `deg` or `rad`. Matrix columns are pixels, and the keywords act as in `pixel_to_world`.
+Return the solid angle in steradians that a pixel covers on the sky, evaluated at the pixel center. It is
+`|det J| cos(lat)`, where `J` is the Jacobian of the world coordinates in radians per pixel and `lat` is the latitude.
+The WCS needs 2 pixel axes and a 2D `CelestialFrame` output frame in `deg` or `rad`. Coordinate forms and keywords act
+as in [`pixel_to_world`](@ref).
 
-Given ranges of integer pixel coordinates, it returns the areas of the pixels in the grid `xs × ys` as a matrix
-indexed like `data[x, y]`, so `pixel_area(wcs, axes(data)...; origin=1)` covers an image. Each is the solid angle within
-the pixel's four corners, which neighboring pixels share, so the grid costs about one evaluation per pixel. Integrated
-over the pixel rather than taken at its center, it differs from the per-pixel area by the variation of the area across
-the pixel, about 1e-10 for Roman.
+Given ranges of integer pixel coordinates, it returns the areas of the pixel grid `xs × ys` as a matrix indexed like
+`data[x, y]`, so `pixel_area(wcs, axes(data)...; origin=1)` covers an image. Each area is the solid angle within the
+pixel's four corners rather than the value at its center, so it differs slightly from the single-pixel form.
 """
 function pixel_area(wcs::WCS, coords::AbstractVector; kwargs...)
     scales = _celestial_area_scales(wcs)
@@ -349,6 +393,25 @@ end
     return pixels .+ offset
 end
 
+"""
+    world_to_pixel(wcs, world...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0,
+                   tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12, quiet=false) -> SVector
+    world_to_pixel(wcs, world::AbstractMatrix; kwargs...) -> Matrix
+
+Return the zero-based pixel of a world coordinate given in transform order and in the output frame's units, or the
+one-based pixel with `origin=1`. Coordinate forms, `with_bounding_box`, `fill_value`, and `strict` act as in
+[`pixel_to_world`](@ref): a world coordinate without a pixel, or whose pixel is outside the bounding box, gives
+`fill_value`.
+
+A WCS with an analytical inverse evaluates it. Otherwise a damped Newton solver inverts the forward transform, which
+needs as many world as pixel axes; with unequal dimensions, `world_to_pixel` throws an `ArgumentError`. The solver stops
+within `tolerance` pixels or after `maxiter` iterations, and halves a step at most `max_backtracks` times. It starts
+from `initial_guess`, a pixel that is one-based with `origin=1`, or from GWCS.jl's own estimate when that is `nothing`.
+
+A solve that does not converge throws [`NoConvergence`](@ref) unless `quiet=true`, which returns the last iterate.
+
+Python equivalent: `gwcs.WCS.world_to_pixel_values`; Python's `world_to_pixel` takes astropy coordinate objects instead.
+"""
 function world_to_pixel(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
     length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))
     T = _coordinate_float_type(eltype(coords))
@@ -389,11 +452,16 @@ end
 end
 
 """
-    in_image(wcs, world...; with_bounding_box=true, kwargs...) -> Bool
-    in_image(wcs, worlds::AbstractMatrix; with_bounding_box=true, kwargs...) -> BitVector
+    in_image(wcs, world...; with_bounding_box=true, origin=0, tolerance=1e-5, maxiter=30, initial_guess=nothing,
+             max_backtracks=12) -> Bool
+    in_image(wcs, world::AbstractMatrix; kwargs...) -> BitVector
 
-Test whether world coordinates invert successfully to finite pixels in the WCS input domain. Matrix columns are coordinates.
-`origin=1` takes `initial_guess` as one-based pixels.
+Return whether a world coordinate has a finite pixel inside the bounding box. The pixel comes from the analytical
+inverse or, without one, the numerical inverse that [`world_to_pixel`](@ref) uses, with its solver keywords; a solve
+that does not converge gives `false`. `with_bounding_box=false` skips the bounding-box test, and `origin=1` reads
+`initial_guess` as a one-based pixel. A matrix holds one world coordinate per column.
+
+Python equivalent: `gwcs.WCS.in_image`.
 """
 function in_image(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
     length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))

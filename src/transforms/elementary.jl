@@ -1,11 +1,23 @@
-"""Identity transform in `N` dimensions."""
+"""
+    IdentityTransform{N}()
+
+The transform that returns its `N` inputs unchanged. [`compose`](@ref) drops it.
+
+Python equivalent: `astropy.modeling.models.Identity`.
+"""
 struct IdentityTransform{N} <: AbstractTransform{N,N} end
 
 @inline (::IdentityTransform{N})(coords::StaticVector{N}) where {N} = coords
 inverse_transform(transform::IdentityTransform) = transform
 transform_jacobian(::IdentityTransform{N}, coords::StaticVector{N}) where {N} = SMatrix{N,N,_evaluation_type(eltype(coords))}(I)
 
-"""Add a constant offset to one coordinate."""
+"""
+    Shift(offset)
+
+The one-input transform that adds `offset` to its coordinate. Combine shifts of several axes with `&`.
+
+Python equivalent: `astropy.modeling.models.Shift`.
+"""
 struct Shift{T<:Real} <: AbstractTransform{1,1}
     offset::T
 end
@@ -19,7 +31,13 @@ end
 inverse_transform(transform::Shift) = Shift(-transform.offset)
 transform_jacobian(::Shift, coords::StaticVector{1}) = SMatrix{1,1}(one(_evaluation_type(eltype(coords))))
 
-"""Multiply one coordinate by a constant factor."""
+"""
+    Scale(factor)
+
+The one-input transform that multiplies its coordinate by `factor`. A zero factor has no inverse.
+
+Python equivalent: `astropy.modeling.models.Scale`.
+"""
 struct Scale{T<:Real} <: AbstractTransform{1,1}
     factor::T
 end
@@ -40,7 +58,15 @@ function transform_jacobian(transform::Scale, coords::StaticVector{1})
     return SMatrix{1,1}(T(transform.factor))
 end
 
-"""Static affine transform `matrix * coords + offset`."""
+"""
+    AffineTransform(matrix, offset)
+    AffineTransform(matrix)
+
+The transform `matrix * coords + offset`, with as many inputs as `matrix` has columns and as many outputs as it has rows;
+`offset` defaults to zero. A square matrix with a nonzero determinant has an inverse.
+
+Python equivalent: `astropy.modeling.models.AffineTransformation2D`, which is two-dimensional only.
+"""
 struct AffineTransform{Nin,Nout,T,L} <: AbstractTransform{Nin,Nout}
     matrix::SMatrix{Nout,Nin,T,L}
     offset::SVector{Nout,T}
@@ -84,7 +110,10 @@ end
 """
     RemapAxes{Nin}(mapping)
 
-Reorder, duplicate, or drop inputs. `mapping` uses Julia's one-based indices.
+The transform whose output `i` is input `mapping[i]` of `Nin`, which reorders, duplicates, or drops inputs. Indices are
+one-based. It has an inverse when every input appears in `mapping`.
+
+Python equivalent: `astropy.modeling.models.Mapping`, whose indices are zero-based.
 """
 struct RemapAxes{Nin,Nout,M<:NTuple{Nout,Int}} <: AbstractTransform{Nin,Nout}
     mapping::M

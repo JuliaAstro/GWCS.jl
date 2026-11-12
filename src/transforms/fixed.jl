@@ -1,4 +1,12 @@
-"""A transform that ignores `Nin` inputs and returns one constant value."""
+"""
+    ConstantTransform(value; n_inputs=0)
+    ConstantTransform{Nin}(value)
+
+The transform that ignores its `Nin` inputs and returns `value` as its single output, such as a constant world axis.
+With no inputs, it has an inverse that accepts only `value` and returns an empty coordinate; with inputs, it has none.
+
+Python equivalent: `astropy.modeling.models.Const1D` and `Const2D`.
+"""
 struct ConstantTransform{Nin,T} <: AbstractTransform{Nin,1}
     value::T
 end
@@ -94,6 +102,24 @@ function _fixed_index(key, names, count)
     throw(ArgumentError("fixed input key $key must be an integer, string, or symbol"))
 end
 
+"""
+    fix_inputs(transform, fixed; atol=nothing, rtol=nothing) -> AbstractTransform
+    fix_inputs(wcs, fixed; atol=nothing, rtol=nothing) -> WCS
+
+Return `transform` with some inputs held at constant values, as a transform of the remaining inputs in their original
+order. `fixed` is a pair, a collection of pairs, a named tuple, or a dictionary mapping each input to its value. An
+input is a one-based index or, for a transform with [`input_names`](@ref), a name as a string or symbol.
+
+When `transform` has an inverse, the result has a checked inverse. It verifies the fixed input values and the forward
+round trip within `atol` and `rtol`, and returns `NaN` for a coordinate outside the fixed-input slice. By default `rtol`
+is `sqrt(eps)` and `atol` scales with it. With every input fixed, the inverse has no outputs and throws a `DomainError`
+instead.
+
+For a WCS, the inputs are pixel axes, named by the input frame's [`axis_names`](@ref). The input frame, bounding box,
+and pixel shape lose the fixed axes.
+
+Python equivalent: `astropy.modeling.fix_inputs`, and `gwcs.WCS.fix_inputs` for a WCS.
+"""
 function fix_inputs(transform::AbstractTransform{Nfull,Nout}, fixed; atol=nothing, rtol=nothing) where {Nfull,Nout}
     input_pairs = _fixed_pairs(fixed)
     names = input_names(transform)

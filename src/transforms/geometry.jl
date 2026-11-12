@@ -1,4 +1,11 @@
-"""Convert longitude and latitude in degrees to a Cartesian unit vector."""
+"""
+    SphericalToCartesian(wrap_lon_at=360)
+
+The transform from longitude and latitude in degrees to a Cartesian unit vector `(x, y, z)`. `wrap_lon_at`, 180 or 360,
+sets the longitude range of the inverse, [`CartesianToSpherical`](@ref).
+
+Python equivalent: `gwcs.geometry.SphericalToCartesian`.
+"""
 struct SphericalToCartesian <: AbstractTransform{2,3}
     wrap_lon_at::Int
     function SphericalToCartesian(wrap_lon_at)
@@ -19,7 +26,14 @@ end
 
 inverse_transform(transform::SphericalToCartesian) = CartesianToSpherical(transform.wrap_lon_at)
 
-"""Convert a Cartesian vector to longitude and latitude in degrees."""
+"""
+    CartesianToSpherical(wrap_lon_at=360)
+
+The transform from a Cartesian vector `(x, y, z)` to longitude and latitude in degrees, with longitude in `[0, 360)` for
+`wrap_lon_at=360` or between -180 and 180 for `wrap_lon_at=180`.
+
+Python equivalent: `gwcs.geometry.CartesianToSpherical`.
+"""
 struct CartesianToSpherical <: AbstractTransform{3,2}
     wrap_lon_at::Int
     function CartesianToSpherical(wrap_lon_at)
@@ -41,7 +55,15 @@ end
 
 inverse_transform(transform::CartesianToSpherical) = SphericalToCartesian(transform.wrap_lon_at)
 
-"""Rotate native spherical coordinates in degrees to celestial coordinates."""
+"""
+    NativeToCelestial(alpha_p, delta_p, phi_p)
+
+The rotation from native spherical coordinates `(phi, theta)` to celestial `(lon, lat)`, all in degrees, as FITS WCS
+Paper II defines it. `alpha_p` and `delta_p` are the celestial coordinates of the native pole, and `phi_p` is the native
+longitude of the celestial pole. Its inverse is [`CelestialToNative`](@ref).
+
+Python equivalent: `astropy.modeling.models.RotateNative2Celestial`.
+"""
 struct NativeToCelestial{T<:Real} <: AbstractTransform{2,2}
     alpha_p::T
     delta_p::T
@@ -71,7 +93,14 @@ end
 
 inverse_transform(transform::NativeToCelestial) = CelestialToNative(transform.alpha_p, transform.delta_p, transform.phi_p)
 
-"""Rotate celestial coordinates in degrees to native spherical coordinates."""
+"""
+    CelestialToNative(alpha_p, delta_p, phi_p)
+
+The rotation from celestial `(lon, lat)` to native spherical `(phi, theta)`, all in degrees, with parameters as for
+[`NativeToCelestial`](@ref), its inverse.
+
+Python equivalent: `astropy.modeling.models.RotateCelestial2Native`.
+"""
 struct CelestialToNative{T<:Real} <: AbstractTransform{2,2}
     alpha_p::T
     delta_p::T
@@ -121,9 +150,11 @@ end
 """
     Rotation2D(angle)
 
-Counterclockwise rotation of `(x, y)` by `angle` degrees, astropy's `Rotation2D` (ASDF `rotate2d`). The compiled WCS
-kernel evaluates it as an `AffineTransform`, so it fuses with neighboring affines, while the stored transform keeps the
-angle to serialize.
+The counterclockwise rotation of `(x, y)` by `angle` degrees. A [`WCS`](@ref) evaluates it as an
+[`AffineTransform`](@ref), so it fuses with neighboring affines, while the stored transform keeps its angle for
+metadata.
+
+Python equivalent: `astropy.modeling.models.Rotation2D`.
 """
 struct Rotation2D{T<:AbstractFloat} <: AbstractTransform{2,2}
     angle::T
@@ -146,7 +177,15 @@ inverse_transform(transform::Rotation2D) = Rotation2D(-transform.angle)
 transform_jacobian(transform::Rotation2D, coords::StaticVector{2}) = SMatrix{2,2,_evaluation_type(eltype(coords))}(transform.matrix)
 _numeric_transform(transform::Rotation2D) = AffineTransform(transform.matrix, zero(SVector{2,eltype(transform.matrix)}))
 
-"""Three-dimensional rotation represented by a precomputed static matrix."""
+"""
+    Rotation3D(matrix)
+    Rotation3D(angles, axes_order)
+
+A rotation of Cartesian vectors `(x, y, z)` by a 3×3 rotation `matrix`, or by the rotations through `angles` in degrees
+about the axes in `axes_order`, a string such as `"zxz"`, applied in that order. Its inverse is the transposed matrix.
+
+Python equivalent: `astropy.modeling.models.RotationSequence3D`.
+"""
 struct Rotation3D{T,L} <: AbstractTransform{3,3}
     matrix::SMatrix{3,3,T,L}
 end

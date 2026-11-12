@@ -14,7 +14,11 @@ end
 """
     Polynomial1D(coefficients; domain=nothing, window=nothing)
 
-One-dimensional polynomial with coefficients in increasing power order.
+The one-dimensional polynomial with `coefficients` in increasing powers, `c[1] + c[2] * x + c[3] * x^2 + ...`. With
+`domain` and `window`, two `(low, high)` pairs given together, the input is first mapped linearly from `domain` to
+`window`. It has no inverse.
+
+Python equivalent: `astropy.modeling.models.Polynomial1D`.
 """
 struct Polynomial1D{N,T,D,W} <: AbstractTransform{1,1}
     coefficients::SVector{N,T}
@@ -52,13 +56,19 @@ end
 
 """
     Polynomial2D(coefficients; domain=nothing, window=nothing)
+    Polynomial2D{T,C,D,W}(coefficients, domain, window)
 
-Triangular two-dimensional polynomial. Matrix element `[i + 1, j + 1]` is the
-coefficient of `x^i * y^j`; entries where `i + j` exceeds the degree are ignored.
+The two-dimensional polynomial of total [`degree`](@ref) `n`, given by a square `(n + 1) × (n + 1)` coefficient matrix
+whose element `[i + 1, j + 1]` multiplies `x^i * y^j`; elements with `i + j > n` are ignored. `domain` and `window`,
+each a pair of `(low, high)` intervals for `x` and `y`, map the inputs as for [`Polynomial1D`](@ref). It has no
+inverse.
 
-The coefficients are stored as an `SMatrix`, so the degree is part of the type and evaluation unrolls. Storage `C` can
-also be a `Matrix`, as in `Polynomial2D{Float64,Matrix{Float64},D,W}(coefficients, domain, window)`: polynomials of every
-degree then share one type and one compiled kernel, at two to three times the evaluation cost.
+The first form stores the coefficients as an `SMatrix`, so the degree is part of the type and evaluation unrolls. The
+parametric form chooses the coefficient storage `C`, with `D` and `W` the types of `domain` and `window`. With
+`C = Matrix{T}`, polynomials of every degree share one type and one compiled kernel, at two to three times the
+evaluation cost.
+
+Python equivalent: `astropy.modeling.models.Polynomial2D`, whose coefficients are named `c{i}_{j}` for the same terms.
 """
 struct Polynomial2D{T,C<:AbstractMatrix{T},D,W} <: AbstractTransform{2,1}
     coefficients::C

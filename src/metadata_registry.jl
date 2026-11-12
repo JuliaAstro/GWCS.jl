@@ -32,8 +32,10 @@ end
 """
     TransformRegistry()
 
-Mutable construction-time registry for metadata transform constructors and
-serializers.
+The constructors and serializers that read and write transforms in metadata, by tag. [`register_transform!`](@ref) and
+[`register_transform_serializer!`](@ref) add to a registry, and [`parse_wcs`](@ref), [`parse_transform`](@ref), and
+[`to_metadata`](@ref) take one with their `registry` keyword. A new registry starts with GWCS.jl's schemas but no
+transforms; `copy(default_transform_registry())` starts from the built-in transforms. Registration is thread-safe.
 """
 mutable struct TransformRegistry
     registrations::Dict{String,Vector{Any}}
@@ -56,10 +58,20 @@ end
 
 const _DEFAULT_TRANSFORM_REGISTRY = TransformRegistry()
 
-"""Return the process-wide transform registry used by metadata parsers."""
+"""
+    default_transform_registry() -> TransformRegistry
+
+Return the registry that metadata reading and writing use by default. It holds the built-in transforms, and external
+packages register theirs in it, typically from their `__init__`.
+"""
 default_transform_registry() = _DEFAULT_TRANSFORM_REGISTRY
 
-"""Metadata tag, version, path, and registry supplied to a constructor."""
+"""
+    TransformParseContext
+
+What a registered constructor is given about the node it builds: the tag family and version, from
+[`metadata_tag`](@ref) and [`metadata_version`](@ref), and the node's [`metadata_path`](@ref) for error messages.
+"""
 struct TransformParseContext
     tag::String
     version::VersionNumber
@@ -67,11 +79,35 @@ struct TransformParseContext
     registry::TransformRegistry
 end
 
+"""
+    metadata_tag(context) -> String
+
+Return the tag family of the node a constructor or serializer is handling, without its version, such as
+`"tag:stsci.edu:asdf/transform/shift"`.
+"""
 metadata_tag(context::TransformParseContext) = context.tag
+
+"""
+    metadata_version(context) -> VersionNumber
+
+Return the schema version of the node a constructor or serializer is handling.
+"""
 metadata_version(context::TransformParseContext) = context.version
+
+"""
+    metadata_path(context) -> String
+
+Return the path of the node a constructor or serializer is handling within the metadata tree, such as
+`"wcs/steps/1/transform"`, for error messages.
+"""
 metadata_path(context::TransformParseContext) = context.path
 
-"""Metadata tag, version, path, and registry supplied to a serializer."""
+"""
+    TransformWriteContext
+
+What a registered serializer is given about the node it writes: the tag family and version it writes, from
+[`metadata_tag`](@ref) and [`metadata_version`](@ref), and the node's [`metadata_path`](@ref) for error messages.
+"""
 struct TransformWriteContext
     tag::String
     version::VersionNumber
@@ -116,21 +152,28 @@ function _registrations_overlap(left::TransformRegistration, right::TransformReg
 end
 
 """
-    register_transform!([registry], tag, constructor; min_version, max_version, versions, validate, normalize, angles, dimensionless, properties)
+    register_transform!([registry], tag, constructor; min_version=v"1.0.0", max_version=v"2.0.0", versions=nothing,
+                        validate, normalize, angles=(), dimensionless=(), properties=nothing) -> TransformRegistry
 
-Register a native transform constructor for either an explicit collection of
-schema `versions` or the half-open semantic version range
-`[min_version, max_version)`. Existing registrations default to `[1.0.0, 2.0.0)`.
-`tag` is the full metadata tag family without its trailing version.
+Register a constructor for the metadata tag family `tag`, given without a version, such as
+`"tag:example.org:gwcs/offset"`. The callback `constructor(node, context)` returns an [`AbstractTransform`](@ref), and
+`context` is a [`TransformParseContext`](@ref). The registry defaults to [`default_transform_registry`](@ref).
+[`required_metadata`](@ref) reads required properties, [`metadata_value`](@ref) unwraps scalars, and
+[`materialize_metadata`](@ref) reads arrays.
 
-`angles` and `dimensionless` name properties that may hold an ASDF quantity, which is replaced by a plain number
-before validation, so the constructor sees what a unitless file holds. An angle quantity in any angle unit is converted
-to degrees; a dimensionless one must have an empty unit. The parsed transform records each unit, and writing restores
-it.
+The constructor handles the versions in `[min_version, max_version)`, or exactly those in `versions`. Ranges that
+overlap a registration of the same tag throw an `ArgumentError`. `validate(node, context)` checks a node and
+`normalize(node, context)` rewrites it before the constructor sees it.
 
-`properties` names the properties the constructor and the type's serializer handle, besides the `name`, `inputs`,
-`outputs`, and `inverse` every transform has. The others in a parsed node are kept on the transform and written back
-with it, when it is written with the same tag family. A registration that declares no `properties` keeps none.
+`angles` and `dimensionless` name properties that may hold an ASDF quantity. The constructor sees a plain number: an
+angle in degrees, or a dimensionless value, whose unit must be empty. The transform records each unit, and writing
+restores it.
+
+`properties` names the properties the constructor and its serializer handle, besides `name`, `inputs`, `outputs`, and
+`inverse`. A parsed node's other properties are kept and written back with the transform, as long as it is written with
+the same tag family. Without `properties`, none are kept.
+
+Python equivalent: the `from_yaml_tree` of an `asdf.extension.Converter`.
 """
 function register_transform!(registry::TransformRegistry, tag::AbstractString, constructor; min_version=nothing, max_version=nothing, versions=nothing, validate=_no_metadata_validation, normalize=_no_metadata_normalization, angles=(), dimensionless=(), properties=nothing)
     if versions === nothing
@@ -170,11 +213,18 @@ function register_transform!(tag::AbstractString, constructor; registry=default_
 end
 
 """
-    register_transform_serializer!([registry], type, tag, serializer; version)
+    register_transform_serializer!([registry], type, tag, serializer; version) -> TransformRegistry
 
-Register a canonical metadata serializer for an `AbstractTransform` subtype.
-The serializer receives the transform and a `TransformWriteContext` and must
-return an untagged mapping. The registry attaches `tag-version`.
+Register a serializer for `type`, a subtype of [`AbstractTransform`](@ref). The callback `serializer(transform, context)`
+returns a dictionary of node properties without a tag, and `context` is a [`TransformWriteContext`](@ref).
+
+The registry tags the node `tag-version`, which a constructor registered with [`register_transform!`](@ref) must
+accept. Nested values are written with `to_metadata(value, context)`; see [`to_metadata`](@ref).
+
+A type with a serializer already registered throws an `ArgumentError`. A transform uses the serializer of its most
+specific registered supertype.
+
+Python equivalent: the `to_yaml_tree` of an `asdf.extension.Converter`.
 """
 function register_transform_serializer!(registry::TransformRegistry, transform_type, tag::AbstractString, serializer; version)
     transform_type <: AbstractTransform || throw(ArgumentError("transform serializer type must subtype AbstractTransform"))

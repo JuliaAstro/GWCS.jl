@@ -148,9 +148,21 @@ Python GWCS reference work uses:
 - Extend validation scripts when implementing externally defined semantics.
 - Document deliberate differences from Python GWCS rather than allowing accidental divergence.
 
+## Docstrings
+
+Every exported and `public` name has a docstring, which the test suite checks. The documentation build's `checkdocs = :public` checks that each one appears in the manual.
+
+- Start with every call form as an indented signature, giving keyword defaults and, where it helps, the return type: `pixel_to_world(wcs, pixels...; with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> SVector`. Matrix and grid forms get their own lines.
+- Follow with one sentence on what the function returns or does, then the details users get wrong: coordinate order (transform order or frame order), units, the pixel origin, what is returned for a coordinate without a result (`NaN`, `fill_value`, `NoInverse`, `nothing`), and the errors thrown for invalid input.
+- Describe keywords in prose, in signature order. Document a keyword set that several functions share once, on the main function (`pixel_to_world`), and refer to it from the others.
+- Write one docstring per function, on its main method, covering every method. Document a type's constructors in the type's docstring. Give an enum a docstring that lists its values, and each value a one-line docstring, since the documentation check counts each binding.
+- Link related names with ``[`name`](@ref)`` where the text mentions them.
+- Use a `jldoctest` block for an example only when its output is short and exact, such as frame names, tuples, integers, or values with few digits, and a plain `julia` block otherwise. An example builds what it needs, so it runs on its own. Doctests run with the test suite, not in the documentation build.
+- End with ``Python equivalent: `<full public path>`.`` when Python GWCS or astropy has one, naming any behavior difference in the same sentence, and omit the line when there is none. Check the equivalent against the Python source. Describe the Julia behavior in its own terms above it, and mention Python in the body only where it defines the behavior.
+- Wrap prose at 120 columns, as in the code.
+
 ## Documentation and feature tracking
 
 - Update the README for new public APIs, conventions, restrictions, and compatibility differences.
-- End a public docstring with ``Python equivalent: `<full public path>`.`` when Python GWCS or astropy has one, naming any behavior difference in the same sentence; omit the line when there is none. Describe the Julia behavior in its own terms above it, and mention Python in the body only where it defines the behavior.
 - Update `feature_list.md` when completing or splitting checklist items.
 - Keep deferred work explicit, especially when correctness depends on future geometry, units, batching, or serialization design.

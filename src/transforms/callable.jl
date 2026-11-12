@@ -1,10 +1,16 @@
 """
-    CallableTransform{Nin,Nout}(forward; inverse=nothing, jacobian=nothing)
-    CallableTransform(forward, nin, nout; inverse=nothing, jacobian=nothing)
+    CallableTransform{Nin,Nout}(forward; inverse=nothing, jacobian=nothing, dependencies=nothing, inverse_dependencies=nothing)
+    CallableTransform(forward, Nin, Nout; kwargs...)
 
-Wrap positional scalar callables as a statically dimensioned transform.
-One-output callables may return a scalar; otherwise callables return a tuple or
-vector with the declared number of outputs.
+A transform that calls `forward(coords...)` with `Nin` numbers. The callable returns a tuple or vector of `Nout`
+values, or a number when `Nout` is 1.
+
+`inverse` is a callable of the same form for the inverse. `jacobian(coords...)` returns the `Nout × Nin` Jacobian;
+without it, ForwardDiff.jl computes the Jacobian. `dependencies` and `inverse_dependencies`, `Bool` matrices like
+[`transform_dependencies`](@ref)'s, declare which outputs depend on which inputs.
+
+A `DomainError` thrown by a callable gives `NaN`, as GWCS.jl transforms do where a coordinate has no image. It cannot
+be written to metadata.
 """
 struct CallableTransform{Nin,Nout,F,I,J,D,ID} <: AbstractTransform{Nin,Nout}
     forward::F

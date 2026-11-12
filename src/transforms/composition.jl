@@ -45,6 +45,19 @@ end
 
 _fuse_pair(first, second) = nothing
 
+"""
+    compose(transforms...) -> AbstractTransform
+    first | second
+
+Return the transform that applies `transforms` in order: the outputs of each are the inputs of the next.
+`first | second` is `compose(first, second)`. Adjacent dimensions that differ throw a `DimensionMismatch`.
+
+The result is simplified: nested compositions flatten, identities drop out, and adjacent shifts, scales, and affines
+fuse into one affine. An [`AnnotatedTransform`](@ref) is never fused, so annotated pipelines keep their structure. The
+inverse composes the parts' inverses in reverse order when each has one.
+
+Python equivalent: the `|` operator of `astropy.modeling.Model`.
+"""
 function compose(@nospecialize(transforms::AbstractTransform...))
     isempty(transforms) && throw(ArgumentError("a composition requires at least one transform"))
     flattened = Any[]
@@ -196,6 +209,19 @@ function _fuse_pair(first::RemapAxes{2,4}, second::ParallelTransform{4,2,<:Tuple
     return AffineTransform(vcat(transpose(xrow), transpose(yrow)), SVector(xoffset, yoffset))
 end
 
+"""
+    parallel(transforms...) -> AbstractTransform
+    first & second
+
+Return the transform that applies `transforms` independently to consecutive slices of the inputs. Each takes as many
+inputs as its [`input_dimension`](@ref), and their outputs are concatenated in the same order. `first & second` is
+`parallel(first, second)`.
+
+Nested parallels flatten, and parts that are all shifts, scales, or affines fuse into one affine. The inverse runs the
+parts' inverses in parallel when each has one.
+
+Python equivalent: the `&` operator of `astropy.modeling.Model`.
+"""
 function parallel(@nospecialize(transforms::AbstractTransform...))
     flattened = Any[]
     foreach(transform -> _append_parallel!(flattened, transform), transforms)
@@ -322,10 +348,14 @@ end
 ArithmeticTransform(operator, left::AbstractTransform, right::AbstractTransform) = _arithmetic_transform(_arithmetic_operator(operator), left, right)
 
 """
-    elementwise(operator, left, right)
+    elementwise(operator, left, right) -> AbstractTransform
+    left + right, left - right, left * right, left / right, left ^ right
 
-Evaluate `left` and `right` on the same inputs and combine corresponding
-outputs with `operator`.
+Return the transform that evaluates `left` and `right` on the same inputs and combines corresponding outputs with
+`operator`, which is `+`, `-`, `*`, `/`, or `^`. The two must have the same dimensions, or it throws a
+`DimensionMismatch`; another operator throws an `ArgumentError`. The result has no inverse.
+
+Python equivalent: the arithmetic operators of `astropy.modeling.Model`.
 """
 elementwise(operator, left::AbstractTransform, right::AbstractTransform) = ArithmeticTransform(operator, left, right)
 

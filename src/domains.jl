@@ -1,7 +1,19 @@
 """Input-domain bounds for an `N`-dimensional transform."""
 abstract type AbstractBoundingBox{N} end
 
-"""Rectangular bounds on selected input axes."""
+"""
+    BoundingBox(intervals; order=:F)
+    BoundingBox{N}(intervals, axes; order=:F)
+
+A rectangular input domain: an inclusive `(lower, upper)` interval for each bounded input axis.
+`BoundingBox(intervals)` bounds every axis, one interval per axis in transform order. `BoundingBox{N}(intervals, axes)`
+bounds the listed axes of `N`; the other axes are unconstrained, though a point in the domain must still be finite.
+With `order=:C`, the intervals are listed in the reverse order of the axes, as in NumPy's row-major convention.
+
+A lower bound above its upper bound, a repeated axis, or an axis outside `1:N` throws an `ArgumentError`.
+
+Python equivalent: `astropy.modeling.bounding_box.ModelBoundingBox`.
+"""
 struct BoundingBox{N,T<:Real,K,A<:NTuple{K,Int}} <: AbstractBoundingBox{N}
     intervals::NTuple{K,Tuple{T,T}}
     axes::A
@@ -43,9 +55,29 @@ BoundingBox(intervals::AbstractVector; order=:F) = BoundingBox(Tuple(intervals);
 BoundingBox{N,T}(intervals::NTuple{N,Tuple{T,T}}, order::Symbol) where {N,T<:Real} = BoundingBox(intervals; order)
 
 input_dimension(::AbstractBoundingBox{N}) where {N} = N
+"""
+    bounded_axes(box::BoundingBox) -> Tuple{Vararg{Int}}
+
+Return the input axes `box` constrains, in increasing order.
+"""
 bounded_axes(box::BoundingBox) = box.axes
+
+"""
+    ignored_axes(box) -> Tuple{Vararg{Int}}
+
+Return the input axes no interval of `box` constrains: for a [`BoundingBox`](@ref) the axes it does not bound, and for a
+[`CompoundBoundingBox`](@ref) the axes it ignores in every entry.
+
+Python equivalent: `astropy.modeling.bounding_box.ModelBoundingBox.ignored`, which is zero-based.
+"""
 ignored_axes(box::BoundingBox{N}) where {N} = Tuple(filter(axis -> !(axis in box.axes), 1:N))
 
+"""
+    bounds(box::BoundingBox, axis) -> Union{Tuple{T,T},Nothing}
+
+Return the `(lower, upper)` interval of input axis `axis`, or `nothing` when `box` does not bound it. An axis outside
+`1:N` throws a `BoundsError`.
+"""
 function bounds(box::BoundingBox, axis::Integer)
     1 <= axis <= input_dimension(box) || throw(BoundsError(box, axis))
     index = findfirst(==(axis), box.axes)
@@ -99,7 +131,20 @@ function Base.get(lookup::_BoundingBoxLookup, key, default)
 end
 Base.haskey(lookup::_BoundingBoxLookup, key) = !iszero(_lookup_bounding_box_index(lookup, key))
 
-"""Selector-keyed collection of rectangular input domains."""
+"""
+    CompoundBoundingBox(boxes, selector_axes; selector_ignored=true, ignored=())
+    CompoundBoundingBox{N}(boxes, selector_axes; selector_ignored=true, ignored=())
+
+An input domain that depends on the values of selector inputs, such as the spectral order of a slit spectrum. `boxes`
+maps each selector value, or a tuple of values for several `selector_axes`, to the [`BoundingBox`](@ref) that applies;
+all boxes bound the same axes. A coordinate whose selector values match no entry exactly is outside the domain.
+
+`selector_ignored` says whether the boxes leave out each selector axis, as one flag or one per selector axis. `ignored`
+lists axes that no box constrains. Every axis is bounded, a selector, or ignored, or construction throws an
+`ArgumentError`. [`select_bounding_box`](@ref) returns the box for a selector value.
+
+Python equivalent: `astropy.modeling.bounding_box.CompoundBoundingBox`.
+"""
 struct CompoundBoundingBox{N,K,S<:NTuple{K,Int},G<:NTuple{K,Bool},I<:Tuple,D<:AbstractDict} <: AbstractBoundingBox{N}
     selector_axes::S
     selector_ignored::G
@@ -181,7 +226,23 @@ function CompoundBoundingBox(boxes, selector_axes; kwargs...)
     return CompoundBoundingBox{input_dimension(first(values(boxes)))}(boxes, selector_axes; kwargs...)
 end
 
+"""
+    selector_axes(box::CompoundBoundingBox) -> Tuple{Vararg{Int}}
+
+Return the input axes whose values select an entry of `box`.
+
+Python equivalent: the `index` of each entry of `astropy.modeling.bounding_box.CompoundBoundingBox.selector_args`,
+which is zero-based.
+"""
 selector_axes(box::CompoundBoundingBox) = box.selector_axes
+
+"""
+    selector_ignored(box::CompoundBoundingBox) -> Tuple{Vararg{Bool}}
+
+Return, for each of the [`selector_axes`](@ref), whether the boxes of `box` leave that axis unconstrained.
+
+Python equivalent: the `ignore` of each entry of `astropy.modeling.bounding_box.CompoundBoundingBox.selector_args`.
+"""
 selector_ignored(box::CompoundBoundingBox) = box.selector_ignored
 ignored_axes(box::CompoundBoundingBox) = box.globally_ignored
 
@@ -190,6 +251,15 @@ function _selected_bounding_box_index(box::CompoundBoundingBox{N,K}, selector) w
     return _lookup_bounding_box_index(box.boxes, key)
 end
 
+"""
+    select_bounding_box(box::CompoundBoundingBox, selector) -> BoundingBox
+    box[selector]
+
+Return the [`BoundingBox`](@ref) for a selector value, or a tuple of values for several selector axes. A value with no
+entry throws a `KeyError`.
+
+Python equivalent: `astropy.modeling.bounding_box.CompoundBoundingBox[selector]`.
+"""
 function select_bounding_box(box::CompoundBoundingBox, selector)
     index = _selected_bounding_box_index(box, selector)
     iszero(index) && throw(KeyError(selector))

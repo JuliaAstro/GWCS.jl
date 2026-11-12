@@ -16,7 +16,20 @@ function _region_entries(selector, ::Val{Nin}, ::Val{Nout}) where {Nin,Nout}
     return L, collect(L, labels), transforms, lookup
 end
 
-"""Discontinuous transform selected by a non-coordinate region label."""
+"""
+    RegionSelector(label_mapper, selector; undefined_value=NaN)
+
+A transform that applies a different branch in each region, such as each slice of an integral field unit.
+`label_mapper` assigns a region label to the input coordinate, and `selector` holds `label => transform` pairs with
+labels of the mapper's label type. The selected branch evaluates the original coordinate. A coordinate in no region
+gives `NaN`, which [`pixel_to_world`](@ref) reports as having no result.
+
+It has an inverse when the label mapper has one, as a [`WithInverseLabelMapper`](@ref), and every branch has one.
+`undefined_value` is kept only so ASDF metadata round-trips exactly.
+
+Python equivalent: `gwcs.selector.RegionsSelector`, whose `undefined_transform_value` is the value it returns outside
+every region.
+"""
 struct RegionSelector{Nin,Nout,L,M<:AbstractLabelMapper{Nin,L},Ts<:Tuple,D<:AbstractDict{L,Int},U<:Real,I<:Union{Nothing,Tuple}} <: AbstractTransform{Nin,Nout}
     label_mapper::M
     labels::Vector{L}
@@ -54,6 +67,13 @@ end
     return _apply_transform_at(transform.transforms, index, coords)
 end
 
+"""
+    selected_transform(selector::RegionSelector, label) -> AbstractTransform
+
+Return the transform `selector` applies in the region with `label`. A label with no transform throws a `KeyError`.
+
+Python equivalent: `gwcs.selector.RegionsSelector.selector[label]`.
+"""
 function selected_transform(transform::RegionSelector, label)
     index = get(transform.lookup, label, 0)
     iszero(index) && throw(KeyError(label))

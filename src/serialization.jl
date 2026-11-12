@@ -72,9 +72,13 @@ end
 
 """
     to_metadata(value; registry=default_transform_registry())
+    to_metadata(value, context::TransformWriteContext; path=metadata_path(context))
 
-Return a canonical tagged metadata tree for a supported transform, frame,
-domain, pipeline, or nested document value.
+Return the tagged metadata tree of a WCS, step, transform, frame, bounding box, or label mapper, or of a dictionary or
+vector holding them. It is the tree [`write_asdf`](@ref) writes, made of GWCS.jl's tagged nodes, dictionaries,
+vectors, strings, and numbers; [`parse_wcs`](@ref) and [`parse_transform`](@ref) read it back. A value without a serializer
+throws an `ArgumentError`. A registered serializer writes a nested value with the second form, which keeps its
+context's registry.
 """
 to_metadata(value; registry=default_transform_registry()) = _plain_metadata(_to_metadata(value, "metadata", registry))
 
@@ -737,8 +741,10 @@ end
 """
     write_asdf(filename, wcs::WCS; key="wcs")
 
-Write `wcs` to an ASDF file under `key`. Requires loading ASDF.jl. This is `ASDF.write_file(filename, Dict(key => wcs))`;
-to write GWCS objects alongside other values, pass a document to `ASDF.write_file` or `save`.
+Write `wcs` to an ASDF file under `key`; requires loading ASDF.jl. To write it alongside other values, pass a document
+to `ASDF.write_file` or `save`, which write GWCS objects anywhere in it. [`parse_wcs`](@ref) reads the WCS back.
+
+Python equivalent: `asdf.AsdfFile({key: wcs}).write_to(filename)`.
 """
 function write_asdf(filename, value; kwargs...)
     throw(ArgumentError("load ASDF.jl before calling write_asdf"))

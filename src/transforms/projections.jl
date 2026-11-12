@@ -4,19 +4,50 @@ abstract type AbstractSphericalProjection end
 """Construction-time description of a zenithal spherical projection."""
 abstract type AbstractZenithalProjection <: AbstractSphericalProjection end
 
-"""The parameter-free TAN/gnomonic projection."""
+"""
+    GnomonicProjection()
+
+The TAN (gnomonic) zenithal projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Gnomonic` and `Sky2Pix_Gnomonic`.
+"""
 struct GnomonicProjection <: AbstractZenithalProjection end
 
-"""The parameter-free STG/stereographic projection."""
+"""
+    StereographicProjection()
+
+The STG (stereographic) zenithal projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Stereographic` and `Sky2Pix_Stereographic`.
+"""
 struct StereographicProjection <: AbstractZenithalProjection end
 
-"""The parameter-free ARC/zenithal-equidistant projection."""
+"""
+    ZenithalEquidistant()
+
+The ARC (zenithal equidistant) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ZenithalEquidistant` and `Sky2Pix_ZenithalEquidistant`.
+"""
 struct ZenithalEquidistant <: AbstractZenithalProjection end
 
-"""The parameter-free ZEA/zenithal-equal-area projection."""
+"""
+    ZenithalEqualArea()
+
+The ZEA (zenithal equal-area) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ZenithalEqualArea` and `Sky2Pix_ZenithalEqualArea`.
+"""
 struct ZenithalEqualArea <: AbstractZenithalProjection end
 
-"""The AZP/zenithal-perspective projection with distance `mu` and tilt `gamma`."""
+"""
+    ZenithalPerspective(mu=0, gamma=0)
+
+The AZP (zenithal perspective) projection, with `mu` the distance of the projection point from the sphere's
+center in sphere radii and `gamma` the tilt of the projection plane in degrees (FITS `PVi_1` and `PVi_2`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ZenithalPerspective` and `Sky2Pix_ZenithalPerspective`.
+"""
 struct ZenithalPerspective{T<:AbstractFloat} <: AbstractZenithalProjection
     mu::T
     gamma::T
@@ -52,7 +83,14 @@ function ZenithalPerspective(mu::Real=0, gamma::Real=0)
     return ZenithalPerspective{T}(mu, gamma)
 end
 
-"""The SZP/slant-zenithal-perspective projection."""
+"""
+    SlantZenithalPerspective(mu=0, phi0=0, theta0=90)
+
+The SZP (slant zenithal perspective) projection, with `mu` the distance of the projection point in sphere radii and
+`phi0` and `theta0` its native longitude and latitude in degrees (FITS `PVi_1` to `PVi_3`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_SlantZenithalPerspective` and `Sky2Pix_SlantZenithalPerspective`.
+"""
 struct SlantZenithalPerspective{T<:AbstractFloat} <: AbstractZenithalProjection
     mu::T
     phi0::T
@@ -87,7 +125,13 @@ function SlantZenithalPerspective(mu::Real=0, phi0::Real=0, theta0::Real=90)
     return SlantZenithalPerspective{T}(mu, phi0, theta0)
 end
 
-"""The SIN/slant-orthographic projection with obliqueness parameters `xi` and `eta`."""
+"""
+    SlantOrthographic(xi=0, eta=0)
+
+The SIN (slant orthographic) projection, with obliqueness parameters `xi` and `eta` (FITS `PVi_1` and `PVi_2`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_SlantOrthographic` and `Sky2Pix_SlantOrthographic`.
+"""
 struct SlantOrthographic{T<:AbstractFloat} <: AbstractZenithalProjection
     xi::T
     eta::T
@@ -109,7 +153,13 @@ function SlantOrthographic(xi::Real=0, eta::Real=0)
     return SlantOrthographic{T}(xi, eta)
 end
 
-"""The AIR/Airy projection with error-minimization latitude `theta_b`."""
+"""
+    AiryProjection(theta_b=90)
+
+The AIR (Airy) zenithal projection, minimizing error within the native latitude `theta_b` in degrees (FITS `PVi_1`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Airy` and `Sky2Pix_Airy`.
+"""
 struct AiryProjection{T<:AbstractFloat} <: AbstractZenithalProjection
     theta_b::T
     coefficient::T
@@ -131,10 +181,22 @@ end
 
 AiryProjection(theta_b::Real=90) = AiryProjection{typeof(float(theta_b))}(theta_b)
 
-"""The CAR/plate carree projection."""
+"""
+    PlateCarreeProjection()
+
+The CAR (plate carrée) cylindrical projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_PlateCarree` and `Sky2Pix_PlateCarree`.
+"""
 struct PlateCarreeProjection <: AbstractSphericalProjection end
 
-"""The CEA/cylindrical equal-area projection with parameter `lambda`."""
+"""
+    CylindricalEqualArea(lambda=1)
+
+The CEA (cylindrical equal-area) projection, with parameter `lambda` in `(0, 1]` (FITS `PVi_1`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_CylindricalEqualArea` and `Sky2Pix_CylindricalEqualArea`.
+"""
 struct CylindricalEqualArea{T<:AbstractFloat} <: AbstractSphericalProjection
     lambda::T
     function CylindricalEqualArea{T}(lambda) where {T}
@@ -146,7 +208,14 @@ end
 
 CylindricalEqualArea(lambda::Real=1) = CylindricalEqualArea{typeof(float(lambda))}(lambda)
 
-"""The CYP/cylindrical perspective projection."""
+"""
+    CylindricalPerspective(mu=1, lambda=1)
+
+The CYP (cylindrical perspective) projection, with `mu` the distance of the projection point from the center of the
+generating sphere and `lambda` the radius of the cylinder, both in sphere radii (FITS `PVi_1` and `PVi_2`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_CylindricalPerspective` and `Sky2Pix_CylindricalPerspective`.
+"""
 struct CylindricalPerspective{T<:AbstractFloat} <: AbstractSphericalProjection
     mu::T
     lambda::T
@@ -161,25 +230,66 @@ end
 
 CylindricalPerspective(mu::Real=1, lambda::Real=1) = CylindricalPerspective{promote_type(typeof(float(mu)), typeof(float(lambda)))}(mu, lambda)
 
-"""The MER/Mercator projection."""
+"""
+    MercatorProjection()
+
+The MER (Mercator) cylindrical projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Mercator` and `Sky2Pix_Mercator`.
+"""
 struct MercatorProjection <: AbstractSphericalProjection end
 
-"""The SFL/Sanson-Flamsteed projection."""
+"""
+    SansonFlamsteedProjection()
+
+The SFL (Sanson-Flamsteed) pseudocylindrical projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_SansonFlamsteed` and `Sky2Pix_SansonFlamsteed`.
+"""
 struct SansonFlamsteedProjection <: AbstractSphericalProjection end
 
-"""The PAR/parabolic projection."""
+"""
+    ParabolicProjection()
+
+The PAR (parabolic) pseudocylindrical projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Parabolic` and `Sky2Pix_Parabolic`.
+"""
 struct ParabolicProjection <: AbstractSphericalProjection end
 
-"""The MOL/Mollweide projection."""
+"""
+    MollweideProjection()
+
+The MOL (Mollweide) pseudocylindrical projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Molleweide` and `Sky2Pix_Molleweide`, as astropy spells it.
+"""
 struct MollweideProjection <: AbstractSphericalProjection end
 
-"""The PCO/polyconic projection."""
+"""
+    PolyconicProjection()
+
+The PCO (polyconic) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_Polyconic` and `Sky2Pix_Polyconic`.
+"""
 struct PolyconicProjection <: AbstractSphericalProjection end
 
-"""The AIT/Hammer-Aitoff projection."""
+"""
+    HammerAitoffProjection()
+
+The AIT (Hammer-Aitoff) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_HammerAitoff` and `Sky2Pix_HammerAitoff`.
+"""
 struct HammerAitoffProjection <: AbstractSphericalProjection end
 
-"""The ZPN/zenithal polynomial projection with coefficients `PV0, PV1, ...`."""
+"""
+    ZenithalPolynomial(coefficients=(0.0, 1.0))
+
+The ZPN (zenithal polynomial) projection, with `coefficients` those of the radius as a polynomial in the native
+colatitude in radians (FITS `PVi_0`, `PVi_1`, and so on).
+"""
 struct ZenithalPolynomial{N,T<:AbstractFloat} <: AbstractZenithalProjection
     coefficients::NTuple{N,T}
     monotonic_limit::T
@@ -267,6 +377,14 @@ function _conic_orthomorphic_constants(sigma::T, delta::T) where {T}
 end
 
 # `constants` holds values precomputed from sigma and delta (in degrees) so evaluation avoids recomputing them.
+"""
+    ConicPerspective(sigma, delta=0)
+
+The COP (conic perspective) projection, with `sigma` the mean of the two standard parallels and `delta` half
+their difference, in degrees (FITS `PVi_1` and `PVi_2`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ConicPerspective` and `Sky2Pix_ConicPerspective`.
+"""
 struct ConicPerspective{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
@@ -274,6 +392,13 @@ struct ConicPerspective{T<:AbstractFloat} <: AbstractConicProjection
     ConicPerspective{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_perspective_constants(_conic_angles(T, sigma, delta)...))
 end
 
+"""
+    ConicEquidistant(sigma, delta=0)
+
+The COD (conic equidistant) projection, with `sigma` and `delta` as for [`ConicPerspective`](@ref).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ConicEquidistant` and `Sky2Pix_ConicEquidistant`.
+"""
 struct ConicEquidistant{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
@@ -281,6 +406,13 @@ struct ConicEquidistant{T<:AbstractFloat} <: AbstractConicProjection
     ConicEquidistant{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_equidistant_constants(_conic_angles(T, sigma, delta)...))
 end
 
+"""
+    ConicEqualArea(sigma, delta=0)
+
+The COE (conic equal-area) projection, with `sigma` and `delta` as for [`ConicPerspective`](@ref).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ConicEqualArea` and `Sky2Pix_ConicEqualArea`.
+"""
 struct ConicEqualArea{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
@@ -288,6 +420,13 @@ struct ConicEqualArea{T<:AbstractFloat} <: AbstractConicProjection
     ConicEqualArea{T}(sigma, delta) where {T} = new{T}(sigma, delta, _conic_equal_area_constants(_conic_angles(T, sigma, delta)...))
 end
 
+"""
+    ConicOrthomorphic(sigma, delta=0)
+
+The COO (conic orthomorphic) projection, with `sigma` and `delta` as for [`ConicPerspective`](@ref).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_ConicOrthomorphic` and `Sky2Pix_ConicOrthomorphic`.
+"""
 struct ConicOrthomorphic{T<:AbstractFloat} <: AbstractConicProjection
     sigma::T
     delta::T
@@ -302,7 +441,13 @@ ConicEquidistant(sigma::Real, delta::Real=0) = ConicEquidistant{_conic_type(sigm
 ConicEqualArea(sigma::Real, delta::Real=0) = ConicEqualArea{_conic_type(sigma, delta)}(sigma, delta)
 ConicOrthomorphic(sigma::Real, delta::Real=0) = ConicOrthomorphic{_conic_type(sigma, delta)}(sigma, delta)
 
-"""The BON/Bonne projection with standard parallel `theta1`."""
+"""
+    BonneProjection(theta1)
+
+The BON (Bonne equal-area) projection, with standard parallel `theta1` in degrees (FITS `PVi_1`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_BonneEqualArea` and `Sky2Pix_BonneEqualArea`.
+"""
 struct BonneProjection{T<:AbstractFloat} <: AbstractSphericalProjection
     theta1::T
     y0::T
@@ -318,10 +463,40 @@ end
 
 BonneProjection(theta1::Real) = BonneProjection{typeof(float(theta1))}(theta1)
 
+"""
+    TangentialSphericalCube()
+
+The TSC (tangential spherical cube) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_TangentialSphericalCube` and `Sky2Pix_TangentialSphericalCube`.
+"""
 struct TangentialSphericalCube <: AbstractSphericalProjection end
+"""
+    COBESphericalCube()
+
+The CSC (COBE quadrilateralized spherical cube) projection. GWCS.jl evaluates it in double precision, where
+WCSLIB uses single precision, so the two differ by up to about 2e-5 degrees.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_COBEQuadSphericalCube` and `Sky2Pix_COBEQuadSphericalCube`.
+"""
 struct COBESphericalCube <: AbstractSphericalProjection end
+"""
+    QuadrilateralizedSphericalCube()
+
+The QSC (quadrilateralized spherical cube) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_QuadSphericalCube` and `Sky2Pix_QuadSphericalCube`.
+"""
 struct QuadrilateralizedSphericalCube <: AbstractSphericalProjection end
 
+"""
+    HEALPixProjection(H=4, K=3)
+
+The HPX (HEALPix) projection, with `H` facets along the equator and `K` facets in latitude (FITS `PVi_1` and
+`PVi_2`).
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_HEALPix` and `Sky2Pix_HEALPix`.
+"""
 struct HEALPixProjection <: AbstractSphericalProjection
     H::Int
     K::Int
@@ -331,14 +506,40 @@ struct HEALPixProjection <: AbstractSphericalProjection
     end
 end
 
+"""
+    HEALPixPolarProjection()
+
+The XPH (HEALPix polar, or butterfly) projection.
+
+Python equivalent: `astropy.modeling.models.Pix2Sky_HEALPixPolar` and `Sky2Pix_HEALPixPolar`.
+"""
 struct HEALPixPolarProjection <: AbstractSphericalProjection end
 
-"""Convert projection-plane coordinates in degrees to native spherical coordinates in degrees."""
+"""
+    IntermediateToNative(projection)
+    IntermediateToNative{P}()
+
+The deprojection of a spherical `projection`, such as [`GnomonicProjection`](@ref): it maps projection-plane
+(intermediate) coordinates `(x, y)` in degrees to native spherical longitude and latitude `(phi, theta)` in degrees, as
+FITS WCS Paper II defines them. A point off the projection gives `NaN`. Its inverse is [`NativeToIntermediate`](@ref),
+and [`celestial_transform`](@ref) adds the rotation to celestial coordinates.
+
+Python equivalent: the `Pix2Sky_*` projections of `astropy.modeling.models`.
+"""
 struct IntermediateToNative{P<:AbstractSphericalProjection} <: AbstractTransform{2,2}
     projection::P
 end
 
-"""Convert native spherical coordinates in degrees to projection-plane coordinates in degrees."""
+"""
+    NativeToIntermediate(projection)
+    NativeToIntermediate{P}()
+
+The spherical `projection` itself: it maps native spherical longitude and latitude `(phi, theta)` in degrees to
+projection-plane coordinates `(x, y)` in degrees. A point the projection does not reach gives `NaN`. Its inverse is
+[`IntermediateToNative`](@ref).
+
+Python equivalent: the `Sky2Pix_*` projections of `astropy.modeling.models`.
+"""
 struct NativeToIntermediate{P<:AbstractSphericalProjection} <: AbstractTransform{2,2}
     projection::P
 end
@@ -1522,14 +1723,18 @@ function _native_pole(reference_longitude, reference_latitude, native_longitude,
 end
 
 """
-    celestial_transform(projection, reference; lonpole=nothing, latpole=90, native_reference=native_fiducial(projection), offset=false)
+    celestial_transform(projection, reference; lonpole=nothing, latpole=90, native_reference=native_fiducial(projection),
+                        offset=false) -> AbstractTransform
 
-Construct an intermediate-plane-to-celestial transform using a two-coordinate
-celestial reference point and FITS Paper II native-pole conventions. All
-coordinates and pole parameters are in degrees. `native_reference` specifies
-the native longitude and latitude of the fiducial point. When `offset` is true,
-the projection is translated so that this native fiducial point has zero
-intermediate coordinates, as specified by FITS longitude-axis `PVi_0`.
+Return a transform from projection-plane coordinates to celestial longitude and latitude, all in degrees. It applies
+the deprojection by `projection`, then a rotation that places the fiducial point at `reference`, a `(lon, lat)` pair.
+`lonpole` and `latpole` are FITS `LONPOLE` and `LATPOLE`, and `lonpole` defaults as FITS Paper II prescribes.
+
+`native_reference` is the fiducial point's native `(phi, theta)` in degrees, by default the projection's own (FITS
+`PVi_1` and `PVi_2` of the longitude axis). With `offset=true`, the projection plane is shifted so that the fiducial
+point is at its origin, as FITS `PVi_0` of the longitude axis specifies.
+
+Python equivalent: a `Pix2Sky_*` projection of `astropy.modeling.models` followed by `RotateNative2Celestial`.
 """
 function celestial_transform(projection::AbstractSphericalProjection, reference; lonpole=nothing, latpole=90, native_reference=native_fiducial(projection), offset=false)
     reference isa Tuple || reference isa AbstractVector || throw(ArgumentError("celestial reference coordinate must be a tuple or vector"))

@@ -1401,14 +1401,31 @@ function _parse_fits_wcs(header::Dict{String,Any}; key::Char=' ', preserve_units
 end
 
 """
-    parse_fits_wcs(source; key=' ', preserve_units=false, minerr=0.0, legacy=:warn)
+    parse_fits_wcs(header::AbstractDict; key=' ', preserve_units=false, minerr=0.0, legacy=:warn) -> WCS
+    parse_fits_wcs(header::FITSIO.FITSHeader; kwargs...) -> WCS
+    parse_fits_wcs(hdu::FITSIO.HDU; kwargs...) -> WCS
+    parse_fits_wcs(cards::FITSFiles.Cards; kwargs...) -> WCS
+    parse_fits_wcs(hdu::FITSFiles.HDU; kwargs...) -> WCS
+    parse_fits_wcs(hdus::AbstractVector{<:FITSFiles.HDU}, index; kwargs...) -> WCS
 
-Parse one primary or alternate FITS image-header WCS into a compiled `WCS` pipeline.
-Pixel coordinates are zero-based, as everywhere in GWCS.jl: the center of the first pixel, FITS pixel 1, is pixel 0.
+Build a [`WCS`](@ref) from a FITS image header. `key=' '` selects the primary WCS, and a letter selects that alternate
+WCS. A header that is not a valid WCS throws an `ArgumentError`.
 
-Legacy conventions accepted by WCSLIB and astropy (for example NCP, AIPS spectral types,
-`EPOCH`, and zero-padded keyword indices) are repaired with one warning per parse when
-`legacy=:warn`, silently when `legacy=:quiet`, and rejected when `legacy=:error`.
+The header is a dictionary of keywords to values, or, with FITSIO.jl or FITSFiles.jl loaded, one of the objects above.
+To read the lookup-table and `-TAB` arrays a header refers to, pass a FITSIO.jl HDU, or FITSFiles.jl HDUs with the
+`index` of the HDU holding the WCS.
+
+Pixel coordinates are zero-based, as everywhere in GWCS.jl, so FITS pixel `p` is GWCS pixel `p .- 1`; `CRPIX` needs no
+adjustment. World coordinates keep the header's axis order. They are in degrees for celestial axes, SI units for
+spectral axes, and seconds from the reference epoch for time axes, unless `preserve_units=true` keeps the header's
+`CUNIT` values.
+
+A distortion whose `D2IMERR` or `CPERR` error estimate is below `minerr` is dropped, as astropy does. Legacy conventions
+that WCSLIB and astropy accept, such as `NCP`, AIPS spectral types, `EPOCH`, and zero-padded keyword indices, are
+repaired with one warning per parse when `legacy=:warn`, silently when `legacy=:quiet`, and rejected when
+`legacy=:error`.
+
+Python equivalent: `astropy.wcs.WCS`, which evaluates the header with WCSLIB rather than building a GWCS pipeline.
 """
 parse_fits_wcs(source::AbstractDict; key::Char=' ', preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn) = _parse_fits_wcs(_fits_header(source); key, preserve_units, minerr, legacy)
 
@@ -1440,7 +1457,15 @@ function _find_all_fits_wcs(parse, header)
     return result
 end
 
-"""Parse every primary and alternate FITS WCS representation in `source`."""
+"""
+    find_all_fits_wcs(header; preserve_units=false, minerr=0.0, legacy=:warn) -> Dict{Char,WCS}
+
+Build a [`WCS`](@ref) from every primary and alternate WCS representation in a FITS header, keyed by its letter
+(`' '` for the primary). The header forms and keywords are those of [`parse_fits_wcs`](@ref). A malformed
+representation throws an `ArgumentError` naming its key.
+
+Python equivalent: `astropy.wcs.find_all_wcs`.
+"""
 function find_all_fits_wcs(source::AbstractDict; preserve_units::Bool=false, minerr::Real=0.0, legacy::Symbol=:warn)
     header = _fits_header(source)
     return _find_all_fits_wcs(key -> _parse_fits_wcs(header; key, preserve_units, minerr, legacy), header)
