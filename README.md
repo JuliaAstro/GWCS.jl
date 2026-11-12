@@ -1,6 +1,6 @@
 # GWCS.jl
 
-[![CI](https://github.com/cgarling/GWCS.jl/actions/workflows/Test.yml/badge.svg?branch=main)](https://github.com/cgarling/GWCS.jl/actions/workflows/Test.yml?query=branch%3Amain)
+[![CI](https://github.com/JuliaAstro/GWCS.jl/actions/workflows/Test.yml/badge.svg?branch=main)](https://github.com/JuliaAstro/GWCS.jl/actions/workflows/Test.yml?query=branch%3Amain)
 
 GWCS.jl implements generalized world coordinate systems in Julia. A WCS is a pipeline of coordinate frames joined by
 transforms, from detector pixels to world coordinates such as sky positions, wavelengths, and times. Pipelines are
@@ -10,7 +10,7 @@ headers and in the ASDF metadata Python GWCS writes, and writes the pipelines AS
 ## Installation
 
 ```julia-repl
-pkg> add https://github.com/cgarling/GWCS.jl
+pkg> add https://github.com/JuliaAstro/GWCS.jl
 ```
 
 FITS and ASDF support load automatically with FITSIO.jl, FITSFiles.jl, or ASDF.jl.

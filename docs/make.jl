@@ -36,9 +36,9 @@ const CI = get(ENV, "CI", "false") == "true"
 makedocs(;
     modules=[GWCS],
     authors="Chris Garling",
-    repo=GitHub("cgarling/GWCS.jl"),
+    repo=GitHub("JuliaAstro/GWCS.jl"),
     sitename="GWCS.jl",
-    format=Documenter.HTML(; prettyurls=CI, canonical="https://cgarling.github.io/GWCS.jl/stable/", edit_link="main"),
+    format=Documenter.HTML(; prettyurls=CI, canonical="https://juliaastro.org/GWCS.jl/stable/", edit_link="main"),
     pages=[
         "Home" => "index.md",
         "Building and evaluating a WCS" => "pipelines.md",
@@ -60,4 +60,4 @@ makedocs(;
     checkdocs=:public,
 )
 
-deploydocs(; repo="github.com/cgarling/GWCS.jl", devbranch="main", push_preview=true, versions=["stable" => "v^", "v#.#", "dev" => "dev"])
+deploydocs(; repo="github.com/JuliaAstro/GWCS.jl", devbranch="main", push_preview=true, versions=["stable" => "v^", "v#.#", "dev" => "dev"])
