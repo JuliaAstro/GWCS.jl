@@ -1,6 +1,7 @@
 module RegistrationFixture
 
 using GWCS
+using GWCS: AbstractTransform, IdentityTransform, Shift, metadata_path, metadata_tag, metadata_value, metadata_version, parse_transform, required_metadata
 using StaticArrays
 import GWCS: compile_transform, inverse_transform
 
@@ -62,6 +63,11 @@ function normalize_legacy(node, context)
 end
 
 end
+
+using GWCS: AbstractTransform, AnnotatedTransform, CoordinateFrame, IdentityTransform, Shift, Step, TransformRegistry, WithInverse,
+            compile_transform, default_transform_registry, input_dimension, input_names, inverse_transform, materialize_metadata, metadata_path,
+            metadata_tag, metadata_value, metadata_version, output_dimension, output_names, parse_transform, register_transform!, required_metadata,
+            transform, transform_name
 
 @testset "Transform registration" begin
     registry = copy(default_transform_registry())

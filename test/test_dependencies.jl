@@ -1,3 +1,7 @@
+using GWCS: AbstractTransform, AffineTransform, AnnotatedTransform, CallableTransform, CartesianToSpherical, ConstantTransform, FITSLookupDistortion,
+            FITSTabularTable, FITSTabularTransform, GnomonicProjection, IdentityTransform, IntermediateToNative, Polynomial1D, Polynomial2D,
+            RemapAxes, Rotation3D, Scale, Shift, SphericalToCartesian, WithInverse, compose, fix_inputs, inverse_transform, parallel
+
 struct DependencyFallback <: AbstractTransform{2,1} end
 struct DependencyOverride <: AbstractTransform{2,2} end
 struct BadDependencyShape <: AbstractTransform{2,1} end

@@ -1,5 +1,11 @@
 using ASDF
 using Logging
+using GWCS: AbstractTransform, AffineTransform, AiryProjection, AnnotatedTransform, ArithmeticTransform, BoundingBox, CompositeFrame,
+            CompoundBoundingBox, CoordinateFrame, FixedInputsTransform, GnomonicProjection, IdentityTransform, IntermediateToNative,
+            NativeToIntermediate, PIXEL, Rotation3D, SPATIAL, SPECTRAL, STOKES, SlantOrthographic, SlantZenithalPerspective, StereographicProjection,
+            TIME, ZenithalEqualArea, ZenithalEquidistant, ZenithalPerspective, axis_names, axis_physical_types, axis_units, bounded_axes, bounds,
+            default_transform_registry, fix_inputs, ignored_axes, input_dimension, input_names, inverse_transform, offset_to_time, output_names,
+            parse_transform, selector_axes, selector_ignored, to_metadata, transform, transform_name
 
 @testset "Metadata parsing" begin
     metadata = read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String)

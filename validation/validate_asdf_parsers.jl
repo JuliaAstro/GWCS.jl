@@ -1,5 +1,6 @@
 using ASDF
 using GWCS
+using GWCS: AnnotatedTransform, parse_transform
 using StaticArrays
 
 path = joinpath(@__DIR__, "..", "test", "fixtures", "affine.asdf")

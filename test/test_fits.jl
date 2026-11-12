@@ -1,5 +1,12 @@
 import FITSFiles
 import FITSIO
+using GWCS: BilinearLookupTable, BonneProjection, COBESphericalCube, CelestialFrame, CompositeFrame, ConicEqualArea, ConicEquidistant,
+            ConicOrthomorphic, ConicPerspective, CoordinateFrame, CylindricalEqualArea, CylindricalPerspective, FITSTabularTable,
+            FITSTabularTransform, HEALPixPolarProjection, HEALPixProjection, HammerAitoffProjection, IdentityTransform, MercatorProjection,
+            MollweideProjection, NativeToIntermediate, ParabolicProjection, PlateCarreeProjection, PolyconicProjection, Polynomial2D,
+            QuadrilateralizedSphericalCube, SIPTransform, SPATIAL, SPECTRAL, SansonFlamsteedProjection, SpectralFrame, Step, StokesFrame,
+            TPVTransform, TangentialSphericalCube, TemporalFrame, ZenithalPolynomial, get_transform, has_inverse, input_dimension, inverse_transform,
+            to_metadata, transform, transform_dependencies, transform_jacobian
 
 # The GWCS pixel of a FITS pixel. FITS numbers the first pixel center 1 and GWCS numbers it 0, so references
 # computed by WCSLIB and astropy at FITS pixels keep their published coordinates.

@@ -1,5 +1,8 @@
 using ASDF
 using Logging
+using GWCS: AbstractTransform, BoundingBox, CallableLabelMapper, CallableTransform, CoordinateFrame, Frame2D, IdentityTransform, NoConvergence,
+            NoInverse, Polynomial1D, Polynomial2D, RegionSelector, RemapAxes, Scale, Shift, Step, WithInverse, WithInverseLabelMapper, degree,
+            numerical_inverse, parallel
 
 struct ZeroTransform <: AbstractTransform{0,0} end
 

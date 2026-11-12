@@ -1,4 +1,5 @@
 using GWCS
+using GWCS: ArrayLabelMapper, ConstantTransform, DictionaryLabelMapper, RangeLabelMapper, RegionSelector, Scale, Shift, map_label
 using StaticArrays
 using YAML
 

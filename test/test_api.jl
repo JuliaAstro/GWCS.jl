@@ -1,3 +1,7 @@
+using GWCS: AffineTransform, BoundingBox, CallableTransform, CartesianToSpherical, CelestialFrame, CoordinateFrame, Frame2D, NoConvergence,
+            NoInverse, Polynomial1D, Rotation3D, Scale, SphericalToCartesian, Step, compose, fix_inputs, get_transform, grid_from_bounding_box,
+            numerical_inverse, parallel
+
 struct OffsetColumnMatrix{T,M<:AbstractMatrix{T}} <: AbstractMatrix{T}
     parent::M
 end

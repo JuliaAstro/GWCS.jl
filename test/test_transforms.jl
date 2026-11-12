@@ -1,3 +1,7 @@
+using GWCS: AffineTransform, ConstantTransform, GnomonicProjection, IdentityTransform, IntermediateToNative, NativeToCelestial, Polynomial1D,
+            Polynomial2D, RemapAxes, Rotation3D, Scale, Shift, SphericalToCartesian, WithInverse, degree, has_inverse, input_dimension,
+            inverse_transform, output_dimension, parallel, transform_jacobian
+
 @testset "Leaf transforms" begin
     @test input_dimension(Shift(2.0)) == 1
     @test output_dimension(Shift(2.0)) == 1

@@ -102,6 +102,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 
 - [x] **P1** Add `get_frame(wcs, name)` as a public frame lookup.
 - [ ] **P1** Add `pixel_to_world_values` and `world_to_pixel_values` aliases for explicitly numeric results.
+- [ ] **P1** Give `GWCS.transform(wcs, from_frame, to_frame, coords...)` Python GWCS's `WCS.transform` domain handling: it evaluates `get_transform` directly, while Python applies the bounding box by default (`with_bounding_box=True`, `fill_value=np.nan`). Add the `with_bounding_box`, `fill_value`, and matrix forms `pixel_to_world` takes. The name stays for parity with Python and `get_transform`; it is public but not exported, so documentation calls it `GWCS.transform` and does not use `transform` as a variable name.
 - [x] **P1** Add `pixel_area` for 2D celestial WCSs from the Jacobian at the pixel center.
 - [x] **P1** Speed up scalar `pixel_area` for pipelines that end in a rigid sky rotation (Roman, JWST) by computing the area before the rotation, which preserves solid angle: 1.9x on a Roman L2 WCS, with the same accuracy.
 - [x] **P1** Add a grid form of `pixel_area` over ranges of pixels, such as `axes(data)`, that integrates each pixel from its shared corners: 9x faster than the Jacobian for a full Roman map, with comparable accuracy.
@@ -121,7 +122,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Handle longitude wrapping and pole crossings when computing and testing celestial footprints.
 - [x] **P2** Add concise text and MIME displays showing frames, transforms, dimensions, inverses, and bounding boxes.
 - [ ] **P2** Add transform and pipeline visualization suitable for documentation and debugging.
-- [ ] **P1** Add docstrings to every exported name before release.
+- [ ] **P1** Add docstrings to every exported and public name before release, starting with the 27 exported names.
 
 ## Numerical inversion
 

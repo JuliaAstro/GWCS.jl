@@ -1,3 +1,7 @@
+using GWCS: CelestialFrame, CompositeFrame, CoordinateFrame, Frame2D, IdentityTransform, PIXEL, SPATIAL, SPECTRAL, STOKES, SpectralFrame, Step,
+            StokesFrame, TIME, TemporalFrame, UNDEFINED, axis_names, axis_physical_types, axis_types, axis_units, fix_inputs, frame_dimension,
+            offset_to_time, time_to_offset
+
 @testset "Coordinate frames" begin
     generic = CoordinateFrame{3}(; name="generic", axes_names=("x", "wave", "quality"), axis_types=(PIXEL, "spectral", "custom:quality"))
     @test axis_names(generic) == ("x", "wave", "quality")

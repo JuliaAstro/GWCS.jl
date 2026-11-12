@@ -2,6 +2,16 @@ using ASDF
 using LinearAlgebra: I
 using Logging
 using YAML
+using GWCS: AbstractTransform, AffineTransform, AiryProjection, ArrayLabelMapper, CallableLabelMapper, CallableTransform, CartesianToSpherical,
+            CelestialFrame, CelestialToNative, CompositeFrame, ConicEquidistant, ConstantTransform, CylindricalEqualArea, CylindricalPerspective,
+            DictionaryLabelMapper, EmptyFrame, Frame2D, GnomonicProjection, HEALPixProjection, IdentityTransform, IntermediateToNative,
+            NativeToCelestial, NativeToIntermediate, PlateCarreeProjection, Polynomial1D, Polynomial2D, RemapAxes, Rotation2D, Rotation3D, SPATIAL,
+            Scale, Shift, SlantOrthographic, SlantZenithalPerspective, SpectralFrame, SphericalToCartesian, Step, StereographicProjection,
+            StokesFrame, TemporalFrame, TransformRegistry, WithInverse, WithInverseLabelMapper, ZenithalEqualArea, ZenithalEquidistant,
+            ZenithalPerspective, annotate_transform, axis_names, compose, default_transform_registry, elementwise, fix_inputs, input_names,
+            inverse_transform, map_label, metadata_value, output_names, parallel, parse_transform, register_transform!,
+            register_transform_serializer!, remove_frame, rename_frame, required_metadata, set_transform, to_metadata, transform,
+            transform_dependencies, transform_jacobian, transform_name
 
 abstract type AbstractSerializationTransform <: AbstractTransform{1,1} end
 

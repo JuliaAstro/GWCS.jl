@@ -1,5 +1,6 @@
 using ASDF
 using GWCS
+using GWCS: BoundingBox, CompoundBoundingBox, bounded_axes, ignored_axes, selector_axes
 using StaticArrays
 
 path = joinpath(@__DIR__, "..", "test", "fixtures", "bounding_boxes.asdf")

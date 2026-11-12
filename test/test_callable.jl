@@ -1,3 +1,6 @@
+using GWCS: CallableTransform, CoordinateFrame, Shift, Step, has_inverse, input_dimension, inverse_transform, output_dimension, transform,
+            transform_jacobian
+
 module CallableFixture
 
 using ForwardDiff

@@ -30,6 +30,14 @@ function Polynomial1D(coefficients::AbstractVector; domain=nothing, window=nothi
     return Polynomial1D{N,T,typeof(domain),typeof(window)}(SVector{N,T}(coefficients), domain, window)
 end
 
+"""
+    degree(polynomial::Union{Polynomial1D,Polynomial2D})
+
+Return the degree a polynomial's coefficients are stored for, whether or not its highest coefficients are zero. It is
+a compile-time constant for static coefficient storage.
+
+Python equivalent: the `degree` attribute of `astropy.modeling.models.Polynomial1D` and `Polynomial2D`.
+"""
 degree(::Polynomial1D{N}) where {N} = N - 1
 
 @inline function (transform::Polynomial1D{N})(coords::StaticVector{1}) where {N}

@@ -1,4 +1,5 @@
 using GWCS
+using GWCS: default_transform_registry
 
 include("python.jl")
 

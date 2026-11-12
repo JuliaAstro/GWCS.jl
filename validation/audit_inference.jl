@@ -11,6 +11,9 @@
 
 using ASDF
 using GWCS
+using GWCS: AffineTransform, CallableLabelMapper, CallableTransform, CartesianToSpherical, CelestialFrame, CoordinateFrame, FITSTabularTable,
+            Frame2D, NoInverse, Polynomial1D, Polynomial2D, RegionSelector, RemapAxes, Rotation3D, Scale, Shift, SphericalToCartesian, Step,
+            WithInverseLabelMapper, compose, fix_inputs, input_dimension, output_dimension, parallel, parse_transform
 using Logging
 using StaticArrays
 using Test
