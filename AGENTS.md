@@ -44,7 +44,7 @@ Pipeline construction may perform extra validation, normalization, fusion, preco
 - Return `NaN` in every output component where a coordinate has no image (an undefined analytical inverse, a point off a projection, an output outside a constrained slice); do not throw `DomainError` from transform evaluation. The evaluation API turns finite input that yields `NaN` into `fill_value`, or into a diagnosed `DomainError` with `strict=true`. Zero-dimensional results, which cannot carry `NaN`, are the only exception.
 - Outer constructors should compute type parameters and delegate inward so all call forms apply the same conversions.
 - Parametric inner constructors must accept unconstrained values and let field declarations or `new` perform conversion. Do not require arguments to already have the field type.
-- GWCS.jl is unreleased, so breaking a public API is acceptable when it clearly simplifies the design. Propose any API-breaking change and get the maintainer's approval before making it; never break an API on your own initiative. The README documents what the package currently does, not its history, so describe the new behavior there rather than the change.
+- Propose any API-breaking change and get the maintainer's approval before making it; never break an API on your own initiative. While GWCS.jl is below 1.0, a breaking change needs a minor version bump. The README documents what the package currently does, not its history, so describe the new behavior there rather than the change.
 
 Composition with `|` is left to right. Parallel composition with `&` operates on consecutive input slices. Elementwise arithmetic sends the same inputs to both operands. Preserve these semantics when simplifying or compiling transform trees.
 
@@ -82,7 +82,7 @@ Transform order is the order of a transform's inputs and outputs, and it is the 
 - Do not force label mappers into the transform-registration API.
 - Preserve ASDF.jl as a weak dependency and adapt its tagged or lazy values through the package extension.
 - GWCS.jl owns FITS WCS keyword interpretation (`src/fits.jl`); delegate FITS container I/O to FITSIO.jl or FITSFiles.jl and ASDF container I/O to ASDF.jl. Do not reimplement those container formats here.
-- When behavior is intended to match Python GWCS, Astropy, NumPy, FITSWCS.jl, or WCSLIB, verify the exact convention rather than substituting a similar Julia API.
+- When behavior is intended to match Python GWCS, Astropy, NumPy, or WCSLIB, verify the exact convention rather than substituting a similar Julia API.
 - For FITS WCS semantics, WCSLIB is the source of truth, settled from its source or a direct WCSLIB run. Always cross-check astropy as well, since it normalizes headers and implements SIP and Paper IV distortions itself; when the two disagree, state which one GWCS.jl matches and why.
 - A serialization round trip must reproduce the WCS mathematically, not the source tree. Preserve frames, annotations (names, inputs, outputs), explicit inverses, and bounding boxes, and change values at most by rounding. `compose` and `parallel` may canonicalize unannotated transforms, so every form a stored step can take needs a serializer that writes standard tags Python GWCS reads.
 - Keep rich units and high-level coordinate objects in optional extensions unless the numeric core requires them.
@@ -95,8 +95,6 @@ Transform order is the order of a transform's inputs and outputs, and it is the 
 - Preserve useful diagnostic information in errors such as `NoConvergence`.
 
 ## Julia style and formatting
-
-FITSWCS.jl at `~/Development/julia/FITSWCS.jl` is the authoritative formatting reference.
 
 - Use American spelling.
 - Keep function calls and signatures on one line when they reasonably fit.
@@ -131,18 +129,14 @@ FITSWCS.jl at `~/Development/julia/FITSWCS.jl` is the authoritative formatting r
 - Run `git diff --check`.
 - Use a long timeout when running full package tests (e.g., 10 min).
 
-Prefer the persistent Julia MCP session with the repository environment so Revise can amortize compilation. Do not repeatedly launch fresh Julia processes for normal edit-test loops.
+Prefer a persistent Julia session with Revise.jl over launching a fresh Julia process for each edit-test loop.
 
-Python GWCS reference work uses:
-
-- Python: `~/.venvs/311_main/bin/python`
-- GWCS source: `~/Development/python/gwcs`
-- Astropy source: `~/Development/python/astropy`
+Python reference work uses the uv environment described in `validation/README.md`; set `GWCS_PYTHON` to use another interpreter.
 
 ## Benchmarks and validation
 
 - Add benchmark coverage for new transform families or dispatch mechanisms.
-- Compare equivalent FITSWCS.jl and GWCS.jl paths where possible.
+- Compare equivalent [FITSWCS.jl](https://github.com/JuliaAstro/FITSWCS.jl) and GWCS.jl paths where possible.
 - Report allocations as well as time.
 - Keep benchmark construction separate from evaluation benchmarks.
 - Extend validation scripts when implementing externally defined semantics.
