@@ -66,6 +66,14 @@ function _inverse_label_mapper_checked(mapper::AbstractLabelMapper)
     return inverse
 end
 
+"""
+    map_label(mapper, coords...) -> Union{label,Nothing}
+
+Return the region label of a coordinate, given as separate numbers or a vector, or `nothing` when it is in no region.
+Labels are not coordinates: they choose a branch of a [`RegionSelector`](@ref).
+
+Python equivalent: evaluating a `gwcs.selector` label mapper.
+"""
 @inline map_label(mapper::AbstractLabelMapper{N}, coords::StaticVector{N}) where {N} = mapper(coords)
 
 function map_label(mapper::AbstractLabelMapper{N}, coords::AbstractVector) where {N}
@@ -98,7 +106,14 @@ end
     return SVector{N}(ntuple(index -> coords[mapping[index]], N))
 end
 
-"""Attach a compatible inverse label mapper."""
+"""
+    WithInverseLabelMapper(forward, backward)
+
+A label mapper that evaluates `forward` and uses `backward` as its inverse mapper. `backward` labels output
+coordinates, with the same label type as `forward`. A [`RegionSelector`](@ref) has an analytical inverse only with an invertible label mapper.
+
+Python equivalent: setting `inverse` on a `gwcs.selector` label mapper.
+"""
 struct WithInverseLabelMapper{Nin,Nout,L,F<:AbstractLabelMapper{Nin,L},I<:AbstractLabelMapper{Nout,L}} <: AbstractLabelMapper{Nin,L}
     forward::F
     backward::I
@@ -111,7 +126,17 @@ label_dependencies(mapper::WithInverseLabelMapper) = _label_dependencies_checked
 input_names(mapper::WithInverseLabelMapper) = input_names(mapper.forward)
 label_mapper_name(mapper::WithInverseLabelMapper) = label_mapper_name(mapper.forward)
 
-"""Two-dimensional array-backed region labels."""
+"""
+    ArrayLabelMapper(labels::AbstractMatrix; inputs_mapping=nothing, no_label=nothing, inputs=nothing, name=nothing)
+    ArrayLabelMapper{N}(labels; kwargs...)
+
+A label mapper backed by a two-dimensional label array, such as a detector's slice or slit mask. Zero-based pixel
+coordinates are rounded to the nearest pixel center, and the label of the resulting `(x, y)` is `labels[y + 1, x + 1]`,
+so `labels` is the transpose of a Julia image `data[x, y]`. `inputs_mapping` picks which two of `N` inputs are `x` and
+`y`, by default the first two. A pixel outside the array, or whose label equals `no_label`, has no label.
+
+Python equivalent: `gwcs.selector.LabelMapperArray`.
+"""
 struct ArrayLabelMapper{N,L,A<:AbstractMatrix{L},M<:NTuple{2,Int},NL,IN,NM} <: AbstractLabelMapper{N,L}
     labels::A
     mapping::M
@@ -150,7 +175,14 @@ end
 input_names(mapper::ArrayLabelMapper) = mapper.inputs
 label_mapper_name(mapper::ArrayLabelMapper) = mapper.name
 
-"""Callable region-label mapping with declared dimensions and dependencies."""
+"""
+    CallableLabelMapper{N,L}(callable; dependencies=nothing, inputs=nothing, name=nothing)
+    CallableLabelMapper(callable, N, L; kwargs...)
+
+A label mapper that calls `callable(coords...)` with `N` numbers and returns its label, converted to type `L`, or
+`nothing` when it returns `nothing`. `dependencies`, a `Bool` per input, declares which inputs the label depends on;
+by default every input. It cannot be written to metadata.
+"""
 struct CallableLabelMapper{N,L,F,D,IN,NM} <: AbstractLabelMapper{N,L}
     callable::F
     dependencies::D
@@ -178,7 +210,15 @@ label_dependencies(mapper::CallableLabelMapper) = mapper.dependencies
 input_names(mapper::CallableLabelMapper) = mapper.inputs
 label_mapper_name(mapper::CallableLabelMapper) = mapper.name
 
-"""Adapt a one-output numeric transform as a label mapper."""
+"""
+    TransformLabelMapper{L}(transform; no_label=nothing, inputs=input_names(transform), name=transform_name(transform))
+    TransformLabelMapper(transform; kwargs...)
+
+A label mapper whose label is the single output of `transform`, converted to type `L` (by default `Float64`). An output
+equal to `no_label` gives no label.
+
+Python equivalent: `gwcs.selector.LabelMapper`.
+"""
 struct TransformLabelMapper{N,L,T<:AbstractTransform{N,1},NL,IN,NM} <: AbstractLabelMapper{N,L}
     transform::T
     no_label::NL
@@ -216,7 +256,17 @@ function _mapper_label_type(::Type{L}) where {L}
     return L
 end
 
-"""Tolerance-based numeric-key label mapping."""
+"""
+    DictionaryLabelMapper{N,L}(mapper; inputs_mapping=nothing, atol=1e-8, rtol=1e-5, inputs=nothing, name=nothing)
+    DictionaryLabelMapper(mapper, N; label_type=Float64, kwargs...)
+
+A label mapper that selects a transform by matching one input against numeric keys. `inputs_mapping` picks that
+input, by default the first, and `mapper` holds `key => transform` pairs. A key matches the input `value` within
+`atol + rtol * abs(value)`, NumPy's asymmetric `isclose` rule rather than `isapprox`. The selected transform evaluates
+all `N` inputs to give the label, and an input matching no key has no label.
+
+Python equivalent: `gwcs.selector.LabelMapperDict`.
+"""
 struct DictionaryLabelMapper{N,L,K,T<:Tuple,M<:NTuple{1,Int},A,R,IN,NM} <: AbstractLabelMapper{N,L}
     keys::Vector{K}
     transforms::T
@@ -280,7 +330,16 @@ end
 input_names(mapper::DictionaryLabelMapper) = mapper.inputs
 label_mapper_name(mapper::DictionaryLabelMapper) = mapper.name
 
-"""Open-interval numeric-range label mapping."""
+"""
+    RangeLabelMapper{N,L}(mapper; inputs_mapping=nothing, inputs=nothing, name=nothing)
+    RangeLabelMapper(mapper, N; label_type=Float64, kwargs...)
+
+A label mapper that finds which interval contains one input, chosen by `inputs_mapping` (by default the first).
+`mapper` holds `(lower, upper) => transform` pairs with non-overlapping intervals, and the transform of the interval
+strictly containing the input gives the label from all `N` inputs. An input in no interval has no label.
+
+Python equivalent: `gwcs.selector.LabelMapperRange`.
+"""
 struct RangeLabelMapper{N,L,K,T<:Tuple,M<:NTuple{1,Int},IN,NM} <: AbstractLabelMapper{N,L}
     intervals::Vector{Tuple{K,K}}
     transforms::T

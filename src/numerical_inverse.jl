@@ -1,4 +1,11 @@
-"""Numerical inverse failed to reach the requested tolerance."""
+"""
+    NoConvergence
+
+The exception [`world_to_pixel`](@ref) and [`numerical_inverse`](@ref) throw when the numerical inverse does not reach
+its tolerance. `best_solution` holds the last pixel, `accuracy` its error, and `niter` the iterations used.
+
+Python equivalent: `gwcs.wcs.NoConvergence`.
+"""
 struct NoConvergence{S,A} <: Exception
     message::String
     best_solution::S
@@ -303,10 +310,14 @@ end
     numerical_inverse(wcs, world...; tolerance=1e-5, maxiter=30, initial_guess=nothing, max_backtracks=12, quiet=false,
                       with_bounding_box=true, fill_value=NaN, strict=false, origin=0) -> SVector
 
-Solve `pixel_to_world(wcs, pixel) == world` for the pixel with the damped Newton solver that `world_to_pixel` uses for a
-square WCS without an analytical inverse, to `tolerance` pixels. With an analytical inverse, which may only approximate
-the forward transform, the solver starts from that inverse's pixel and refines it against the forward transform.
-Nonconvergence throws `NoConvergence` unless `quiet=true`; the other keywords act as in `world_to_pixel`.
+Solve `pixel_to_world(wcs, pixel) == world` numerically for `pixel`, to `tolerance` pixels. The damped Newton solver is
+the one [`world_to_pixel`](@ref) uses without an analytical inverse, and it needs equal pixel and world dimensions. With
+an analytical inverse, which may only approximate the forward transform, the solver starts from that inverse's pixel and
+refines it against the forward transform.
+Nonconvergence throws [`NoConvergence`](@ref) unless `quiet=true`; the other keywords act as in
+[`world_to_pixel`](@ref).
+
+Python equivalent: `gwcs.WCS.numerical_inverse`.
 """
 function numerical_inverse(wcs::WCS{Nin,Nout}, coords::AbstractVector; kwargs...) where {Nin,Nout}
     length(coords) == Nout || throw(DimensionMismatch("world coordinate has length $(length(coords)), expected $Nout"))

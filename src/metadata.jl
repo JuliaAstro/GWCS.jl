@@ -38,10 +38,21 @@ _unwrap(node::TaggedScalar) = node.value
 _unwrap(node) = node
 _materialize_array(value) = value
 
-"""Unwrap a scalar value retained by a tagged metadata adapter."""
+"""
+    metadata_value(value)
+
+Return the plain value of a metadata scalar, such as the string inside a tagged scalar node, and any other value
+unchanged.
+"""
 metadata_value(value) = _unwrap(value)
 
-"""Materialize an inline or lazy metadata array."""
+"""
+    materialize_metadata(value)
+
+Return the Julia array of a metadata array, reading a lazy ASDF block as needed. A matrix keeps the file's row and
+column order rather than being transposed to an image's `data[x, y]` order, so `m[i + 1, j + 1]` is NumPy's `m[i, j]`.
+Any other value is returned unchanged.
+"""
 materialize_metadata(value) = _materialize_array(value)
 
 function _construct_tagged_node(constructor, node)
@@ -71,7 +82,11 @@ function _required(node, key, path)
     return node[key]
 end
 
-"""Return a required mapping property or raise a path-aware metadata error."""
+"""
+    required_metadata(node, key, context::TransformParseContext)
+
+Return the property `key` of a metadata node. A missing property throws an `ArgumentError` naming its path.
+"""
 function required_metadata(node, key, context::TransformParseContext)
     return _required(node, key, metadata_path(context))
 end
@@ -765,6 +780,15 @@ function _parse_transform_annotation(@nospecialize(transform), node, context, un
     return annotate_transform(transform; name, inputs, outputs, parameter_units=units, pass_through)
 end
 
+"""
+    parse_transform(node; path="transform", registry=default_transform_registry()) -> AbstractTransform
+    parse_transform(node, context::TransformParseContext; path=metadata_path(context)) -> AbstractTransform
+
+Build a transform from a tagged metadata node. Its tag and version select the constructor registered in `registry`.
+An `inverse` property becomes an explicit inverse ([`WithInverse`](@ref)), and `name`, `inputs`, and `outputs` become
+annotations ([`AnnotatedTransform`](@ref)). Malformed metadata or an unsupported tag throws an `ArgumentError` naming
+`path`. A registered constructor parses a child node with the second form, which keeps its context's registry.
+"""
 function parse_transform(node; path="transform", registry=default_transform_registry())
     tag, version = _split_metadata_tag(_tag(node), path)
     registration = _lookup_transform_registration(registry, tag, version, path)
@@ -1124,6 +1148,19 @@ function _parse_bounding_box(node, transform, path, registry)
     _metadata_error(path, "unsupported bounding-box tag $(_tag(node))")
 end
 
+"""
+    parse_wcs(node::AbstractDict; registry=default_transform_registry()) -> WCS
+    parse_wcs(yaml::AbstractString; registry=default_transform_registry()) -> WCS
+
+Build a [`WCS`](@ref) from a `tag:stsci.edu:gwcs/wcs` metadata node, such as `ASDF.load_file(filename)["wcs"]` with
+ASDF.jl loaded, or from YAML text holding one. An astropy FITS WCS stored with asdf-astropy's `wcs` tag is read
+through [`parse_fits_wcs`](@ref). Transforms are parsed by the tags registered in `registry`; see
+[`register_transform!`](@ref).
+
+Metadata that is malformed, uses an unsupported tag or schema version, or describes an invalid pipeline throws an
+`ArgumentError` naming its path in the tree. Properties GWCS.jl does not model are kept and written back by
+[`write_asdf`](@ref).
+"""
 function parse_wcs(node::AbstractDict; registry=default_transform_registry())
     node, context = _prepare_metadata(node, "wcs", registry)
     metadata_tag(context) == _ASTROPY_WCS_TAG && return _parse_astropy_wcs(node, registry)

@@ -1,4 +1,12 @@
-"""Abstract coordinate frame with `N` axes."""
+"""
+    AbstractCoordinateFrame{N}
+
+Supertype of every coordinate frame, with `N` axes. A frame names a step's coordinates and describes their axes:
+[`axis_names`](@ref), [`axis_units`](@ref), [`axis_physical_types`](@ref), and [`axis_types`](@ref), each in transform
+order.
+
+Python equivalent: `gwcs.coordinate_frames.BaseCoordinateFrame`.
+"""
 abstract type AbstractCoordinateFrame{N} end
 
 @enum AxisType::UInt8 begin
@@ -10,6 +18,36 @@ abstract type AbstractCoordinateFrame{N} end
     UNDEFINED
 end
 
+@doc """
+    AxisType
+
+The kind of a frame axis: `GWCS.SPATIAL`, `GWCS.SPECTRAL`, `GWCS.TIME`, `GWCS.STOKES`, `GWCS.PIXEL`, or
+`GWCS.UNDEFINED`. Frames also accept these names as case-insensitive strings, with `"TEMPORAL"` for `TIME`, and keep any
+other nonempty string as a custom type.
+
+Python equivalent: the strings of `gwcs.coordinate_frames.CoordinateFrame.axes_type`.
+""" AxisType
+
+"[`AxisType`](@ref) of a spatial axis, such as a detector position or a sky coordinate."
+SPATIAL
+"[`AxisType`](@ref) of a spectral axis, such as wavelength or frequency."
+SPECTRAL
+"[`AxisType`](@ref) of a time axis."
+TIME
+"[`AxisType`](@ref) of a Stokes polarization axis."
+STOKES
+"[`AxisType`](@ref) of a pixel axis."
+PIXEL
+"[`AxisType`](@ref) of an axis of unspecified type, the default of a [`CoordinateFrame`](@ref)."
+UNDEFINED
+
+"""
+    frame_dimension(frame) -> Int
+
+Return the number of axes of `frame`.
+
+Python equivalent: `gwcs.coordinate_frames.CoordinateFrame.naxes`.
+"""
 frame_dimension(::AbstractCoordinateFrame{N}) where {N} = N
 
 # As in Python GWCS, a frame stores its axes in its own order (a CelestialFrame's is lon, lat), and `axes_order[i]` is
@@ -19,9 +57,42 @@ _axis_rank(order, index) = count(<(order[index]), order) + 1
 _axis_at(order, rank) = findfirst(index -> _axis_rank(order, index) == rank, ntuple(identity, length(order)))::Int
 _to_transform_order(values::NTuple{N,Any}, order::NTuple{N,Int}) where {N} = ntuple(rank -> values[_axis_at(order, rank)], Val(N))
 
+"""
+    axis_names(frame) -> NTuple{N,String}
+
+Return the names of the frame's axes in transform order.
+
+Python equivalent: `gwcs.coordinate_frames.CoordinateFrame.axes_names`.
+"""
 axis_names(frame::AbstractCoordinateFrame) = _to_transform_order(frame.axes_names, frame.axes_order)
+
+"""
+    axis_physical_types(frame) -> NTuple{N,String}
+
+Return the physical types of the frame's axes in transform order, as IVOA UCD strings such as `"pos.eq.ra"` or
+`"custom:<name>"`.
+
+Python equivalent: `gwcs.coordinate_frames.CoordinateFrame.axis_physical_types`.
+"""
 axis_physical_types(frame::AbstractCoordinateFrame) = _to_transform_order(frame.axis_physical_types, frame.axes_order)
+
+"""
+    axis_units(frame) -> NTuple{N,String}
+
+Return the units of the frame's axes in transform order, as strings such as `"deg"`, empty for a unitless axis.
+
+Python equivalent: `gwcs.coordinate_frames.CoordinateFrame.unit`, which holds astropy units rather than strings.
+"""
 axis_units(frame::AbstractCoordinateFrame) = _to_transform_order(frame.unit, frame.axes_order)
+
+"""
+    axis_types(frame) -> Tuple
+
+Return the types of the frame's axes in transform order. Each entry is an [`AxisType`](@ref), such as `GWCS.SPATIAL`,
+or a string for a custom type.
+
+Python equivalent: `gwcs.coordinate_frames.CoordinateFrame.axes_type`, which holds strings.
+"""
 axis_types(frame::AbstractCoordinateFrame) = _to_transform_order(frame.axis_types, frame.axes_order)
 
 _frame_values(values) = values isa Tuple || values isa AbstractVector ? Tuple(values) : (values,)
@@ -62,7 +133,20 @@ function _axes_order(values, count)
     return result
 end
 
-"""Generic coordinate frame metadata."""
+"""
+    CoordinateFrame{N}(; name, axes_names=("x0", "x1", ...), axes_order=(1, 2, ...), axis_types=(UNDEFINED, ...),
+                       axis_physical_types=nothing, unit=("", ...), reference_frame=nothing)
+
+A frame of `N` axes of any kind, such as pixels or focal-plane coordinates. `axes_names`, `axis_types`,
+`axis_physical_types`, and `unit` each hold one entry per axis, in the frame's own order. Axis types are
+[`AxisType`](@ref)s or custom strings, and physical types default to `"custom:<axis name>"`.
+
+`axes_order[i]` is the transform position of frame axis `i`, so it labels coordinates without reordering them; the
+accessors such as [`axis_names`](@ref) return transform order. `reference_frame` holds metadata that describes the
+coordinates, kept for round trips.
+
+Python equivalent: `gwcs.coordinate_frames.CoordinateFrame`.
+"""
 struct CoordinateFrame{N,R} <: AbstractCoordinateFrame{N}
     name::String
     axes_names::NTuple{N,String}
@@ -93,8 +177,10 @@ end
 """
     EmptyFrame{N}(name)
 
-A frame with `N` axes known only by its name, like Python GWCS's `EmptyFrame`, which a step frame written as a bare
-string becomes. It has no axis names, physical types, units, or types, and is written back as its name.
+A frame with `N` axes known only by its name, which a step frame written as a bare string in metadata becomes. It has no
+axis names, physical types, units, or types, and is written back as its name.
+
+Python equivalent: `gwcs.coordinate_frames.EmptyFrame`.
 """
 struct EmptyFrame{N} <: AbstractCoordinateFrame{N}
     name::String
@@ -106,12 +192,32 @@ struct EmptyFrame{N} <: AbstractCoordinateFrame{N}
     EmptyFrame{N}(name) where {N} = new{N}(name, ntuple(_ -> "", N), ntuple(identity, N), ntuple(_ -> UNDEFINED, N), ntuple(_ -> "", N), ntuple(_ -> "", N))
 end
 
+"""
+    Frame2D(; name, axes_names=("x", "y"), axes_order=(1, 2), axis_types=nothing, axis_physical_types=nothing,
+            unit=("", ""), reference_frame=nothing) -> CoordinateFrame{2}
+
+Return a two-axis [`CoordinateFrame`](@ref) whose axes are spatial unless `axis_types` says otherwise, such as a detector
+or focal-plane frame. Metadata writes a two-axis spatial frame without a reference frame as `frame2d`.
+
+Python equivalent: `gwcs.coordinate_frames.Frame2D`.
+"""
 function Frame2D(; name, axes_names=("x", "y"), axes_order=(1, 2), axis_types=nothing, axis_physical_types=nothing, unit=("", ""), reference_frame=nothing)
     types = axis_types === nothing ? (SPATIAL, SPATIAL) : axis_types
     return CoordinateFrame{2}(; name, axes_names, axes_order, axis_types=types, axis_physical_types, unit, reference_frame)
 end
 
-"""Celestial coordinate frame metadata."""
+"""
+    CelestialFrame(; name, axes_names=("lon", "lat"), axes_order=(1, 2), axis_physical_types=("pos.eq.ra", "pos.eq.dec"),
+                   unit=("deg", "deg"), reference_frame=:ICRS)
+    CelestialFrame{N}(; kwargs...)
+
+A frame of sky positions: longitude and latitude in that frame order, and with `N = 3` a distance. Its axes are
+spatial. `reference_frame` identifies the celestial system; frames read from FITS or ASDF metadata hold the system it
+describes, such as FK5 with its equinox. Per-axis keywords are in frame order; [`CoordinateFrame`](@ref) describes
+`axes_order`.
+
+Python equivalent: `gwcs.coordinate_frames.CelestialFrame`.
+"""
 struct CelestialFrame{N,R} <: AbstractCoordinateFrame{N}
     name::String
     axes_names::NTuple{N,String}
@@ -150,7 +256,17 @@ function _spectral_physical_type(unit)
     return "custom:spectral"
 end
 
-"""One-dimensional spectral coordinate frame metadata."""
+"""
+    SpectralFrame(; name="spectral", axes_names=("spectral",), axes_order=(1,), axis_physical_types=nothing, unit=("",),
+                  reference_frame=nothing, reference_position="geocenter")
+
+A one-axis frame of a spectral coordinate. Without `axis_physical_types`, the unit sets the physical type: `"em.wl"` for
+a length, `"em.freq"` for a frequency, `"em.energy"` for an energy, `"spect.dopplerVeloc"` for a velocity, and
+`"custom:spectral"` otherwise. `reference_position` is `"geocenter"`, `"barycenter"`, or `"heliocenter"`.
+[`CoordinateFrame`](@ref) describes the shared keywords.
+
+Python equivalent: `gwcs.coordinate_frames.SpectralFrame`.
+"""
 struct SpectralFrame{R} <: AbstractCoordinateFrame{1}
     name::String
     axes_names::NTuple{1,String}
@@ -171,7 +287,17 @@ function SpectralFrame(; name="spectral", axes_names=("spectral",), axes_order=(
     return SpectralFrame{typeof(reference_frame)}(String(name), names, _axes_order(axes_order, 1), (SPECTRAL,), physical_types, units, reference_frame, position)
 end
 
-"""One-dimensional temporal coordinate frame metadata."""
+"""
+    TemporalFrame(; name="temporal", axes_names=("time",), axes_order=(1,), axis_physical_types=("time",), unit=("s",),
+                  reference_frame=nothing, reference_epoch=nothing, time_scale="", time_format="", location=nothing)
+
+A one-axis frame whose coordinate is a time offset in `unit` from `reference_epoch`, which defaults to
+`reference_frame`. [`offset_to_time`](@ref) and [`time_to_offset`](@ref) convert between offsets and times.
+`time_scale` and `time_format` describe the epoch, for example `"utc"` and `"mjd"`, and `location` is the observer's
+location for topocentric times. [`CoordinateFrame`](@ref) describes the shared keywords.
+
+Python equivalent: `gwcs.coordinate_frames.TemporalFrame`.
+"""
 struct TemporalFrame{E,L,R} <: AbstractCoordinateFrame{1}
     name::String
     axes_names::NTuple{1,String}
@@ -203,6 +329,14 @@ function _temporal_days_per_unit(unit)
     throw(ArgumentError("cannot convert temporal unit $unit to days without an optional time integration"))
 end
 
+"""
+    offset_to_time(frame::TemporalFrame, offset)
+
+Return the time `offset` after the frame's reference epoch. With a numeric epoch in the `"jd"` or `"mjd"` format, the
+result is a Julian or modified Julian date, with `offset` converted to days from the frame's unit (`d`, `h`, `min`, or
+`s`). Otherwise it is `reference_epoch + offset`. A frame without a reference epoch, or with another numeric format,
+throws an `ArgumentError`.
+"""
 function offset_to_time(frame::TemporalFrame, offset)
     frame.reference_epoch === nothing && throw(ArgumentError("temporal frame $(frame.name) has no reference epoch"))
     if frame.reference_epoch isa Real && lowercase(frame.time_format) in ("jd", "mjd")
@@ -214,6 +348,12 @@ function offset_to_time(frame::TemporalFrame, offset)
     return frame.reference_epoch + offset
 end
 
+"""
+    time_to_offset(frame::TemporalFrame, time)
+
+Return the offset of `time` from the frame's reference epoch, in the frame's unit; the inverse of
+[`offset_to_time`](@ref).
+"""
 function time_to_offset(frame::TemporalFrame, value)
     frame.reference_epoch === nothing && throw(ArgumentError("temporal frame $(frame.name) has no reference epoch"))
     if frame.reference_epoch isa Real && lowercase(frame.time_format) in ("jd", "mjd")
@@ -225,7 +365,14 @@ function time_to_offset(frame::TemporalFrame, value)
     return value - frame.reference_epoch
 end
 
-"""One-dimensional Stokes coordinate frame metadata."""
+"""
+    StokesFrame(; name="stokes", axes_names=("stokes",), axes_order=(1,), axis_physical_types=("phys.polarization.stokes",))
+
+A unitless one-axis frame whose coordinate selects a Stokes parameter, numbered as in FITS, such as 1 to 4 for I, Q,
+U, and V. [`CoordinateFrame`](@ref) describes the shared keywords.
+
+Python equivalent: `gwcs.coordinate_frames.StokesFrame`.
+"""
 struct StokesFrame <: AbstractCoordinateFrame{1}
     name::String
     axes_names::NTuple{1,String}
@@ -242,7 +389,16 @@ function StokesFrame(; name="stokes", axes_names=("stokes",), axes_order=(1,), a
     return StokesFrame(String(name), names, _axes_order(axes_order, 1), (STOKES,), physical_types, ("",), nothing)
 end
 
-"""Mixed coordinate frame composed from heterogeneous constituent frames."""
+"""
+    CompositeFrame(frames; name="composite")
+
+A frame combining other frames, such as a celestial and a spectral frame for an image cube. Its axes are the
+constituents' axes, concatenated in the order given. Each constituent's `axes_order` gives its axes' transform
+positions in the whole composite, and together these must be a permutation of `1:N`, where `N` is the total number of
+axes. Nested composites flatten.
+
+Python equivalent: `gwcs.coordinate_frames.CompositeFrame`.
+"""
 struct CompositeFrame{N,F} <: AbstractCoordinateFrame{N}
     name::String
     frames::F
