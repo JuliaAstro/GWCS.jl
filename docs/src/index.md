@@ -18,7 +18,7 @@ and writes them back to ASDF.
 ## Installation
 
 ```julia-repl
-pkg> add https://github.com/cgarling/GWCS.jl
+pkg> add https://github.com/JuliaAstro/GWCS.jl
 ```
 
 FITS support for FITSIO.jl and FITSFiles.jl headers and HDUs, and ASDF reading and writing, load automatically with
