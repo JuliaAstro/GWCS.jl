@@ -1,0 +1,20 @@
+[deps]
+ASDF = "686f71d1-807d-59a4-a860-28280ea06d7b"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+FITSFiles = "358a0a88-3548-4ad6-b652-8bdbf64af8e5"
+FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
+GWCS = "17a4e446-17b6-4e6e-99b0-ac92d3d7deb5"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[sources]
+GWCS = {path = ".."}
+
+[compat]
+ASDF = "2.1.1"
+Documenter = "1"
+FITSFiles = "0.3"
+FITSIO = "0.17"
+StaticArrays = "1"
+YAML = "0.4"
+julia = "1.11"
