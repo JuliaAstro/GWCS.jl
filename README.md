@@ -95,7 +95,5 @@ wcs = parse_fits_wcs(FITSFiles.fits("image.fits"), 1)
 
 ## Acknowledgements
 
-The design of GWCS.jl was inspired by [Python GWCS](https://github.com/spacetelescope/gwcs).
-and the transform and FITS distortion semantics of 's `modeling` and `wcs` packages.
-The development of the FITS WCS features was aided by validation (see validation/) against [astropy](https://www.astropy.org) and [WCSLIB](https://www.atnf.csiro.au/computing/software/wcs/). The sample headers in `test/fixtures/wcslib` are from WCSLIB and are
+The design of GWCS.jl was inspired by [Python GWCS](https://github.com/spacetelescope/gwcs). The development of the FITS WCS features was aided by validation (see validation/) against [astropy](https://www.astropy.org) and [WCSLIB](https://www.atnf.csiro.au/computing/software/wcs/). The sample headers in `test/fixtures/wcslib` are from WCSLIB and are
 distributed under the LGPL v3; see `test/fixtures/wcslib/COPYING.LESSER`.
