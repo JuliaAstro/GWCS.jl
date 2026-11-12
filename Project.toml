@@ -22,6 +22,7 @@ GWCSFITSIOExt = "FITSIO"
 
 [compat]
 ASDF = "2.1.1"
+Documenter = "1"
 FITSFiles = "0.3"
 FITSIO = "0.17"
 ForwardDiff = "0.10, 1"
@@ -32,10 +33,11 @@ julia = "1.10"
 
 [extras]
 ASDF = "686f71d1-807d-59a4-a860-28280ea06d7b"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 FITSFiles = "358a0a88-3548-4ad6-b652-8bdbf64af8e5"
 FITSIO = "525bcba6-941b-5504-bd06-fd0dc1a4d2eb"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["ASDF", "FITSFiles", "FITSIO", "Logging", "Test"]
+test = ["ASDF", "Documenter", "FITSFiles", "FITSIO", "Logging", "Test"]
