@@ -30,6 +30,8 @@ axis_units
 axis_types
 offset_to_time
 time_to_offset
+celestial_frame
+celestial_system
 ```
 
 ## Bounding boxes

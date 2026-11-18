@@ -43,6 +43,10 @@ The core parser supports:
   header. The header is parsed with [`parse_fits_wcs`](@ref), the stored `pixel_shape` is kept, and `pixel_bounds`
   becomes the bounding box.
 
+[`celestial_system`](@ref) reports the system of a celestial frame's astropy reference frame and its FK4 and FK5
+epochs. It reads the epochs asdf-astropy writes, and throws for one given as a UTC date, such as an FK4 `obstime` set
+from a date.
+
 Unknown tags, unsupported schema versions, malformed dimensions, and missing required properties raise errors that
 name their path in the tree. Built-in parsers register the exact tag versions in the ASDF schema packages instead of
 assuming that every future `1.x` version is compatible. Rotation and projection angles given as quantities in deg, rad,

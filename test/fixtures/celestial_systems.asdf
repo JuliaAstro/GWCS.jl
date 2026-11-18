@@ -1,0 +1,326 @@
+#ASDF 1.0.0
+#ASDF_STANDARD 1.6.0
+%YAML 1.1
+%TAG ! tag:stsci.edu:asdf/
+--- !core/asdf-1.1.0
+asdf_library: !core/software-1.0.0 {author: The ASDF Developers, homepage: 'http://github.com/asdf-format/asdf',
+  name: asdf, version: 5.4.0}
+history:
+  extensions:
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://astropy.org/astropy/extensions/units-1.3.0
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/gwcs/extensions/gwcs-1.4.0
+    manifest_software: !core/software-1.0.0 {name: asdf_wcs_schemas, version: 0.5.0}
+    software: !core/software-1.0.0 {name: gwcs, version: 1.0.3}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/extensions/astronomy-1.2.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/core/extensions/core-1.6.0
+    manifest_software: !core/software-1.0.0 {name: asdf_standard, version: 1.5.0}
+    software: !core/software-1.0.0 {name: asdf, version: 5.4.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/coordinates/extensions/coordinates-1.0.0
+    manifest_software: !core/software-1.0.0 {name: asdf_coordinates_schemas, version: 0.5.1}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/transform/extensions/transform-1.7.0
+    manifest_software: !core/software-1.0.0 {name: asdf_transform_schemas, version: 0.6.0}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+  - !core/extension_metadata-1.0.0
+    extension_class: asdf.extension._manifest.ManifestExtension
+    extension_uri: asdf://asdf-format.org/astronomy/coordinates/extensions/coordinates-1.3.0
+    manifest_software: !core/software-1.0.0 {name: asdf_coordinates_schemas, version: 0.5.1}
+    software: !core/software-1.0.0 {name: asdf-astropy, version: 0.11.0}
+references:
+  fk4_1975: {equinox: 1975.0, obstime: 1975.0, system: fk4}
+  fk4_default: {equinox: 1950.0, obstime: 1950.0, system: fk4}
+  fk4noeterms: {equinox: 1950.0, obstime: 2000.001277513665, system: fk4noeterms}
+  fk5_1975: {equinox: 1975.0, system: fk5}
+  fk5_besselian: {equinox: 1949.9997904422999, system: fk5}
+  fk5_default: {equinox: 2000.0, system: fk5}
+  galactic: {system: galactic}
+  gcrs: {system: gcrs}
+  icrs: {system: icrs}
+  precessedgeocentric: {equinox: 2010.0, system: precessedgeocentric}
+wcs:
+  fk4_1975: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk4-1.2.0>
+          frame_attributes:
+            equinox: &id001 !time/time-1.4.0 {scale: tt, value: B1975.000}
+            obstime: *id001
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  fk4_default: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk4-1.2.0>
+          frame_attributes:
+            equinox: &id002 !time/time-1.4.0 {scale: tt, value: B1950.000}
+            obstime: *id002
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  fk4noeterms: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk4noeterms-1.2.0>
+          frame_attributes:
+            equinox: !time/time-1.4.0 {scale: tt, value: B1950.000}
+            obstime: !time/time-1.4.0 {scale: tt, value: J2000.000}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  fk4noeterms_utc: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk4noeterms-1.2.0>
+          frame_attributes:
+            equinox: *id002
+            obstime: !time/time-1.4.0 2000-01-01 00:00:00.000
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  fk5_1975: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0>
+          frame_attributes:
+            equinox: !time/time-1.4.0 {scale: tt, value: J1975.000}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  fk5_besselian: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0>
+          frame_attributes:
+            equinox: !time/time-1.4.0 {scale: tt, value: B1950.000}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  fk5_default: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0>
+          frame_attributes:
+            equinox: !time/time-1.4.0 {scale: tt, value: J2000.000}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  galactic: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.galactic.lon, pos.galactic.lat]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/galactic-1.2.0>
+          frame_attributes: {}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  gcrs: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.bodyrc.lon, pos.bodyrc.lat]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/gcrs-1.2.0>
+          frame_attributes:
+            obsgeoloc: !<tag:astropy.org:astropy/coordinates/representation-1.2.0>
+              components:
+                x: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m,
+                  value: 0.0}
+                y: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m,
+                  value: 0.0}
+                z: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m,
+                  value: 0.0}
+              type: CartesianRepresentation
+            obsgeovel: !<tag:astropy.org:astropy/coordinates/representation-1.2.0>
+              components:
+                x: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m.s**-1,
+                  value: 0.0}
+                y: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m.s**-1,
+                  value: 0.0}
+                z: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m.s**-1,
+                  value: 0.0}
+              type: CartesianRepresentation
+            obstime: !time/time-1.4.0 2020-01-01 00:00:00.000
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  icrs: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.eq.ra, pos.eq.dec]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/icrs-1.1.0>
+          frame_attributes: {}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+  precessedgeocentric: !<tag:stsci.edu:gwcs/wcs-1.4.0>
+    name: ''
+    pixel_shape: null
+    steps:
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: detector
+      transform: !transform/identity-1.4.0
+        inputs: [x0, x1]
+        n_dims: 2
+        outputs: [x0, x1]
+    - !<tag:stsci.edu:gwcs/step-1.3.0>
+      frame: !<tag:stsci.edu:gwcs/celestial_frame-1.2.0>
+        axes_names: [lon, lat]
+        axes_order: [0, 1]
+        axis_physical_types: [pos.bodyrc.lon, pos.bodyrc.lat]
+        name: world
+        reference_frame: !<tag:astropy.org:astropy/coordinates/frames/precessedgeocentric-1.2.0>
+          frame_attributes:
+            equinox: !time/time-1.4.0 {scale: tt, value: J2010.000}
+            obsgeoloc: !<tag:astropy.org:astropy/coordinates/representation-1.2.0>
+              components:
+                x: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m,
+                  value: 0.0}
+                y: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m,
+                  value: 0.0}
+                z: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m,
+                  value: 0.0}
+              type: CartesianRepresentation
+            obsgeovel: !<tag:astropy.org:astropy/coordinates/representation-1.2.0>
+              components:
+                x: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m.s**-1,
+                  value: 0.0}
+                y: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m.s**-1,
+                  value: 0.0}
+                z: !unit/quantity-1.3.0 {datatype: float64, unit: !unit/unit-1.0.0 m.s**-1,
+                  value: 0.0}
+              type: CartesianRepresentation
+            obstime: !time/time-1.4.0 {scale: tt, value: J2000.000}
+        unit: [!unit/unit-1.0.0 deg, !unit/unit-1.0.0 deg]
+      transform: null
+...

@@ -433,6 +433,123 @@ function CompositeFrame(frames; name="composite")
     return CompositeFrame{N,typeof(values)}(String(name), values, axes_names, order, types, physical_types, units, nothing)
 end
 
+"""
+    celestial_frame(frame::AbstractCoordinateFrame) -> Union{Nothing,CelestialFrame}
+    celestial_frame(wcs) -> Union{Nothing,CelestialFrame}
+
+Return the [`CelestialFrame`](@ref) of `frame`, or of a WCS's output frame, looking inside a [`CompositeFrame`](@ref).
+Return `nothing` when there is none, and throw an `ArgumentError` when there is more than one. Its `axes_order` holds
+the transform-order positions of its longitude and latitude, which for a WCS are their positions in the world
+coordinates of [`pixel_to_world`](@ref). [`celestial_system`](@ref) reports its celestial system.
+"""
+function celestial_frame(frame::AbstractCoordinateFrame)
+    frames = filter(leaf -> leaf isa CelestialFrame, _composite_leaves(frame))
+    length(frames) > 1 && throw(ArgumentError("frame $(frame.name) has $(length(frames)) celestial frames"))
+    return isempty(frames) ? nothing : only(frames)
+end
+
+const _ASTROPY_FRAME_PREFIX = "tag:astropy.org:astropy/coordinates/frames/"
+const _FITS_CELESTIAL_SYSTEMS = Dict("ELON" => :ecliptic, "HLON" => :helioecliptic, "SLON" => :supergalactic)
+const _EPOCH_FRAME_SYSTEMS = (:fk5, :precessedgeocentric, :fk4, :fk4noeterms)
+
+"""
+    celestial_system(frame::CelestialFrame) -> NamedTuple{(:system, :equinox, :obstime)}
+
+Return the celestial system of `frame` as `(; system, equinox, obstime)`.
+
+`system` is astropy's name for the reference frame, such as `:icrs`, `:fk5`, `:fk4`, `:fk4noeterms`, `:galactic`, or
+`:gcrs`. FITS systems that astropy's `wcs_to_celestial_frame` does not map to an astropy frame are `:ecliptic`
+(`ELON`/`ELAT`), `:helioecliptic` (`HLON`/`HLAT`), `:supergalactic` (`SLON`/`SLAT`), and `:gappt` (`RADESYS =
+'GAPPT'`); the header does not say which of astropy's ecliptic frames it means, and asdf-astropy cannot write ecliptic
+or supergalactic frames. A frame without a recognized system, such as one read from generic FITS `xLON`/`xLAT` axes or
+built with `reference_frame=nothing`, is `:unknown`. A `Symbol` reference frame, such as the default `:ICRS`, names
+the system.
+
+`equinox` is a Julian epoch for FK5, PrecessedGeocentric, and the FITS ecliptic systems, and a Besselian epoch for FK4
+and FK4-NO-E. `obstime` is the Besselian epoch of FK4 and FK4-NO-E. Both are `nothing` for the other systems, whose
+observation times are not reported. A missing attribute takes astropy's default: J2000 for FK5 and
+PrecessedGeocentric, B1950 for FK4, and an FK4 obstime equal to its equinox. FITS headers have their `RADESYS` and
+`EQUINOX` defaults applied when they are read, and an ecliptic `EQUINOX`, which is Besselian when `RADESYS` is an FK4
+system, is converted to a Julian epoch.
+
+Epochs are read in the forms asdf-astropy and [`parse_fits_wcs`](@ref) write: `J` and `B` epoch strings, and `jyear`,
+`byear`, `jd`, or `mjd` values, in the TT or TDB scale (which differ by under 2 ms). Other forms, such as UTC dates,
+and unsupported frame or time schema versions throw an `ArgumentError`.
+
+Python equivalent: `gwcs.coordinate_frames.CelestialFrame.reference_frame`, the astropy frame itself.
+"""
+function celestial_system(frame::CelestialFrame)
+    reference = frame.reference_frame
+    path = "frame $(frame.name)/reference_frame"
+    reference isa NamedTuple && return _fits_celestial_system(reference)
+    if reference isa Symbol
+        system, attributes = Symbol(lowercase(String(reference))), Dict()
+    elseif _has_tag(reference) && startswith(_tag(reference), _ASTROPY_FRAME_PREFIX)
+        family, version = _split_metadata_tag(_tag(reference), path)
+        system = Symbol(chopprefix(family, _ASTROPY_FRAME_PREFIX))
+        # Only the attributes read here depend on the schema version.
+        system in _EPOCH_FRAME_SYSTEMS && !(version in _SCHEMA_VERSIONS_1_0_TO_1_2) && _metadata_error(path, "unsupported metadata tag version $family-$version")
+        attributes = get(reference, "frame_attributes", Dict())
+    else
+        return (system=:unknown, equinox=nothing, obstime=nothing)
+    end
+    if system in (:fk5, :precessedgeocentric)
+        return (; system, equinox=_frame_epoch(attributes, "equinox", :julian, 2000.0, path), obstime=nothing)
+    elseif system in (:fk4, :fk4noeterms)
+        equinox = _frame_epoch(attributes, "equinox", :besselian, 1950.0, path)
+        return (; system, equinox, obstime=_frame_epoch(attributes, "obstime", :besselian, equinox, path))
+    end
+    return (; system, equinox=nothing, obstime=nothing)
+end
+
+# The FITS metadata `parse_fits_wcs` keeps for systems without an astropy frame tag. Its EQUINOX is Besselian when
+# RADESYS is an FK4 system and Julian otherwise.
+function _fits_celestial_system(reference)
+    longitude = first(reference.system)
+    system = longitude == "RA" && reference.radesys == "GAPPT" ? :gappt : get(_FITS_CELESTIAL_SYSTEMS, longitude, :unknown)
+    (system === :unknown || reference.equinox === nothing) && return (; system, equinox=nothing, obstime=nothing)
+    format = reference.radesys in ("FK4", "FK4-NO-E") ? "byear" : "jyear"
+    return (; system, equinox=_convert_epoch(Float64(reference.equinox), format, :julian), obstime=nothing)
+end
+
+# An epoch from an ASDF time in the forms asdf-astropy and parse_fits_wcs write. UTC and the other scales would need
+# leap seconds, so they are rejected rather than approximated.
+function _frame_epoch(attributes, key, kind, default, path)
+    node = get(attributes, key, nothing)
+    node === nothing && return Float64(default)
+    location = "$path/frame_attributes/$key"
+    _has_tag(node) || _metadata_error(location, "an epoch must be a tagged ASDF time")
+    family, version = _split_metadata_tag(_tag(node), location)
+    family == _TIME_TAG || _metadata_error(location, "an epoch must be an ASDF time, not $family")
+    version in _SCHEMA_VERSIONS_1_0_TO_1_4 || _metadata_error(location, "unsupported metadata tag version $family-$version")
+    mapping = node isa AbstractDict
+    value = _unwrap(mapping ? node["value"] : node)
+    format = mapping ? _unwrap(get(node, "format", nothing)) : nothing
+    scale = mapping ? _unwrap(get(node, "scale", nothing)) : nothing
+    if value isa AbstractString
+        matched = match(r"^\s*([JB])(\d+(?:\.\d*)?)\s*$", value)
+        matched === nothing && _metadata_error(location, "time $(repr(value)) is not supported; only J and B epoch strings are read, not dates")
+        string_format = matched[1] == "J" ? "jyear_str" : "byear_str"
+        format === nothing || format == string_format || _metadata_error(location, "time $(repr(value)) does not match its format $(repr(format))")
+        format, number = chopsuffix(string_format, "_str"), parse(Float64, matched[2])
+    elseif value isa Real && format in ("jyear", "byear", "jd", "mjd")
+        number = Float64(value)
+    else
+        _metadata_error(location, "time $(repr(value)) with format $(repr(format)) is not supported")
+    end
+    scale = something(scale, format in ("jyear", "byear") ? "tt" : "utc")
+    scale in ("tt", "tdb") || _metadata_error(location, "time scale $(repr(scale)) is not supported; only TT and TDB epochs are")
+    return _convert_epoch(number, format, kind)
+end
+
+# A TT epoch in a jyear, byear, jd, or mjd format as a Julian or Besselian epoch, by ERFA's epj and epb definitions.
+function _convert_epoch(number, format, kind)
+    (format == "jyear" && kind === :julian || format == "byear" && kind === :besselian) && return number
+    jd = format == "jyear" ? 2451545.0 + (number - 2000) * 365.25 : format == "byear" ? 2415020.31352 + (number - 1900) * 365.242198781 :
+        format == "mjd" ? number + 2400000.5 : number
+    return kind === :julian ? 2000 + (jd - 2451545.0) / 365.25 : 1900 + (jd - 2415020.31352) / 365.242198781
+end
+
 function _validate_frame_axes_order(frame::AbstractCoordinateFrame{N}) where {N}
     all(position -> position in frame.axes_order, 1:N) || throw(ArgumentError("frame $(frame.name) axes_order must be a permutation of 1:$N"))
     return frame
