@@ -98,7 +98,8 @@ axes, combined in a [`CompositeFrame`](@ref) named `world` when there is more th
 its axes at their header positions. As in astropy's `wcs_to_celestial_frame`, RA/DEC take ICRS, FK5, FK4, or FK4-NO-E
 from `RADESYS` and `EQUINOX` (FK4's `obstime` is its equinox) and GLON/GLAT are Galactic, and these reference frames
 are written to ASDF in the form astropy reads. Unlike astropy, `RADESYS` makes only RA/DEC equatorial, so an ecliptic
-header is not labeled FK5 or ICRS.
+header is not labeled FK5 or ICRS. [`celestial_frame`](@ref) finds the celestial frame, and [`celestial_system`](@ref)
+reports its system and epochs.
 
 A time axis's reference time follows astropy's FITS WCS: `MJDREF`, or `JDREF`, or an ISO 8601 `DATEREF` that must agree
 with them to 0.001 day (legacy forms such as `DD/MM/YY`, which WCSLIB also reads, are rejected), defaulting to zero as

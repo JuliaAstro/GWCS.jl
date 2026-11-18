@@ -188,6 +188,7 @@ Return the frame of the last step, whose coordinates are the WCS world coordinat
 Python equivalent: `gwcs.WCS.output_frame`.
 """
 output_frame(wcs::WCS) = last(wcs.steps).frame
+celestial_frame(wcs::WCS) = celestial_frame(output_frame(wcs))
 """
     available_frames(wcs) -> Tuple{Vararg{String}}
 

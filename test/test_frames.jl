@@ -1,6 +1,8 @@
+using ASDF
+using Logging
 using GWCS: CelestialFrame, CompositeFrame, CoordinateFrame, Frame2D, IdentityTransform, PIXEL, SPATIAL, SPECTRAL, STOKES, SpectralFrame, Step,
-            StokesFrame, TIME, TemporalFrame, UNDEFINED, axis_names, axis_physical_types, axis_types, axis_units, fix_inputs, frame_dimension,
-            offset_to_time, time_to_offset
+            StokesFrame, TIME, TemporalFrame, UNDEFINED, axis_names, axis_physical_types, axis_types, axis_units, celestial_frame,
+            celestial_system, fix_inputs, frame_dimension, offset_to_time, time_to_offset
 
 @testset "Coordinate frames" begin
     generic = CoordinateFrame{3}(; name="generic", axes_names=("x", "wave", "quality"), axis_types=(PIXEL, "spectral", "custom:quality"))
@@ -122,4 +124,67 @@ end
     @test length(input_frame(nested_slice).frames) == 1
     @test pixel_to_world(nested_slice, 1.0, 2.0) == SVector(1.0, 2.0, 3.0)
 
+end
+
+@testset "Celestial systems" begin
+    tan = Dict("CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CRPIX1" => 1.0, "CRPIX2" => 1.0, "CRVAL1" => 10.0, "CRVAL2" => 20.0, "CDELT1" => 1e-3, "CDELT2" => 1e-3)
+    fits_system(extra) = celestial_system(celestial_frame(parse_fits_wcs(merge(tan, Dict(extra)))))
+    # FITS RADESYS and EQUINOX defaults are applied when the header is read.
+    @test fits_system(()) == (system=:icrs, equinox=nothing, obstime=nothing)
+    @test fits_system(("EQUINOX" => 1950.0,)) == (system=:fk4, equinox=1950.0, obstime=1950.0)
+    @test fits_system(("RADESYS" => "FK5",)) == (system=:fk5, equinox=2000.0, obstime=nothing)
+    @test fits_system(("RADESYS" => "FK4-NO-E", "EQUINOX" => 1975.0)) == (system=:fk4noeterms, equinox=1975.0, obstime=1975.0)
+    @test fits_system(("RADESYS" => "GAPPT", "EQUINOX" => 2000.0)) == (system=:gappt, equinox=nothing, obstime=nothing)
+    @test fits_system(("CTYPE1" => "GLON-TAN", "CTYPE2" => "GLAT-TAN")) == (system=:galactic, equinox=nothing, obstime=nothing)
+    # An ecliptic EQUINOX is Besselian with an FK4 RADESYS, which EQUINOX = 1950 implies, and is reported as a Julian epoch.
+    @test fits_system(("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN", "EQUINOX" => 1950.0)).equinox ≈ 1949.9997904423 atol=1e-9
+    @test fits_system(("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN", "EQUINOX" => 2000.0)) == (system=:ecliptic, equinox=2000.0, obstime=nothing)
+    @test fits_system(("CTYPE1" => "HLON-TAN", "CTYPE2" => "HLAT-TAN")) == (system=:helioecliptic, equinox=nothing, obstime=nothing)
+    @test fits_system(("CTYPE1" => "SLON-TAN", "CTYPE2" => "SLAT-TAN")) == (system=:supergalactic, equinox=nothing, obstime=nothing)
+    generic = celestial_frame(parse_fits_wcs(merge(tan, Dict("CTYPE1" => "XLAT-TAN", "CTYPE2" => "XLON-TAN"))))
+    @test celestial_system(generic) == (system=:unknown, equinox=nothing, obstime=nothing)
+    @test generic.axes_order == (2, 1)
+
+    # In a cube, axes_order gives the celestial axes' positions in the world coordinates.
+    cube = Dict("NAXIS" => 3, "CTYPE1" => "FREQ", "CTYPE2" => "RA---TAN", "CTYPE3" => "DEC--TAN", "CRPIX1" => 1.0, "CRPIX2" => 1.0, "CRPIX3" => 1.0,
+        "CRVAL1" => 1e9, "CRVAL2" => 10.0, "CRVAL3" => 20.0, "CDELT1" => 1e6, "CDELT2" => 1e-3, "CDELT3" => 1e-3, "CUNIT1" => "Hz")
+    @test celestial_frame(parse_fits_wcs(cube)).axes_order == (2, 3)
+    @test celestial_frame(parse_fits_wcs(Dict("CTYPE1" => "FREQ", "CRPIX1" => 1.0, "CRVAL1" => 1e9, "CDELT1" => 1e6))) === nothing
+    @test celestial_frame(SpectralFrame(; unit="nm")) === nothing
+    twice = CompositeFrame((CelestialFrame(; name="a", axes_order=(1, 2)), CelestialFrame(; name="b", axes_order=(3, 4))); name="both")
+    @test_throws "frame both has 2 celestial frames" celestial_frame(twice)
+
+    @test celestial_system(CelestialFrame(; name="sky")) == (system=:icrs, equinox=nothing, obstime=nothing)
+    @test celestial_system(CelestialFrame(; name="sky", reference_frame=:FK5)) == (system=:fk5, equinox=2000.0, obstime=nothing)
+    @test celestial_system(CelestialFrame(; name="sky", reference_frame=nothing)) == (system=:unknown, equinox=nothing, obstime=nothing)
+    time(value, format, scale...; version="1.4.0") = GWCS.TaggedMapping("tag:stsci.edu:asdf/time/time-$version", Dict{Any,Any}("value" => value, "format" => format, (isempty(scale) ? () : ("scale" => only(scale),))...))
+    frame(name, attributes...; version="1.2.0") = CelestialFrame(; name="sky", reference_frame=GWCS.TaggedMapping("tag:astropy.org:astropy/coordinates/frames/$name-$version", Dict{Any,Any}("frame_attributes" => Dict{Any,Any}(attributes...))))
+    @test celestial_system(frame("fk5", "equinox" => time(2451545.0, "jd", "tt"))).equinox == 2000.0
+    @test celestial_system(frame("fk5", "equinox" => time(51544.5, "mjd", "tdb"))).equinox == 2000.0
+    @test celestial_system(frame("fk5")).equinox == 2000.0
+    # An FK4 obstime defaults to the equinox.
+    @test celestial_system(frame("fk4", "equinox" => time(1975.0, "byear", "tt"))) == (system=:fk4, equinox=1975.0, obstime=1975.0)
+    @test_throws "time scale \"utc\" is not supported" celestial_system(frame("fk5", "equinox" => time(2451545.0, "jd")))
+    @test_throws "with format \"unix\" is not supported" celestial_system(frame("fk5", "equinox" => time(0.0, "unix", "tt")))
+    @test_throws "time \"J1975.0\" does not match its format \"iso\"" celestial_system(frame("fk5", "equinox" => time("J1975.0", "iso", "tt")))
+    @test celestial_system(frame("fk5", "equinox" => time("J1975.0", "jyear_str"))).equinox == 1975.0
+    @test_throws "unsupported metadata tag version tag:stsci.edu:asdf/time/time-1.5.0" celestial_system(frame("fk5", "equinox" => time(2000.0, "jyear"; version="1.5.0")))
+    @test_throws "an epoch must be a tagged ASDF time" celestial_system(frame("fk5", "equinox" => 2000.0))
+    @test_throws "unsupported metadata tag version tag:astropy.org:astropy/coordinates/frames/fk5-1.3.0" celestial_system(frame("fk5"; version="1.3.0"))
+    # Frames whose attributes are not read report their system at any version.
+    @test celestial_system(frame("galactic"; version="9.0.0")).system === :galactic
+
+    # validation/generate_celestial_systems_fixture.py: Python GWCS frames, with the system and epochs astropy reports.
+    fixture = with_logger(NullLogger()) do
+        ASDF.load(joinpath(@__DIR__, "fixtures", "celestial_systems.asdf"); extensions=true)
+    end
+    for (name, reference) in fixture["references"]
+        system = celestial_system(celestial_frame(parse_wcs(fixture["wcs"][name])))
+        @test system.system === Symbol(reference["system"])
+        @test system.equinox === nothing ? !haskey(reference, "equinox") : isapprox(system.equinox, reference["equinox"]; atol=1e-9)
+        @test system.obstime === nothing ? !haskey(reference, "obstime") : isapprox(system.obstime, reference["obstime"]; atol=1e-9)
+    end
+    # asdf-astropy writes an obstime given as a date in UTC, which needs leap seconds.
+    utc = celestial_frame(parse_wcs(fixture["wcs"]["fk4noeterms_utc"]))
+    @test_throws "only J and B epoch strings are read, not dates at frame world/reference_frame/frame_attributes/obstime" celestial_system(utc)
 end
