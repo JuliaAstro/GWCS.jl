@@ -52,6 +52,7 @@ output_frame
 available_frames
 with_bounding_box
 with_pixel_shape
+with_celestial_system
 ```
 
 ## Pipelines

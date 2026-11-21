@@ -211,3 +211,23 @@ bare string, and GWCS.jl reads and writes it the same way.
 [`time_to_offset`](@ref) handle numeric JD and MJD origins for common time units and delegate ordinary arithmetic to
 compatible external time values; other numeric time formats require an optional time integration. Rich units,
 celestial coordinates, and astronomy time objects remain concerns of optional extensions.
+
+### Celestial systems
+
+[`celestial_frame`](@ref) finds a WCS's celestial frame, and [`celestial_system`](@ref) reports its system, such as
+ICRS, FK5 with its equinox, or Galactic. [`with_celestial_system`](@ref) replaces the output frame with one in another
+system, rotating the celestial coordinates appropriately, so the WCS gives world coordinates in that system
+and `world_to_pixel` takes them. The rotation is folded into the WCS's final sky rotation where it has one,
+so it adds nothing to evaluation. `keep_frame=true` keeps the original
+frame as an intermediate one instead:
+
+```@example pipeline
+using GWCS: celestial_system, celestial_frame, with_celestial_system
+
+galactic = parse_fits_wcs(Dict("CTYPE1" => "GLON-TAN", "CTYPE2" => "GLAT-TAN", "CRPIX1" => 50.0, "CRPIX2" => 50.0,
+    "CRVAL1" => 120.0, "CRVAL2" => 20.0, "CDELT1" => -1e-3, "CDELT2" => 1e-3))
+icrs = with_celestial_system(galactic, :icrs)
+celestial_system(celestial_frame(icrs)), pixel_to_world(icrs, 49.0, 49.0)
+```
+
+ICRS, FK5 at any equinox, Galactic, and Supergalactic systems can be converted.

@@ -49,7 +49,8 @@ CartesianToSpherical() = CartesianToSpherical(360)
     h = hypot(x, y)
     lon = rad2deg(atan(y, x))
     iszero(h) && (lon = zero(lon))
-    transform.wrap_lon_at == 360 && (lon = mod(lon, oftype(lon, 360)))
+    # mod returns 360 for a longitude just below zero, which is outside [0, 360).
+    transform.wrap_lon_at == 360 && (lon = mod(lon, oftype(lon, 360)); lon == 360 && (lon = zero(lon)))
     return SVector(lon, rad2deg(atan(z, h)))
 end
 
@@ -86,8 +87,12 @@ end
     sin_theta, cos_theta = sincos(theta)
     sin_dphi, cos_dphi = sincos(dphi)
     sin_delta_p, cos_delta_p = sincos(delta_p)
-    delta = asin(clamp(sin_theta * sin_delta_p + cos_theta * cos_delta_p * cos_dphi, -one(T), one(T)))
-    alpha = alpha_p + atan(-cos_theta * sin_dphi, sin_theta * cos_delta_p - cos_theta * sin_delta_p * cos_dphi)
+    x = sin_theta * cos_delta_p - cos_theta * sin_delta_p * cos_dphi
+    y = -cos_theta * sin_dphi
+    z = sin_theta * sin_delta_p + cos_theta * cos_delta_p * cos_dphi
+    # asin loses precision near the poles, so there the latitude comes from the equatorial component, as in WCSLIB.
+    delta = abs(z) > T(0.99) ? copysign(acos(clamp(hypot(x, y), zero(T), one(T))), z) : asin(clamp(z, -one(T), one(T)))
+    alpha = alpha_p + atan(y, x)
     return SVector(mod(rad2deg(alpha), T(360)), rad2deg(delta))
 end
 

@@ -91,6 +91,7 @@ wcs = parse_fits_wcs(FITSFiles.fits("image.fits"), 1)
 - Bounding boxes and compound bounding boxes, with `in_domain`, `in_image`, and grid sampling
 - Celestial, spectral, temporal, Stokes, composite, and generic frames, with the APE 14 axis accessors
 - Non-mutating pipeline editing: insert, remove, rename, and replace frames and transforms
+- Conversion of world coordinates between the ICRS, FK5, Galactic, and Supergalactic systems, as astropy converts them
 - FITS WCS reading: PC, CD, and CROTA linear forms; SIP, TPV, TPD, TNX, and ZPX distortions; D2IM and CPDIS lookup
   tables; `-TAB` coordinate arrays; spectral algorithms and grisms; time axes; and repairs for legacy conventions
 - Reading and writing Python GWCS's ASDF metadata, keeping properties GWCS.jl does not model
