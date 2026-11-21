@@ -33,6 +33,7 @@ include("pipeline.jl")
 include("display.jl")
 include("fits.jl")
 include("api.jl")
+include("celestial_systems.jl")
 include("numerical_inverse.jl")
 include("metadata.jl")
 include("serialization.jl")
@@ -65,7 +66,7 @@ export WCS, parse_wcs, parse_fits_wcs, find_all_fits_wcs, write_asdf, pixel_to_w
                numerical_inverse, offset_to_time, output_dimension, output_names, parallel, parse_transform, prepend_frame, prepend_transform,
                register_transform!, register_transform_serializer!, remove_frame, rename_frame, required_metadata, select_bounding_box,
                selected_transform, selector_axes, selector_ignored, set_transform, time_to_offset, to_metadata, transform, transform_dependencies,
-               transform_jacobian, transform_name
+               transform_jacobian, transform_name, with_celestial_system
         """))
 end
 

@@ -590,6 +590,8 @@ function _reference_metadata(value, path, registry)
     # Metadata kept from a FITS header that the ASDF frame schemas cannot hold.
     value isa NamedTuple && _metadata_error(path, "FITS reference metadata $value has no ASDF representation")
     value === :ICRS && return _tagged_metadata(_ICRS_TAG, v"1.1.0", Dict("frame_attributes" => Dict()))
+    # Only ICRS has a Symbol form; another would be written as a plain string, which is not a reference frame.
+    value isa Symbol && _metadata_error(path, "reference frame $(repr(value)) has no ASDF representation")
     return _to_metadata(value, path, registry)
 end
 
