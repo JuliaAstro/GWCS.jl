@@ -230,4 +230,55 @@ icrs = with_celestial_system(galactic, :icrs)
 celestial_system(celestial_frame(icrs)), pixel_to_world(icrs, 49.0, 49.0)
 ```
 
-ICRS, FK5 at any equinox, Galactic, and Supergalactic systems can be converted.
+ICRS, FK5, FK4, and FK4-NO-E at any equinox, Galactic, Supergalactic, and the FITS ecliptic systems can be converted.
+
+#### Conversion details
+
+The conversions use astropy's definitions of each system, validated against astropy, except where the systems are
+formally defined otherwise:
+
+| Between | Model |
+|---|---|
+| ICRS and FK5 J2000 | The frame bias of USNO Circular 179 |
+| FK5 equinoxes | IAU 1976 precession (Lieske et al. 1977; ERFA's `pmat76`), the FK5 catalog's |
+| FK4 equinoxes | Newcomb's precession |
+| FK4-NO-E B1950 and FK5 J2000 | Murray's (1989) rotation, with its correction for FK4's rotation at the obstime; every conversion from or to FK4 passes through it |
+| FK4 and FK4-NO-E | The E-terms of aberration at the FK4 equinox, removed and added as SLALIB's `sla_SUBET` and `sla_ADDET` do |
+| Galactic and FK5 J2000 | astropy's J2000 north Galactic pole |
+| Supergalactic and Galactic | astropy's north supergalactic pole |
+| FK5 ecliptic and FK5 at its equinox | The IAU 1980 mean obliquity (ERFA's `obl80`, SLALIB's `sla_ECMAT`) |
+| FK4 ecliptic and FK4-NO-E at its equinox | Newcomb's mean obliquity, as SLALIB's `sla_ETRMS` gives it |
+| ICRS ecliptic and ICRS | The IAU 2006 mean ecliptic and equinox of J2000 (ERFA's `ecm06`), astropy's `BarycentricMeanEcliptic` |
+
+An FK4 obstime is the time of observation, which Murray's correction needs since FK4's axes rotate slowly against
+FK5's. [`parse_fits_wcs`](@ref) takes it from `MJD-OBS`, else `DATE-OBS`, as FITS Paper II (Calabretta & Greisen
+2002, sect. 3.1) specifies, and otherwise as the equinox. A FITS ecliptic (`ELON`/`ELAT`) is the mean ecliptic and
+equinox of `EQUINOX` in the `RADESYS` system, as Paper II defines it; the FK5 conversion reproduces its example 2 to about 1 mas. An FK4
+ecliptic has no E-terms, and Paper II does not apply `RADESYS = 'FK4-NO-E'` to ecliptics, so one is read as FK4's.
+ICRS defines no ecliptic, so converting from or to `:ecliptic_icrs` warns that it takes astropy's J2000 mean ecliptic.
+Apparent (`RADESYS = 'GAPPT'`) and helioecliptic (`HLON`/`HLAT`) coordinates depend on the time of observation, and
+are not converted. astropy has no frame for the FK5 and FK4 ecliptics.
+
+The results differ from astropy's in six ways:
+
+- **FK5 equinoxes other than J2000** are precessed with IAU 1976, the model that defines FK5. astropy precesses them
+  with IAU 2006, which differs by about 75 mas at J1975 and J2025 and 150 mas at J2050. A WCS written to ASDF in
+  such a frame, and a FITS header with such an equinox, are read the same way by Python GWCS, whose numbers come from
+  the pipeline, but astropy's `SkyCoord` conversions from them use IAU 2006.
+- **FK4 obstimes from FITS headers.** astropy's `wcs_to_celestial_frame` ignores `MJD-OBS` and `DATE-OBS` for FK4 and
+  takes the obstime as the equinox. For a typical archival FK4 image, observed decades after 1950, Murray's correction
+  then differs by about 0.1″.
+- **FK4 and Galactic coordinates.** Every conversion from or to FK4 passes through FK5 J2000 with Murray's correction
+  at the obstime, so its result does not depend on the route. astropy converts FK4 to Galactic coordinates through the
+  B1950 north Galactic pole without the obstime, and between FK4 systems by precession alone, so its results through
+  different intermediate systems differ. The two agree at an obstime of B1950, and differ by up to about 0.25″ at
+  obstimes near B2000.
+- **FK4 to FK5.** The conversion removes the E-terms, precesses to B1950, applies Murray's rotation, and precesses
+  within FK5, the path astropy's direct FK4-NO-E-to-FK5 transform takes. astropy's `transform_to` from FK4 passes
+  instead through an FK4-NO-E frame at the FK5 equinox, because its frame graph gives intermediate frames the target's
+  attributes; Newcomb's precession there and back is not exactly the identity, which shifts its result by up to about
+  60 µas for equinoxes near J2025.
+- **Murray's rotation** is made exactly orthogonal. Its linear obstime correction leaves it up to about 1e-12 rad
+  (0.3 µas) from orthogonal at obstimes near B2000, so a conversion keeps an exact inverse.
+- **FK5 to FK4** is the exact inverse of FK4 to FK5. astropy evaluates Newcomb's precession in the reverse direction
+  instead, which differs by tens of µas for FK4 equinoxes far from B1950.

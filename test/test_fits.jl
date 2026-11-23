@@ -107,6 +107,19 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     fk4 = parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0)))
     @test frame_tag(fk4) == "tag:astropy.org:astropy/coordinates/frames/fk4-1.2.0"
     @test epoch(fk4, "equinox") == epoch(fk4, "obstime") == (1950.0, "byear", "tt")
+    # FITS Paper II takes the FK4 obstime as the time of observation, MJD-OBS or else DATE-OBS (astropy's Time gives
+    # B1983.4519849615624 for 1983-06-15); astropy's wcs_to_celestial_frame ignores it.
+    observed = parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "1983-06-15")))
+    @test epoch(observed, "obstime")[1] ≈ 1983.4519849615624 atol=1e-10
+    @test epoch(parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "MJD-OBS" => 45600.0, "DATE-OBS" => "1983-06-15"))), "obstime")[1] ≈ 1983.4519849615624 + 100 / 365.242198781 atol=1e-10
+    legacy_date = @test_logs (:warn, r"DATE-OBS=\"15/06/83\" read as \"1983-06-15\"") parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "15/06/83")))
+    @test epoch(legacy_date, "obstime") == epoch(observed, "obstime")
+    @test epoch(parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "15-06-1983")); legacy=:quiet), "obstime") == epoch(observed, "obstime")
+    @test_throws "FITS DATE-OBS=\"1983-13-01\" is not a calendar date" parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "1983-13-01")))
+    @test_throws "FITS DATE-OBS=\"1983-02-29\" is not a calendar date" parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "1983-02-29")))
+    @test_throws "is not a valid time of day" parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "1983-06-15T99:00:00")))
+    @test epoch(parse_fits_wcs(merge(tan_header, Dict("EQUINOX" => 1950.0, "DATE-OBS" => "1984-02-29"))), "obstime")[1] > 1984
+    @test !haskey(output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "FK5", "DATE-OBS" => "1983-06-15")))).reference_frame["frame_attributes"], "obstime")
     fk5 = parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "FK5")))
     @test frame_tag(fk5) == "tag:astropy.org:astropy/coordinates/frames/fk5-1.2.0"
     @test epoch(fk5, "equinox") == (2000.0, "jyear", "tt")
@@ -115,9 +128,9 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test epoch(no_e_terms, "equinox") == (1950.0, "byear", "tt")
     @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "icrs", "EQUINOX" => 1950.0)))).reference_frame === :ICRS
     # Systems without an astropy frame tag keep their FITS metadata.
-    @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "GAPPT", "EQUINOX" => 2000.0)))).reference_frame == (system=("RA", "DEC"), radesys="GAPPT", equinox=nothing)
+    @test output_frame(parse_fits_wcs(merge(tan_header, Dict("RADESYS" => "GAPPT", "EQUINOX" => 2000.0)))).reference_frame == (system=("RA", "DEC"), radesys="GAPPT", equinox=nothing, obstime=nothing)
     ecliptic_header = merge(tan_header, Dict("CTYPE1" => "ELON-AIT", "CTYPE2" => "ELAT-AIT", "EQUINOX" => 2000.0))
-    @test output_frame(parse_fits_wcs(ecliptic_header)).reference_frame == (system=("ELON", "ELAT"), radesys="FK5", equinox=2000.0)
+    @test output_frame(parse_fits_wcs(ecliptic_header)).reference_frame == (system=("ELON", "ELAT"), radesys="FK5", equinox=2000.0, obstime=nothing)
     generic_header = merge(tan_header, Dict("CTYPE1" => "XLAT-BON", "CTYPE2" => "XLON-BON", "CRVAL1" => 20.0, "CRVAL2" => 120.0, "PV1_1" => 45.0))
     generic = parse_fits_wcs(generic_header)
     generic_world = pixel_to_world(generic, fits_pixel(512.0, 512.0))
@@ -127,7 +140,7 @@ fits_pixel(pixel...) = SVector(pixel) .- 1
     @test world_axis_physical_types(generic) == ("custom:xlat", "custom:xlon")
     # Latitude first: axes_order places the CelestialFrame's (lon, lat) at header axes (2, 1).
     @test output_frame(generic) isa CelestialFrame{2} && output_frame(generic).axes_order == (2, 1)
-    @test output_frame(generic).reference_frame == (system=("XLON", "XLAT"), radesys="", equinox=nothing)
+    @test output_frame(generic).reference_frame == (system=("XLON", "XLAT"), radesys="", equinox=nothing, obstime=nothing)
     @test_throws "not a matching longitude/latitude pair" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "XLON-TAN", "CTYPE2" => "YLAT-TAN")))
     @test_throws "must be paired" parse_fits_wcs(merge(tan_header, Dict("CTYPE1" => "XXLN-TAN", "CTYPE2" => "Y")))
 

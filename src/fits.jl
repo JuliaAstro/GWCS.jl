@@ -509,6 +509,15 @@ function _fits_normalize_keywords(header, key, repairs)
     for (legacy, standard) in _FITS_DATE_SYNONYMS
         haskey(header, legacy) && _fits_rename!(edit, repairs, legacy, standard; conflict=:ignore)
     end
+    # WCSLIB's datfix reads the pre-2000 DATE-OBS forms DD/MM/YY and DD-MM-YY, a two-digit year in the 1900s, and the
+    # same with a four-digit year.
+    dateobs = get(header, "DATE-OBS", nothing)
+    matched = dateobs isa AbstractString ? match(r"^\s*(\d{2})([/-])(\d{2})\2(\d{2}|\d{4})\s*$", dateobs) : nothing
+    if matched !== nothing
+        year = length(matched[4]) == 2 ? "19$(matched[4])" : matched[4]
+        _fits_edit!(edit, "DATE-OBS", "$year-$(matched[3])-$(matched[1])")
+        push!(repairs, "DATE-OBS=$(repr(dateobs)) read as $(repr(edit.header["DATE-OBS"]))")
+    end
     return edit.header
 end
 
@@ -993,32 +1002,47 @@ function _fits_date_mjd(value, keyword)
     matched = match(r"^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?))?$", text)
     matched === nothing && throw(ArgumentError("FITS $keyword=$(repr(text)) is not an ISO 8601 date"))
     year, month, day = parse.(Int, matched.captures[1:3])
+    leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    days_in_month = month == 2 ? 28 + leap : month in (4, 6, 9, 11) ? 30 : 31
+    1 <= month <= 12 && 1 <= day <= days_in_month || throw(ArgumentError("FITS $keyword=$(repr(text)) is not a calendar date"))
     days = (1461 * (year - (12 - month) ÷ 10 + 4712)) ÷ 4 + (306 * ((month + 9) % 12) + 5) ÷ 10 - (3 * ((year - (12 - month) ÷ 10 + 4900) ÷ 100)) ÷ 4 + day - 2399904
     matched.captures[4] === nothing && return Float64(days)
     hour, minute = parse.(Int, matched.captures[4:5])
-    return days + (hour + (minute + parse(Float64, matched.captures[6]) / 60) / 60) / 24
+    second = parse(Float64, matched.captures[6])
+    # A second of 60 is a leap second.
+    hour < 24 && minute < 60 && second < 61 || throw(ArgumentError("FITS $keyword=$(repr(text)) is not a valid time of day"))
+    return days + (hour + (minute + second / 60) / 60) / 24
 end
 
 # A reference frame as asdf-astropy writes it, so Python reads it as the astropy frame.
 _fits_astropy_frame(name, attributes...) = _tagged_metadata("tag:astropy.org:astropy/coordinates/frames/$name", v"1.2.0", Dict("frame_attributes" => Dict{Any,Any}(attributes...)))
 _fits_epoch(value, format) = _tagged_metadata(_TIME_TAG, v"1.4.0", Dict("value" => value, "format" => format, "scale" => "tt"))
 
-# Like astropy's wcs_to_celestial_frame, RA/DEC take ICRS, FK5, FK4, or FK4-NO-E from RADESYS and EQUINOX, with FK4's
-# obstime the equinox, and GLON/GLAT is Galactic. astropy also applies RADESYS to other pairs, so that it labels ecliptic
-# coordinates equatorial; here only RA/DEC are. Systems without an astropy frame tag keep their FITS metadata, which has
-# no ASDF representation.
-function _fits_celestial_reference(longitude, latitude, radesys, equinox)
+# Like astropy's wcs_to_celestial_frame, RA/DEC take ICRS, FK5, FK4, or FK4-NO-E from RADESYS and EQUINOX, and
+# GLON/GLAT is Galactic. astropy also applies RADESYS to other pairs, so that it labels ecliptic coordinates
+# equatorial; here only RA/DEC are. Systems without an astropy frame tag keep their FITS metadata, which has no ASDF
+# representation.
+function _fits_celestial_reference(longitude, latitude, radesys, equinox, obstime)
     if longitude == "RA"
         radesys == "ICRS" && return :ICRS
         radesys == "FK5" && return _fits_astropy_frame("fk5", "equinox" => _fits_epoch(equinox, "jyear"))
         if radesys in ("FK4", "FK4-NO-E")
-            epoch = _fits_epoch(equinox, "byear")
-            return _fits_astropy_frame(radesys == "FK4" ? "fk4" : "fk4noeterms", "equinox" => epoch, "obstime" => epoch)
+            return _fits_astropy_frame(radesys == "FK4" ? "fk4" : "fk4noeterms", "equinox" => _fits_epoch(equinox, "byear"), "obstime" => _fits_epoch(obstime, "byear"))
         end
     elseif longitude == "GLON"
         return _fits_astropy_frame("galactic")
     end
-    return (system=(longitude, latitude), radesys, equinox)
+    return (system=(longitude, latitude), radesys, equinox, obstime)
+end
+
+# The FK4 obstime, the time of observation that FITS Paper II (sect. 3.1) gives for Murray's correction of FK4's
+# rotation: MJD-OBS, else DATE-OBS, as a Besselian epoch, or without either the equinox, as astropy takes it. astropy
+# ignores the time of observation for FK4. FITS defines no time scale for these keywords; within a minute it is
+# immaterial here.
+function _fits_fk4_obstime(header, radesys, equinox)
+    radesys in ("FK4", "FK4-NO-E") || return nothing
+    mjd = haskey(header, "MJD-OBS") ? _fits_number(header["MJD-OBS"], "MJD-OBS") : haskey(header, "DATE-OBS") ? _fits_date_mjd(header["DATE-OBS"], "DATE-OBS") : nothing
+    return mjd === nothing ? equinox : _convert_epoch(mjd, "mjd", :besselian)
 end
 
 # FITS spectral reference metadata, which the ASDF spectral frame cannot represent.
@@ -1065,7 +1089,7 @@ function _fits_world_frame(header, suffix, parsed, names, descriptions, units, l
     if longitude_axis != 0
         radesys, equinox = _fits_reference_system(header, suffix, parsed)
         axes = (longitude_axis, latitude_axis)
-        reference = _fits_celestial_reference(parsed[longitude_axis][1], parsed[latitude_axis][1], radesys, equinox)
+        reference = _fits_celestial_reference(parsed[longitude_axis][1], parsed[latitude_axis][1], radesys, equinox, _fits_fk4_obstime(header, radesys, equinox))
         push!(frames, CelestialFrame{2}(; name=name("celestial"), axes_names=map(i -> names[i], axes), axes_order=axes,
             axis_physical_types=map(i -> descriptions[i][2], axes), unit=map(i -> units[i], axes), reference_frame=reference))
     end

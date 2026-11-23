@@ -136,9 +136,14 @@ end
     @test fits_system(("RADESYS" => "FK4-NO-E", "EQUINOX" => 1975.0)) == (system=:fk4noeterms, equinox=1975.0, obstime=1975.0)
     @test fits_system(("RADESYS" => "GAPPT", "EQUINOX" => 2000.0)) == (system=:gappt, equinox=nothing, obstime=nothing)
     @test fits_system(("CTYPE1" => "GLON-TAN", "CTYPE2" => "GLAT-TAN")) == (system=:galactic, equinox=nothing, obstime=nothing)
-    # An ecliptic EQUINOX is Besselian with an FK4 RADESYS, which EQUINOX = 1950 implies, and is reported as a Julian epoch.
-    @test fits_system(("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN", "EQUINOX" => 1950.0)).equinox ≈ 1949.9997904423 atol=1e-9
-    @test fits_system(("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN", "EQUINOX" => 2000.0)) == (system=:ecliptic, equinox=2000.0, obstime=nothing)
+    # An ecliptic is named by its RADESYS, which EQUINOX implies when it is missing; FK4 equinoxes are Besselian.
+    ecliptic(extra...) = fits_system(("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN", extra...))
+    @test ecliptic("EQUINOX" => 1950.0) == (system=:ecliptic_fk4, equinox=1950.0, obstime=1950.0)
+    @test ecliptic("EQUINOX" => 1950.0, "MJD-OBS" => 45500.0).obstime ≈ 1983.4519849615624 atol=1e-10
+    @test ecliptic("RADESYS" => "FK4-NO-E") == (system=:ecliptic_fk4, equinox=1950.0, obstime=1950.0)
+    @test ecliptic("EQUINOX" => 2000.0) == (system=:ecliptic_fk5, equinox=2000.0, obstime=nothing)
+    @test ecliptic() == (system=:ecliptic_icrs, equinox=nothing, obstime=nothing)
+    @test ecliptic("RADESYS" => "GAPPT") == (system=:ecliptic_gappt, equinox=nothing, obstime=nothing)
     @test fits_system(("CTYPE1" => "HLON-TAN", "CTYPE2" => "HLAT-TAN")) == (system=:helioecliptic, equinox=nothing, obstime=nothing)
     @test fits_system(("CTYPE1" => "SLON-TAN", "CTYPE2" => "SLAT-TAN")) == (system=:supergalactic, equinox=nothing, obstime=nothing)
     generic = celestial_frame(parse_fits_wcs(merge(tan, Dict("CTYPE1" => "XLAT-TAN", "CTYPE2" => "XLON-TAN"))))
