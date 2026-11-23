@@ -56,5 +56,9 @@ for a WCS with an input that is not an array position, such as a grism spectral 
 - **Immutable WCSs.** Editing functions such as [`set_transform`](@ref) return a new WCS, while Python GWCS changes its
   WCS in place.
 - **FITS time axes** are in seconds from the reference epoch, whatever `TIMEUNIT` the header uses.
+- **Celestial conversions** with [`with_celestial_system`](@ref) precess FK5 with IAU 1976, its defining model, where
+  astropy uses IAU 2006 (about 75 mas apart away from J2000), and apply Murray's FK4 obstime correction on every route,
+  with the obstime of a FITS header from `MJD-OBS` or `DATE-OBS`, where astropy omits it from FK4 to Galactic
+  coordinates and ignores those keywords (up to about 0.25″); [Conversion details](@ref) explains why.
 
 The [Python equivalents](@ref) page lists the Python counterpart of every name that has one.

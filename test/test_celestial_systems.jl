@@ -14,19 +14,56 @@ end
     fixture = with_logger(NullLogger()) do
         ASDF.load(joinpath(@__DIR__, "fixtures", "celestial_conversions.asdf"); extensions=true)
     end
-    reference(spec) = spec["system"] == "icrs" ? :ICRS : spec["system"] == "galactic" ? GWCS._fits_astropy_frame("galactic") :
-        spec["system"] == "supergalactic" ? :Supergalactic : GWCS._fits_astropy_frame("fk5", "equinox" => GWCS._fits_epoch(spec["equinox"], "jyear"))
+    function reference(spec)
+        spec["system"] == "icrs" && return :ICRS
+        spec["system"] == "galactic" && return GWCS._fits_astropy_frame("galactic")
+        spec["system"] == "supergalactic" && return :Supergalactic
+        spec["system"] == "fk5" && return GWCS._fits_astropy_frame("fk5", "equinox" => GWCS._fits_epoch(spec["equinox"], "jyear"))
+        # A FITS ecliptic, as parse_fits_wcs keeps it.
+        spec["system"] == "ecliptic_fk5" && return (system=("ELON", "ELAT"), radesys="FK5", equinox=spec["equinox"], obstime=nothing)
+        spec["system"] == "ecliptic_fk4" && return (system=("ELON", "ELAT"), radesys="FK4", equinox=spec["equinox"], obstime=spec["obstime"])
+        spec["system"] == "ecliptic_icrs" && return (system=("ELON", "ELAT"), radesys="ICRS", equinox=nothing, obstime=nothing)
+        return GWCS._fits_astropy_frame(spec["system"], "equinox" => GWCS._fits_epoch(spec["equinox"], "byear"), "obstime" => GWCS._fits_epoch(spec["obstime"], "byear"))
+    end
     sky(spec) = WCS(Step(CoordinateFrame{2}(; name="input"), IdentityTransform{2}()), Step(CelestialFrame(; name="world", reference_frame=reference(spec))))
     points = permutedims(hcat(fixture["points"]["lon"][], fixture["points"]["lat"][]))
+    fk4(spec) = spec["system"] in ("fk4", "fk4noeterms", "ecliptic_fk4")
+    galactic(spec) = spec["system"] in ("galactic", "supergalactic")
+    # Every conversion from or to FK4 passes through FK5 J2000. Murray's rotation, made orthogonal, differs from
+    # astropy's by up to 0.1 µas; FK5 to FK4 is the exact inverse of FK4 to FK5, where astropy evaluates Newcomb's
+    # precession in reverse (6 µas to an FK4 equinox of B1975, 36 µas to B2010).
+    function tolerance(source, target)
+        fk4(target) && target["equinox"] != 1950 && return 2e-8
+        fk4(source) || fk4(target) ? 1e-10 : 1e-12
+    end
+    # astropy's own transform_to converts FK4 to Galactic coordinates through the B1950 pole and between FK4 systems by
+    # precession alone, neither with Murray's obstime correction, so it is compared only where the obstimes cannot
+    # matter: an FK4 obstime of B1950 against Galactic coordinates, and equal obstimes between FK4 systems.
+    function comparable(source, target)
+        fk4(source) && fk4(target) && return source["obstime"] == target["obstime"]
+        fk4(source) && galactic(target) && return source["obstime"] == 1950
+        fk4(target) && galactic(source) && return target["obstime"] == 1950
+        return true
+    end
     for (source, source_spec) in fixture["systems"], (target, target_spec) in fixture["systems"]
-        options = target_spec["system"] == "fk5" ? (; equinox=target_spec["equinox"]) : (;)
+        options = target_spec["system"] in ("fk5", "ecliptic_fk5") ? (; equinox=target_spec["equinox"]) :
+            target_spec["system"] in ("fk4", "fk4noeterms", "ecliptic_fk4") ? (; equinox=target_spec["equinox"], obstime=target_spec["obstime"]) : (;)
         for keep_frame in (false, true)
-            converted = with_celestial_system(sky(source_spec), Symbol(target_spec["system"]); keep_frame, options...)
+            # An ICRS ecliptic warns on each conversion; the warning is tested below.
+            converted = with_logger(NullLogger()) do
+                with_celestial_system(sky(source_spec), Symbol(target_spec["system"]); keep_frame, options...)
+            end
             world = pixel_to_world(converted, points)
             expected = fixture["converted"][source][target]
-            @test maximum(k -> _separation(world[1, k], world[2, k], expected["lon"][][k], expected["lat"][][k]), axes(points, 2)) < 1e-12
+            @test maximum(k -> _separation(world[1, k], world[2, k], expected["lon"][][k], expected["lat"][][k]), axes(points, 2)) < tolerance(source_spec, target_spec)
+            if haskey(fixture["default"][source], target) && comparable(source_spec, target_spec)
+                # astropy's transform_to from FK4 to FK5 passes through the FK5 equinox, up to about 60 µas away.
+                default = fixture["default"][source][target]
+                @test maximum(k -> _separation(world[1, k], world[2, k], default["lon"][][k], default["lat"][][k]), axes(points, 2)) < 2e-8
+            end
             @test all(lon -> 0 <= lon < 360, world[1, :])
             @test celestial_system(celestial_frame(converted)).system === Symbol(target_spec["system"])
+            # The E-terms' addition inverts their removal to third order in their 1.7e-6 rad size, so round trips are exact.
             back = world_to_pixel(converted, world)
             @test maximum(k -> _separation(back[1, k], back[2, k], points[1, k], points[2, k]), axes(points, 2)) < 1e-12
         end
@@ -124,10 +161,13 @@ end
     @test pixel_to_world(arcsec_icrs, pixel) ≈ 3600 .* pixel_to_world(icrs, pixel) rtol=1e-14
     @test world_to_pixel(arcsec_icrs, pixel_to_world(arcsec_icrs, pixel)) ≈ pixel atol=1e-9
     @test_throws "has unit \"pixel\"; its axes must be in an angle unit (arcmin, arcsec, deg, hourangle, mas, rad)" with_celestial_system(WCS(Step(CoordinateFrame{2}(; name="input"), IdentityTransform{2}()), Step(CelestialFrame(; name="world", unit=("pixel", "deg")))), :icrs)
-    ecliptic = parse_fits_wcs(merge(tan, Dict("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN")))
-    @test_throws "the WCS's celestial system :ecliptic cannot be converted" with_celestial_system(ecliptic, :icrs)
-    @test_throws "celestial system :fk4 cannot be converted" with_celestial_system(galactic, :fk4)
-    @test_throws "equinox applies only to an FK5 system" with_celestial_system(galactic, :icrs; equinox=2000.0)
+    gappt_ecliptic = parse_fits_wcs(merge(tan, Dict("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN", "RADESYS" => "GAPPT")))
+    @test_throws "the WCS's celestial system :ecliptic_gappt cannot be converted" with_celestial_system(gappt_ecliptic, :icrs)
+    @test_throws "the WCS's celestial system :helioecliptic cannot be converted" with_celestial_system(parse_fits_wcs(merge(tan, Dict("CTYPE1" => "HLON-TAN", "CTYPE2" => "HLAT-TAN"))), :icrs)
+    @test_throws "celestial system :gcrs cannot be converted" with_celestial_system(galactic, :gcrs)
+    @test_throws "obstime applies only to FK4, FK4-NO-E, and FK4 ecliptic systems" with_celestial_system(galactic, :fk5; obstime=2000.0)
+    @test_throws "obstime applies only to FK4, FK4-NO-E, and FK4 ecliptic systems" with_celestial_system(galactic, :ecliptic_fk5; obstime=1950.0)
+    @test_throws "equinox applies only to FK5 and FK4 systems" with_celestial_system(galactic, :icrs; equinox=2000.0)
     @test_throws "the WCS already has a frame named \"intermediate\"" with_celestial_system(galactic, :icrs; name="intermediate")
     @test_throws "equinox must be finite" with_celestial_system(galactic, :fk5; equinox=NaN)
 
@@ -145,6 +185,68 @@ end
         @test pixel_to_world(pole_fused, pixel)[2] ≈ pixel_to_world(pole_kept, pixel)[2] atol=1e-12
         @test world_to_pixel(pole_fused, pixel_to_world(pole_fused, pixel)) ≈ pixel atol=1e-8
     end
+
+    # FK4-NO-E is a rotation, so it fuses and writes; FK4's E-terms are a separate step with no ASDF form.
+    fk4_header(radesys) = parse_fits_wcs(Dict("CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CRPIX1" => 50.0, "CRPIX2" => 50.0, "CRVAL1" => 150.0,
+        "CRVAL2" => 30.0, "CDELT1" => -1e-3, "CDELT2" => 1e-3, "RADESYS" => radesys, "EQUINOX" => 1950.0))
+    noe_icrs = with_celestial_system(fk4_header("FK4-NO-E"), :icrs)
+    @test typeof(noe_icrs.forward) == typeof(fk4_header("FK4-NO-E").forward)
+    fk4_icrs = with_celestial_system(fk4_header("FK4"), :icrs)
+    @test pixel_to_world(fk4_icrs, pixel) ≈ pixel_to_world(with_celestial_system(fk4_header("FK4"), :icrs; keep_frame=true), pixel) atol=1e-12
+    @test world_to_pixel(fk4_icrs, pixel_to_world(fk4_icrs, pixel)) ≈ pixel atol=1e-7
+    fk4_world = pixel_to_world(fk4_icrs, pixel)
+    world_to_pixel(fk4_icrs, fk4_world)
+    @test allocated_forward(fk4_icrs, pixel) == 0
+    @test allocated_inverse(fk4_icrs, fk4_world) == 0
+    @test celestial_system(celestial_frame(with_celestial_system(galactic, :fk4))) == (system=:fk4, equinox=1950.0, obstime=1950.0)
+    @test celestial_system(celestial_frame(with_celestial_system(galactic, :fk4noeterms; equinox=1975, obstime=2000))) == (system=:fk4noeterms, equinox=1975.0, obstime=2000.0)
+    @test world_axis_physical_types(with_celestial_system(galactic, :fk4)) == ("pos.eq.ra", "pos.eq.dec")
+    mktempdir(@__DIR__) do directory
+        filename = joinpath(directory, "fk4.asdf")
+        write_asdf(filename, noe_icrs)
+        @test_throws "no metadata serializer is registered" write_asdf(filename, fk4_icrs)
+    end
+
+    # FITS Paper II's example 2 (Calabretta & Greisen 2002, sect. 7.3.2, Tables 7 and 8): a Galactic conic image whose
+    # alternate description is in FK5 J2000 ecliptic coordinates. Its tabulated values are rounded to 1e-7 degrees.
+    paper2 = Dict{String,Any}("NAXIS" => 2, "NAXIS1" => 2048, "NAXIS2" => 2048, "CTYPE1" => "GLON-COE", "CTYPE2" => "GLAT-COE", "PV2_1" => -25.0,
+        "CRVAL1" => 90.0, "CRVAL2" => -25.0, "CTYPE1A" => "ELON-COE", "CTYPE2A" => "ELAT-COE", "PV2_1A" => -25.0, "CRVAL1A" => -7.0300934,
+        "CRVAL2A" => 34.8474143, "LONPOLEA" => 6.3839706, "LATPOLEA" => 29.8114400, "RADESYSA" => "FK5")
+    for suffix in ("", "A")
+        merge!(paper2, Dict("CRPIX1$suffix" => 1024.5, "CRPIX2$suffix" => -1023.5, "PC1_1$suffix" => 1.0, "PC1_2$suffix" => -0.004, "PC2_1$suffix" => -0.002,
+            "PC2_2$suffix" => 1.0, "CDELT1$suffix" => -0.005, "CDELT2$suffix" => 0.005))
+    end
+    paper2_pixel = SVector(1957.2, 775.4) .- 1
+    galactic_image, ecliptic_image = parse_fits_wcs(paper2), parse_fits_wcs(paper2; key='A')
+    @test celestial_system(celestial_frame(ecliptic_image)) == (system=:ecliptic_fk5, equinox=2000.0, obstime=nothing)
+    @test pixel_to_world(galactic_image, paper2_pixel) ≈ SVector(85.2439814, -15.8973800) atol=1e-7
+    @test _separation(pixel_to_world(ecliptic_image, paper2_pixel)..., -14.7066741 + 360, 43.0457292) < 2e-7
+    converted_image = with_celestial_system(galactic_image, :ecliptic_fk5)
+    @test world_axis_physical_types(converted_image) == ("pos.ecliptic.lon", "pos.ecliptic.lat")
+    @test celestial_system(celestial_frame(converted_image)) == (system=:ecliptic_fk5, equinox=2000.0, obstime=nothing)
+    # The conversion reproduces the paper's ecliptic coordinates to within about a milliarcsecond.
+    @test _separation(pixel_to_world(converted_image, paper2_pixel)..., -14.7066741 + 360, 43.0457292) < 1.5 / 3.6e6
+    @test _separation(pixel_to_world(converted_image, SVector(1024.5, -1023.5) .- 1)..., -7.0300934 + 360, 34.8474143) < 1.5 / 3.6e6
+    mktempdir(@__DIR__) do directory
+        @test_throws "has no ASDF representation" write_asdf(joinpath(directory, "ecliptic.asdf"), converted_image)
+    end
+    # ICRS defines no ecliptic, so converting from or to astropy's J2000 mean ecliptic warns.
+    icrs_ecliptic = parse_fits_wcs(merge(tan, Dict("CTYPE1" => "ELON-TAN", "CTYPE2" => "ELAT-TAN")))
+    @test celestial_system(celestial_frame(icrs_ecliptic)).system === :ecliptic_icrs
+    @test_logs (:warn, r"ICRS defines no ecliptic") with_celestial_system(icrs_ecliptic, :icrs)
+    @test_logs (:warn, r"ICRS defines no ecliptic") with_celestial_system(galactic, :ecliptic_icrs)
+    @test_logs with_celestial_system(galactic, :ecliptic_fk4; equinox=1975.0)
+    @test celestial_system(celestial_frame(with_celestial_system(galactic, :ecliptic_fk4; equinox=1975.0))) == (system=:ecliptic_fk4, equinox=1975.0, obstime=1975.0)
+    @test celestial_system(celestial_frame(with_celestial_system(galactic, :ecliptic_fk4; obstime=1985.0))) == (system=:ecliptic_fk4, equinox=1950.0, obstime=1985.0)
+    # Murray's obstime correction enters every FK4 conversion, so the route does not matter: FK4-NO-E at obstime B1990
+    # reaches ICRS directly and through Galactic coordinates the same way.
+    noe1990 = WCS(Step(CoordinateFrame{2}(; name="input"), IdentityTransform{2}()), Step(CelestialFrame(; name="world",
+        reference_frame=GWCS._fits_astropy_frame("fk4noeterms", "equinox" => GWCS._fits_epoch(1950.0, "byear"), "obstime" => GWCS._fits_epoch(1990.0, "byear")))))
+    @test pixel_to_world(with_celestial_system(noe1990, :icrs), SVector(120.0, 30.0)) ≈ pixel_to_world(with_celestial_system(with_celestial_system(noe1990, :galactic), :icrs), SVector(120.0, 30.0)) atol=1e-12
+    # An ecliptic named by Symbol takes its system's default equinox.
+    symbolic(system) = WCS(Step(CoordinateFrame{2}(; name="input"), IdentityTransform{2}()), Step(CelestialFrame(; name="world", reference_frame=system)))
+    @test celestial_system(celestial_frame(symbolic(:ecliptic_fk5))) == (system=:ecliptic_fk5, equinox=2000.0, obstime=nothing)
+    @test pixel_to_world(with_celestial_system(symbolic(:ecliptic_fk4), :icrs), pixel) ≈ pixel_to_world(with_celestial_system(symbolic(:ecliptic_fk4), :icrs; keep_frame=true), pixel) atol=1e-12
 
     # Replacing a composite frame keeps the metadata of the step and of its unchanged constituents.
     notes = GWCS._PassThrough("" => ("tag:stsci.edu:gwcs/step", Dict{Any,Any}("note" => "step")),

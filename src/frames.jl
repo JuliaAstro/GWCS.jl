@@ -449,7 +449,10 @@ function celestial_frame(frame::AbstractCoordinateFrame)
 end
 
 const _ASTROPY_FRAME_PREFIX = "tag:astropy.org:astropy/coordinates/frames/"
-const _FITS_CELESTIAL_SYSTEMS = Dict("ELON" => :ecliptic, "HLON" => :helioecliptic, "SLON" => :supergalactic)
+const _FITS_CELESTIAL_SYSTEMS = Dict("HLON" => :helioecliptic, "SLON" => :supergalactic)
+# Paper II applies RADESYS to ecliptic coordinates, apart from FK4-NO-E, so an FK4-NO-E ecliptic is read as FK4's,
+# which is defined without the E-terms in any case.
+const _FITS_ECLIPTIC_SYSTEMS = Dict("FK5" => :ecliptic_fk5, "FK4" => :ecliptic_fk4, "FK4-NO-E" => :ecliptic_fk4, "ICRS" => :ecliptic_icrs, "GAPPT" => :ecliptic_gappt)
 const _EPOCH_FRAME_SYSTEMS = (:fk5, :precessedgeocentric, :fk4, :fk4noeterms)
 
 """
@@ -458,19 +461,19 @@ const _EPOCH_FRAME_SYSTEMS = (:fk5, :precessedgeocentric, :fk4, :fk4noeterms)
 Return the celestial system of `frame` as `(; system, equinox, obstime)`.
 
 `system` is astropy's name for the reference frame, such as `:icrs`, `:fk5`, `:fk4`, `:fk4noeterms`, `:galactic`, or
-`:gcrs`. FITS systems that astropy's `wcs_to_celestial_frame` does not map to an astropy frame are `:ecliptic`
-(`ELON`/`ELAT`), `:helioecliptic` (`HLON`/`HLAT`), `:supergalactic` (`SLON`/`SLAT`), and `:gappt` (`RADESYS =
-'GAPPT'`); the header does not say which of astropy's ecliptic frames it means, and asdf-astropy cannot write ecliptic
-or supergalactic frames. A frame without a recognized system, such as one read from generic FITS `xLON`/`xLAT` axes or
-built with `reference_frame=nothing`, is `:unknown`. A `Symbol` reference frame, such as the default `:ICRS`, names
-the system.
+`:gcrs`. FITS systems that astropy's `wcs_to_celestial_frame` does not map to an astropy frame are the ecliptic
+(`ELON`/`ELAT`) systems `:ecliptic_fk5`, `:ecliptic_fk4`, `:ecliptic_icrs`, and `:ecliptic_gappt`, named by `RADESYS`
+(an FK4-NO-E ecliptic is FK4's); `:helioecliptic` (`HLON`/`HLAT`); `:supergalactic` (`SLON`/`SLAT`); and `:gappt`
+(`RADESYS = 'GAPPT'`). asdf-astropy cannot write ecliptic or supergalactic frames. A frame without a recognized system,
+such as one read from generic FITS `xLON`/`xLAT` axes or built with `reference_frame=nothing`, is `:unknown`. A
+`Symbol` reference frame, such as the default `:ICRS`, names the system.
 
-`equinox` is a Julian epoch for FK5, PrecessedGeocentric, and the FITS ecliptic systems, and a Besselian epoch for FK4
-and FK4-NO-E. `obstime` is the Besselian epoch of FK4 and FK4-NO-E. Both are `nothing` for the other systems, whose
-observation times are not reported. A missing attribute takes astropy's default: J2000 for FK5 and
-PrecessedGeocentric, B1950 for FK4, and an FK4 obstime equal to its equinox. FITS headers have their `RADESYS` and
-`EQUINOX` defaults applied when they are read, and an ecliptic `EQUINOX`, which is Besselian when `RADESYS` is an FK4
-system, is converted to a Julian epoch.
+`equinox` is a Julian epoch for FK5, PrecessedGeocentric, and FK5 ecliptics, and a Besselian epoch for FK4, FK4-NO-E,
+and FK4 ecliptics. `obstime` is the Besselian epoch of observation of FK4, FK4-NO-E, and FK4 ecliptics. Both are
+`nothing` for the other systems, whose observation times are not reported. A missing attribute takes astropy's
+default: J2000 for FK5 and PrecessedGeocentric, B1950 for FK4, and an FK4 obstime equal to its equinox. FITS headers
+have their `RADESYS` and `EQUINOX` defaults applied when they are read, and an FK4 obstime from `MJD-OBS` or
+`DATE-OBS`.
 
 Epochs are read in the forms asdf-astropy and [`parse_fits_wcs`](@ref) write: `J` and `B` epoch strings, and `jyear`,
 `byear`, `jd`, or `mjd` values, in the TT or TDB scale (which differ by under 2 ms). Other forms, such as UTC dates,
@@ -484,6 +487,9 @@ function celestial_system(frame::CelestialFrame)
     reference isa NamedTuple && return _fits_celestial_system(reference)
     if reference isa Symbol
         system, attributes = Symbol(lowercase(String(reference))), Dict()
+        # A FITS ecliptic named by Symbol takes its RADESYS system's default equinox.
+        system === :ecliptic_fk5 && return (; system, equinox=2000.0, obstime=nothing)
+        system === :ecliptic_fk4 && return (; system, equinox=1950.0, obstime=1950.0)
     elseif _has_tag(reference) && startswith(_tag(reference), _ASTROPY_FRAME_PREFIX)
         family, version = _split_metadata_tag(_tag(reference), path)
         system = Symbol(chopprefix(family, _ASTROPY_FRAME_PREFIX))
@@ -502,14 +508,15 @@ function celestial_system(frame::CelestialFrame)
     return (; system, equinox=nothing, obstime=nothing)
 end
 
-# The FITS metadata `parse_fits_wcs` keeps for systems without an astropy frame tag. Its EQUINOX is Besselian when
-# RADESYS is an FK4 system and Julian otherwise.
+# The FITS metadata `parse_fits_wcs` keeps for systems without an astropy frame tag. An ecliptic's EQUINOX is Besselian
+# for FK4 and Julian for FK5, as RADESYS requires.
 function _fits_celestial_system(reference)
     longitude = first(reference.system)
-    system = longitude == "RA" && reference.radesys == "GAPPT" ? :gappt : get(_FITS_CELESTIAL_SYSTEMS, longitude, :unknown)
-    (system === :unknown || reference.equinox === nothing) && return (; system, equinox=nothing, obstime=nothing)
-    format = reference.radesys in ("FK4", "FK4-NO-E") ? "byear" : "jyear"
-    return (; system, equinox=_convert_epoch(Float64(reference.equinox), format, :julian), obstime=nothing)
+    system = longitude == "ELON" ? get(_FITS_ECLIPTIC_SYSTEMS, reference.radesys, :unknown) :
+        longitude == "RA" && reference.radesys == "GAPPT" ? :gappt : get(_FITS_CELESTIAL_SYSTEMS, longitude, :unknown)
+    equinox = system in (:ecliptic_fk5, :ecliptic_fk4) && reference.equinox !== nothing ? Float64(reference.equinox) : nothing
+    obstime = system === :ecliptic_fk4 ? Float64(something(get(reference, :obstime, nothing), equinox)) : nothing
+    return (; system, equinox, obstime)
 end
 
 # An epoch from an ASDF time in the forms asdf-astropy and parse_fits_wcs write. UTC and the other scales would need
