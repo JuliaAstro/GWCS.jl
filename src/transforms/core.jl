@@ -183,8 +183,8 @@ end
 
 _value_and_jacobian(transform::AbstractTransform, coords::StaticVector) = (transform(coords), _transform_jacobian_checked(transform, coords))
 
-_evaluation_type(::Type{T}) where {T<:Integer} = Float64
-_evaluation_type(::Type{T}) where {T<:Rational} = Float64
+# The floating-point type that holds results for coordinates of type T
+_evaluation_type(::Type{T}) where {T<:Real} = float(T)
 _evaluation_type(::Type{T}) where {T} = T
 
 """

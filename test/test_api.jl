@@ -1,6 +1,6 @@
-using GWCS: AffineTransform, BoundingBox, CallableTransform, CartesianToSpherical, CelestialFrame, CoordinateFrame, Frame2D, NoConvergence,
-            NoInverse, Polynomial1D, Rotation3D, Scale, SphericalToCartesian, Step, compose, fix_inputs, get_transform, grid_from_bounding_box,
-            numerical_inverse, parallel
+using GWCS: AffineTransform, BoundingBox, CallableTransform, CartesianToSpherical, CelestialFrame, CompoundBoundingBox, CoordinateFrame, Frame2D,
+            NoConvergence, NoInverse, Polynomial1D, RegionSelector, RemapAxes, Rotation3D, Scale, Shift, SphericalToCartesian, Step, TransformLabelMapper,
+            compose, fix_inputs, get_transform, grid_from_bounding_box, numerical_inverse, parallel
 
 struct OffsetColumnMatrix{T,M<:AbstractMatrix{T}} <: AbstractMatrix{T}
     parent::M
@@ -351,4 +351,43 @@ end
         @test allocated_forward(wcs, pixel) == 0
         @test allocated_inverse(wcs, world) == 0
     end
+end
+
+@testset "Generic real coordinates" begin
+    # ForwardDiff's Duals are evaluated by their values, with their derivatives from the WCS Jacobians, so they match those
+    # Jacobians even where differentiating each transform would not: a projection's reference pixel, ZPN and AIR's
+    # iterative deprojections, the numerical inverse, and selectors. Integers, rationals, and irrationals evaluate in
+    # Float64 and BigInt in BigFloat.
+    tan = Dict("CTYPE1" => "RA---TAN", "CTYPE2" => "DEC--TAN", "CRPIX1" => 50.0, "CRPIX2" => 50.0, "CRVAL1" => 120.0, "CRVAL2" => 20.0,
+        "CDELT1" => -1e-3, "CDELT2" => 1e-3, "PC1_2" => 0.1)
+    # Without reverse SIP coefficients, world_to_pixel is the numerical inverse.
+    sip = merge(tan, Dict("CTYPE1" => "RA---TAN-SIP", "CTYPE2" => "DEC--TAN-SIP", "A_ORDER" => 2, "B_ORDER" => 2, "A_2_0" => 1e-4, "A_1_1" => 5e-5, "B_0_2" => -2e-4))
+    roman = parse_wcs(read(joinpath(@__DIR__, "fixtures", "roman_wcs.yaml"), String))
+    zpn = merge(tan, Dict("CTYPE1" => "RA---ZPN", "CTYPE2" => "DEC--ZPN", "PV2_1" => 1.0, "PV2_2" => 0.1))
+    air = merge(tan, Dict("CTYPE1" => "RA---AIR", "CTYPE2" => "DEC--AIR", "PV2_1" => 45.0))
+    cases = ((parse_fits_wcs(tan), SVector(10.0, 70.0)), (parse_fits_wcs(tan), SVector(49.0, 49.0)), (parse_fits_wcs(sip), SVector(10.0, 70.0)),
+        (parse_fits_wcs(zpn), SVector(10.0, 70.0)), (parse_fits_wcs(air), SVector(10.0, 70.0)), (roman, SVector(11.0, 22.0)))
+    for (wcs, pixel) in cases
+        world = pixel_to_world(wcs, pixel)
+        @test ForwardDiff.jacobian(p -> pixel_to_world(wcs, p), pixel) ≈ pixel_to_world_jacobian(wcs, pixel) rtol=1e-12
+        @test ForwardDiff.jacobian(w -> world_to_pixel(wcs, w), world) ≈ world_to_pixel_jacobian(wcs, world) rtol=1e-12
+        @test ForwardDiff.jacobian(p -> vec(pixel_to_world(wcs, hcat(p, p .+ 1))), pixel)[1:2, :] ≈ pixel_to_world_jacobian(wcs, pixel) rtol=1e-12
+    end
+    # A compound bounding box and a transform label mapper select by the values.
+    boxes = Dict((1,) => BoundingBox{3}(((0.0, 5.0), (0.0, 5.0)), (1, 2)), (2,) => BoundingBox{3}(((10.0, 15.0), (10.0, 15.0)), (1, 2)))
+    compound = with_bounding_box(WCS(Step(CoordinateFrame{3}(; name="pixels"), Scale(2.0) & Scale(3.0) & Scale(1.0)), Step(CoordinateFrame{3}(; name="world"))),
+        CompoundBoundingBox(boxes, (3,)))
+    @test ForwardDiff.jacobian(p -> pixel_to_world(compound, p), SVector(2.0, 3.0, 1.0)) == pixel_to_world_jacobian(compound, SVector(2.0, 3.0, 1.0))
+    @test all(isnan, ForwardDiff.jacobian(p -> pixel_to_world(compound, p), SVector(7.0, 3.0, 1.0)))
+    selector = RegionSelector(TransformLabelMapper{Int}(RemapAxes{2}((2,))), (1 => Scale(2.0) & Scale(3.0), 2 => Shift(1.0) & Shift(1.0)))
+    selected = WCS(Step(Frame2D(; name="pixels"), selector), Step(Frame2D(; name="world")))
+    @test ForwardDiff.jacobian(p -> pixel_to_world(selected, p), SVector(4.0, 1.0)) == pixel_to_world_jacobian(selected, SVector(4.0, 1.0))
+    wcs = parse_fits_wcs(tan)
+    seeded = SVector(ForwardDiff.Dual{Nothing}(10, 1), ForwardDiff.Dual{Nothing}(70, 0))
+    @test eltype(pixel_to_world(wcs, seeded)) === ForwardDiff.Dual{Nothing,Float64,1}
+    @test ForwardDiff.value.(pixel_to_world(wcs, seeded)) ≈ pixel_to_world(wcs, 10.0, 70.0) rtol=1e-15
+    @test pixel_to_world(wcs, π, 3) == pixel_to_world(wcs, Float64(π), 3.0)
+    @test eltype(pixel_to_world(wcs, 1 // 2, 3)) === Float64
+    @test eltype(pixel_to_world(wcs, big(10), big(70))) === BigFloat
+    @test pixel_to_world(wcs, big(10), big(70)) ≈ pixel_to_world(wcs, 10.0, 70.0) rtol=1e-14
 end

@@ -16,8 +16,7 @@ Python equivalent: `gwcs.WCS.world_n_dim`.
 """
 world_n_dim(::WCS{Nin,Nout}) where {Nin,Nout} = Nout
 
-_coordinate_float_type(::Type{T}) where {T<:AbstractFloat} = T
-_coordinate_float_type(::Type{T}) where {T<:Real} = Float64
+_coordinate_float_type(::Type{T}) where {T<:Real} = _evaluation_type(T)
 
 function _coordinate_vector(coords::Tuple{Vararg{Real,N}}) where {N}
     T = _coordinate_float_type(promote_type(map(typeof, coords)...))
@@ -67,6 +66,24 @@ function in_domain(wcs::WCS{N}, pixels::AbstractMatrix; origin=0) where {N}
         result[index] = _in_domain(wcs, SVector{N,T}(view(pixels, :, column)); origin)
     end
     return result
+end
+
+# ForwardDiff's Dual coordinates are evaluated by their values, and their derivatives carried through the WCS's
+# Jacobian, which handles what differentiating each transform would not: a projection's reference point, iterative
+# deprojections and numerical inverses, and selectors.
+function _pixel_to_world(wcs::WCS{Nin}, coords::StaticVector{Nin,<:ForwardDiff.Dual}; kwargs...) where {Nin}
+    values = ForwardDiff.value.(coords)
+    return _with_partials(coords, _pixel_to_world(wcs, values; kwargs...), _pixel_to_world_jacobian(wcs, values; kwargs...))
+end
+
+function _world_to_pixel(wcs::WCS{Nin,Nout}, coords::StaticVector{Nout,<:ForwardDiff.Dual}; kwargs...) where {Nin,Nout}
+    values = ForwardDiff.value.(coords)
+    return _with_partials(coords, _world_to_pixel(wcs, values; kwargs...), _world_to_pixel_jacobian(wcs, values; kwargs...))
+end
+
+function _with_partials(coords::StaticVector{N,ForwardDiff.Dual{T,V,P}}, values::StaticVector{M}, jacobian) where {N,M,T,V,P}
+    derivatives = jacobian * SMatrix{N,P}(ntuple(i -> ForwardDiff.partials(coords[(i - 1) % N + 1], (i - 1) ÷ N + 1), N * P))
+    return SVector{M}(ntuple(i -> ForwardDiff.Dual{T}(values[i], ntuple(k -> derivatives[i, k], P)...), M))
 end
 
 # `strict=false` returns `fill_value` for coordinates without a result (outside the bounding box or
