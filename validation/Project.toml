@@ -9,7 +9,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 GWCS = {path = ".."}
 
 [compat]
-ASDF = "2.1.1"
+ASDF = "2.1.2"
 GWCS = "0.1"
 JSON = "1"
 OrderedCollections = "1"
