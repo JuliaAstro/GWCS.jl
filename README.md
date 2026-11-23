@@ -14,7 +14,7 @@ headers and in the ASDF metadata Python GWCS writes, and writes the pipelines AS
 ## Installation
 
 ```julia-repl
-pkg> add https://github.com/JuliaAstro/GWCS.jl
+pkg> add GWCS
 ```
 
 FITS and ASDF support load automatically with FITSIO.jl, FITSFiles.jl, or ASDF.jl.
