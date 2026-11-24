@@ -1,6 +1,6 @@
 name = "GWCS"
 uuid = "17a4e446-17b6-4e6e-99b0-ac92d3d7deb5"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Chris Garling"]
 
 [deps]
