@@ -15,7 +15,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P0** Add a public transform-registration API so external packages can register metadata tags, constructors, inverses, dimensions, and compilation rules without modifying GWCS.jl.
 - [x] **P1** Add a callable transform wrapper for user functions with declared input/output dimensions and optional inverse and Jacobian functions.
 - [x] **P1** Add constant-output and fixed-input transforms, including the ASDF `constant` and `fix_inputs` semantics.
-- [ ] **P1** Extend axis remapping to support dropping inputs, inserting constants, and named input/output axes.
+- [x] **P1** Extend axis remapping to support dropping inputs.
+- [ ] **P1** Extend axis remapping to support inserting constants and named input/output axes.
 - [x] **P1** Support elementwise arithmetic composition of compatible transforms: add, subtract, multiply, divide, and power.
 - [x] **P1** Preserve transform names and input/output axis names through metadata parsing, composition, inversion, and compilation.
 - [x] **P1** Add per-transform dependency or separability metadata and compute an axis-correlation matrix for a compiled pipeline.
@@ -36,7 +37,8 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [x] **P1** Add HEALPix-family projections: HPX and XPH.
 - [x] **P1** Support zenithal projection parameters and explicit inverses with the same domain conventions as Astropy and wcslib.
 - [x] **P1** Support parameters and explicit inverses for the remaining projection families with the same domain conventions as FITSWCS.jl and wcslib.
-- [ ] **P1** Add a general 2D rotation transform and named Euler-angle rotation transform.
+- [x] **P1** Add a general 2D rotation transform.
+- [ ] **P1** Add a named Euler-angle rotation transform; `Rotation3D` keeps only its matrix, not the angles and axis order.
 - [x] **P1** Add automatic `LONPOLE` computation and general native-pole solving for supported celestial projections.
 - [x] **P1** Support celestial reference frames beyond ICRS, including Galactic, FK4, FK5, ecliptic, and supergalactic frames. FITS headers and ASDF files keep their reference frames, and `celestial_frame` and `celestial_system` report the celestial frame, its system, and its FK4 and FK5 epochs. Ecliptic and supergalactic systems come only from FITS: astropy's `wcs_to_celestial_frame` does not map them to astropy frames, and asdf-astropy cannot write those frames.
 - [ ] **P2** Read epochs given as UTC dates in `celestial_system`, such as the `obstime` asdf-astropy writes for a frame whose obstime was set from a date. This needs ISO date parsing and leap seconds (for example LeapSeconds.jl), and UTC before 1972 needs checking; `celestial_system` throws for these epochs until then.
@@ -128,7 +130,7 @@ Python reference surfaces include `gwcs.coordinate_frames`, `gwcs.wcs`, `gwcs.wc
 - [ ] **P1** Handle longitude wrapping and pole crossings when computing and testing celestial footprints.
 - [x] **P2** Add concise text and MIME displays showing frames, transforms, dimensions, inverses, and bounding boxes.
 - [ ] **P2** Add transform and pipeline visualization suitable for documentation and debugging.
-- [ ] **P1** Add docstrings to every exported and public name before release, starting with the 27 exported names.
+- [x] **P1** Add docstrings to every exported and public name before release, starting with the 27 exported names.
 
 ## Numerical inversion
 
